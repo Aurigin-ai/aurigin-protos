@@ -1,8 +1,12 @@
 # aurigin-protos
 
-Generated gRPC Python stubs for Aurigin services. Built from [`aurigin-protos`](https://github.com/aurigin/aurigin-protos) using [`grpcio-tools`](https://pypi.org/project/grpcio-tools/) (standard `protoc-gen-python` + `grpc_python_plugin`).
+Generated gRPC Python stubs for Aurigin services. Built from [`aurigin-protos`](https://github.com/Aurigin-ai/aurigin-protos) using buf's `protocolbuffers/python` and `grpc/python` remote plugins (standard `protoc-gen-python` + `grpc_python_plugin`).
 
 ## Install (with `uv`)
+
+This package is published in two places. Pick whichever your team authenticates against.
+
+### Option A — AWS CodeArtifact
 
 Configure CodeArtifact as an extra index in your `pyproject.toml`:
 
@@ -39,6 +43,26 @@ For ad-hoc use, after `aws codeartifact login --tool pip ...`:
 uv pip install aurigin-protos
 ```
 
+### Option B — GitHub Release asset
+
+GitHub Packages doesn't host a Python registry, so the wheel + sdist are attached to a GitHub Release. Install directly via PEP 508 direct-URL:
+
+```bash
+uv pip install \
+  "https://github.com/Aurigin-ai/aurigin-protos/releases/download/v0.1.0/aurigin_protos-0.1.0-py3-none-any.whl"
+```
+
+Or in `pyproject.toml`:
+
+```toml
+[project]
+dependencies = [
+    "aurigin-protos @ https://github.com/Aurigin-ai/aurigin-protos/releases/download/v0.1.0/aurigin_protos-0.1.0-py3-none-any.whl",
+]
+```
+
+For private repos, fetch the asset first with `gh release download v0.1.0 -R Aurigin-ai/aurigin-protos -p '*.whl'` and `uv pip install ./aurigin_protos-*.whl`.
+
 ## Usage
 
 ```python
@@ -67,4 +91,4 @@ Currently published modules:
 
 ## Source
 
-This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/aurigin/aurigin-protos), then bump the version and republish via `make publish-py`.
+This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/Aurigin-ai/aurigin-protos), then bump the version and republish via `make publish-py` (CodeArtifact) or `make publish-py-github` (GitHub Release).

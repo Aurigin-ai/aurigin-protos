@@ -60,9 +60,10 @@ aurigin-protos = { index = "aurigin" }
 
 CodeArtifact tokens expire after 12h, so re-export `CODEARTIFACT_AUTH_TOKEN` before each `uv sync` (the same `aws codeartifact get-authorization-token` command shown above).
 
-Expected client output:
+Expected client output (against `python/server.py`'s stub analysis, with no WAVs in `audio/`):
 
 ```
+=== silence (3 s @ 16 kHz) ===
 Session: demo-session-0001
 Analysis | offset=0ms     | score=0.050 | label=bonafide
 Analysis | offset=500ms   | score=0.050 | label=bonafide
@@ -70,9 +71,11 @@ Analysis | offset=500ms   | score=0.050 | label=bonafide
 FINAL    | total=3000ms   | score=0.050 | label=bonafide
 ```
 
+To run against real audio (real ML server required, e.g. backend-app's gRPC service), drop one or more `.wav` files (S16LE PCM, any sample rate, any channel count) into `examples/python/audio/` and re-run the client. It opens one session per file. The `audio/` dir is gitignored.
+
 Files:
 - `python/server.py` — `DeepfakeDetectionServicer` impl with stub analysis, listens on `[::]:50051`
-- `python/client.py` — opens the bidi stream, sends a `CreateSessionRequest` plus 6×500 ms silent audio buffers, prints every response
+- `python/client.py` — streams every `.wav` in `examples/python/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty.
 
 ## TypeScript
 
@@ -100,7 +103,7 @@ npm run client    # in another
 
 Files:
 - `typescript/server.ts` — `Server` from `@grpc/grpc-js` + `addService(DeepfakeDetectionService, impl)` with bidi stream handling
-- `typescript/client.ts` — `DeepfakeDetectionClient.detectDeepfake()` duplex stream demo
+- `typescript/client.ts` — streams every `.wav` in `examples/typescript/audio/` (one session per file) using `DeepfakeDetectionClient.detectDeepfake()`; falls back to 6 × 500 ms of silence when the dir is empty. The `audio/` dir is gitignored.
 
 ### Notes on ts-proto naming
 

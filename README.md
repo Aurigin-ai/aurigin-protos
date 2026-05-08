@@ -5,7 +5,7 @@
 [![Publish (CodeArtifact)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/publish-codeartifact.yml/badge.svg)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/publish-codeartifact.yml)
 [![Latest release](https://img.shields.io/github/v/release/Aurigin-ai/aurigin-protos?sort=semver)](https://github.com/Aurigin-ai/aurigin-protos/releases/latest)
 [![Built with buf](https://img.shields.io/badge/built%20with-buf-1A2B49?logo=buf&logoColor=white)](https://buf.build)
-[![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Node ≥ 22](https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Python ≥ 3.10](https://img.shields.io/badge/python-%E2%89%A53.10-3776AB?logo=python&logoColor=white)](https://www.python.org)
 
 Source of truth for Aurigin's gRPC service definitions. Generates and publishes language-specific client/server stubs to AWS CodeArtifact and GitHub Packages.
@@ -29,7 +29,8 @@ aurigin-protos/
 │   └── py/                   # Python package (grpcio + protobuf)
 │       ├── pyproject.toml
 │       ├── README.md         # shipped to PyPI/CodeArtifact page
-│       └── aurigin/          # generated (gitignored)
+│       ├── aurigin/          # generated (gitignored)
+│       └── twilio/           # generated (gitignored) — vendored Twilio types
 ├── examples/                 # consumer-side reference snippets
 │   ├── python/               # uv-managed: `uv run server` / `uv run client`
 │   └── typescript/           # npm-managed: `npm run server` / `npm run client`
@@ -37,8 +38,10 @@ aurigin-protos/
 ├── buf.gen.yaml              # codegen targets
 ├── Makefile                  # lint / generate / build / publish
 └── scripts/
-    ├── publish-ts.sh
-    └── publish-py.sh
+    ├── publish-ts.sh         # CodeArtifact (npm)
+    ├── publish-py.sh         # CodeArtifact (twine)
+    ├── publish-ts-github.sh  # GitHub Packages (npm)
+    └── publish-py-github.sh  # GitHub Release asset (wheel + sdist)
 ```
 
 ## Prerequisites
@@ -46,9 +49,10 @@ aurigin-protos/
 For maintainers (publishing):
 
 - `buf` — `brew install bufbuild/buf/buf`
-- Node 20+ — used to run `ts-proto` and build the TS package
+- Node 22+ — used to run `ts-proto` and build the TS package
 - Python 3.10+ with `build` + `twine` — `uv pip install build twine` (or `pip install build twine`)
-- AWS CLI v2 with credentials for the CodeArtifact account
+- AWS CLI v2 with credentials for the CodeArtifact account (CodeArtifact path only)
+- `gh` CLI authenticated against the `Aurigin-ai` org (GitHub Packages / Releases path only)
 
 For consumers, see [Consuming the packages](#consuming-the-packages) below.
 

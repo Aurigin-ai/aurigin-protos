@@ -1,11 +1,14 @@
 # @aurigin/protos
 
-Generated gRPC TypeScript stubs for Aurigin services. Built from [`aurigin-protos`](https://github.com/aurigin/aurigin-protos) using [`ts-proto`](https://github.com/stephenh/ts-proto), compatible with [`@grpc/grpc-js`](https://github.com/grpc/grpc-node/tree/master/packages/grpc-js).
+Generated gRPC TypeScript stubs for Aurigin services. Built from [`aurigin-protos`](https://github.com/Aurigin-ai/aurigin-protos) using [`ts-proto`](https://github.com/stephenh/ts-proto), compatible with [`@grpc/grpc-js`](https://github.com/grpc/grpc-node/tree/master/packages/grpc-js).
 
 ## Install
 
+This package is published in two places. Pick whichever your team authenticates against. The package scope differs by registry; the import path under that scope is identical.
+
+### Option A — AWS CodeArtifact (`@aurigin/protos`)
+
 ```bash
-# One-time CodeArtifact authentication
 aws codeartifact login --tool npm \
   --domain $AURIGIN_CA_DOMAIN \
   --domain-owner $AURIGIN_CA_DOMAIN_OWNER \
@@ -13,6 +16,21 @@ aws codeartifact login --tool npm \
   --region $AWS_REGION
 
 npm install @aurigin/protos @grpc/grpc-js
+```
+
+### Option B — GitHub Packages (`@<owner>/protos`, e.g. `@aurigin-ai/protos`)
+
+Add to your project's `.npmrc`:
+
+```
+@aurigin-ai:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+Then:
+
+```bash
+npm install @aurigin-ai/protos @grpc/grpc-js
 ```
 
 ## Usage
@@ -44,11 +62,11 @@ Server-side: import `DeepfakeDetectionService` (the service definition) and `Dee
 | `service DeepfakeDetection` | `DeepfakeDetectionService` / `DeepfakeDetectionServer` / `DeepfakeDetectionClient` |
 | `oneof response { ... }` | discriminated optional fields on the message (e.g. `response.analysisResult`) |
 
-Currently published modules:
+Currently published modules (substitute `@<scope>` for whichever scope matches the registry you installed from):
 
-- `@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection`
-- `@aurigin/protos/twilio/tme/extensions/common/v1/audio_buffer` (vendored Twilio Media Extensions message)
+- `@<scope>/protos/aurigin/deepfake_detection/v1/deepfake_detection`
+- `@<scope>/protos/twilio/tme/extensions/common/v1/audio_buffer` (vendored Twilio Media Extensions message)
 
 ## Source
 
-This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/aurigin/aurigin-protos), then bump the version and republish via `make publish-ts`.
+This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/Aurigin-ai/aurigin-protos), then bump the version and republish via `make publish-ts` (CodeArtifact) or `make publish-ts-github` (GitHub Packages).
