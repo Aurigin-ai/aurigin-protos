@@ -25,7 +25,11 @@ jobs:
       - name: buf format (check)
         run: buf format --diff --exit-code
 
-      - name: buf breaking (against origin/main)
+      - name: Fetch main as a local ref for buf breaking
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags origin +refs/heads/main:refs/heads/main
+
+      - name: buf breaking (against main)
         # Skip on push to main itself — there's no parent to diff against.
         if: github.event_name == 'pull_request'
         run: buf breaking --against ".git#branch=main,subdir=."
