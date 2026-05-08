@@ -50,11 +50,14 @@ jobs:
         working-directory: gen/ts
         run: npm run build
 
+      - name: Pack TS package as tarball
+        working-directory: gen/ts
+        run: npm pack
+
       - name: tsc strict check on examples
         working-directory: examples/typescript
         run: |
-          npm install --no-save ../../gen/ts/*.tgz tsx typescript @grpc/grpc-js \
-            || (cd ../../gen/ts && npm pack && cd - && npm install --no-save ../../gen/ts/aurigin-protos-*.tgz tsx typescript @grpc/grpc-js)
+          npm install --no-save ../../gen/ts/aurigin-protos-*.tgz tsx typescript @grpc/grpc-js
           npx tsc --noEmit
 
   python:
