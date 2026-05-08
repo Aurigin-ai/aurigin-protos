@@ -222,9 +222,20 @@ from twilio.tme.extensions.common.v1 import audio_buffer_pb2
 
 Full server + client snippets: [examples/python/](examples/python/).
 
+## Git workflow
+
+A few conventions enforced at the repo level — worth knowing before opening a PR:
+
+- **PR-only.** Direct pushes to `main` are blocked by branch protection. Push your work to a feature branch and open a PR.
+- **Squash-merge only.** "Create a merge commit" and "Rebase and merge" are disabled. Each merge produces exactly one commit on `main`, with the **PR title as the subject** and the **PR body as the message body** — pick descriptive PR titles, they become permanent history.
+- **Branches auto-delete on merge.** Don't worry about cleanup; GitHub removes the source branch the moment the PR merges.
+- **CI must be green.** `buf lint + breaking + format`, `TypeScript build`, `Python build + import smoke test`, and `shellcheck publish scripts` are required status checks. `buf breaking` runs against `main`, so a wire-incompatible proto change will fail CI unless it's intentional and reviewed.
+- **PR template.** `.github/pull_request_template.md` pre-fills sections for summary, changes, wire/API impact (additive vs breaking — please be honest), and verification. Reviewers rely on the wire-impact tickbox to gate downstream upgrades.
+- **Versioning happens in publish workflows, not on `main`.** `gen/ts/package.json` and `gen/py/pyproject.toml` stay at `0.0.0` in the source tree; the version is stamped in by `publish.yml` / `publish-codeartifact.yml` from the `v*` tag that triggered the run.
+
 ## Adding a new service
 
 1. Create `proto/<package-path>/<service>.proto` (file path must mirror the proto `package`)
 2. `make lint && make generate` — verify it builds
-3. Bump versions in `gen/ts/package.json` and `gen/py/pyproject.toml`
-4. `make publish`
+3. Open a PR. CI runs lint, breaking-check, and both language builds.
+4. After merge, tag the release: `git tag v<x.y.z> && git push --tags`. The publish workflows stamp the version into both packages and push to CodeArtifact + GitHub Packages / Releases.
