@@ -13,11 +13,13 @@ jobs:
     name: buf lint + breaking + format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0   # buf breaking needs history to compare against main
 
       - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: buf lint
         run: buf lint
@@ -38,13 +40,15 @@ jobs:
     name: TypeScript build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: bufbuild/buf-setup-action@v1
-
-      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
 
       - name: Generate stubs
         run: make generate
@@ -67,15 +71,17 @@ jobs:
     name: Python build + import smoke test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: bufbuild/buf-setup-action@v1
-
-      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -110,5 +116,5 @@ jobs:
     name: shellcheck publish scripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: shellcheck scripts/*.sh
