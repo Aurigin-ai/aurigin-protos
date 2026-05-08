@@ -1,0 +1,93 @@
+name: Publish to GitHub Packages
+
+# Runs on every `v*` tag push (e.g. `git tag v0.1.0 && git push --tags`)
+# and can also be invoked manually via the Actions UI.
+#
+# Outputs:
+#   - npm package `@<repo-owner>/protos` published to GitHub Packages
+#   - Python wheel + sdist attached to a GitHub Release
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 0.1.0)'
+        required: true
+
+permissions:
+  contents: write   # for `gh release create`
+  packages: write   # for `npm publish`
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bufbuild/buf-setup-action@v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://npm.pkg.github.com'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install Python build deps
+        run: pip install --upgrade build
+
+      - name: Generate stubs
+        run: make generate
+
+      - name: Stamp TS package (name + version + registry)
+        working-directory: gen/ts
+        run: |
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          npm pkg set name="@${OWNER_LC}/protos"
+          npm pkg set version="${{ steps.ver.outputs.version }}"
+          npm pkg set publishConfig.registry="https://npm.pkg.github.com"
+          npm run build
+
+      - name: Publish TS to GitHub Packages
+        working-directory: gen/ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish
+
+      - name: Stamp Python package version
+        working-directory: gen/py
+        run: |
+          python -c "
+          import pathlib, re
+          p = pathlib.Path('pyproject.toml')
+          p.write_text(re.sub(r'(?m)^version = .*', 'version = \"${{ steps.ver.outputs.version }}\"', p.read_text()))
+          "
+
+      - name: Build Python wheel + sdist
+        working-directory: gen/py
+        run: python -m build
+
+      - name: Attach Python artefacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" gen/py/dist/* --clobber
+          else
+            gh release create "$TAG" gen/py/dist/* --title "$TAG" --generate-notes
+          fi

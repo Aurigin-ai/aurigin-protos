@@ -1,0 +1,97 @@
+name: Publish to AWS CodeArtifact
+
+# Runs on every `v*` tag push and via the Actions "Run workflow" button.
+# Publishes:
+#   - @aurigin/protos to the CodeArtifact npm repo
+#   - aurigin-protos  to the CodeArtifact PyPI  repo
+#
+# Required configuration (repo Settings → Secrets and variables → Actions):
+#   secrets.AWS_ROLE_TO_ASSUME          IAM role ARN trusting GitHub OIDC
+#   vars.AWS_REGION                     e.g. eu-west-1
+#   vars.AURIGIN_CA_DOMAIN              CodeArtifact domain name
+#   vars.AURIGIN_CA_DOMAIN_OWNER        AWS account ID owning the domain
+#   vars.AURIGIN_CA_REPO                CodeArtifact repository name
+#
+# OIDC setup (one-time, in AWS):
+#   1. Create an OIDC provider for token.actions.githubusercontent.com
+#   2. Create an IAM role trusting that provider, scoped to this repo
+#   3. Attach a policy with codeartifact:GetAuthorizationToken,
+#      codeartifact:PublishPackageVersion, codeartifact:ReadFromRepository,
+#      sts:GetServiceBearerToken
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 0.1.0)'
+        required: true
+
+permissions:
+  id-token: write   # required for OIDC role assumption
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AURIGIN_CA_DOMAIN: ${{ vars.AURIGIN_CA_DOMAIN }}
+      AURIGIN_CA_DOMAIN_OWNER: ${{ vars.AURIGIN_CA_DOMAIN_OWNER }}
+      AURIGIN_CA_REPO: ${{ vars.AURIGIN_CA_REPO }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bufbuild/buf-setup-action@v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install Python build deps
+        run: pip install --upgrade build twine
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Generate stubs
+        run: make generate
+
+      - name: Stamp TS package version
+        working-directory: gen/ts
+        run: |
+          npm pkg set version="${{ steps.ver.outputs.version }}"
+          npm run build
+
+      - name: Publish TS to CodeArtifact
+        run: bash scripts/publish-ts.sh
+
+      - name: Stamp Python package version
+        working-directory: gen/py
+        run: |
+          python -c "
+          import pathlib, re
+          p = pathlib.Path('pyproject.toml')
+          p.write_text(re.sub(r'(?m)^version = .*', 'version = \"${{ steps.ver.outputs.version }}\"', p.read_text()))
+          "
+
+      - name: Publish Python to CodeArtifact
+        run: bash scripts/publish-py.sh

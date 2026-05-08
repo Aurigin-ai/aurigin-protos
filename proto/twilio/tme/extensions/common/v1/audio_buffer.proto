@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package twilio.tme.extensions.common.v1;
+
+option java_multiple_files = true;
+option java_outer_classname = "AudioBufferProto";
+option java_package = "com.twilio.tme.extensions.common.v1";
+
+// Vendored copy of Twilio's AudioBuffer message used by Twilio Media
+// Extensions. Kept here so Aurigin services that consume Twilio media
+// streams can import it as a stable, locally-published proto.
+message AudioBuffer {
+  // audio type, always "audio/x-raw"
+  string type = 1;
+  // audio format, i.e. S16LE
+  string format = 2;
+  // number of channels
+  int32 channels = 3;
+  // bitrate
+  int32 rate = 4;
+  // duration of this buffer in nanoseconds
+  uint64 duration_ns = 5;
+  // presentation timestamp of this buffer in nanoseconds
+  uint64 pts_ns = 6;
+  // size of the audio data
+  uint64 size = 7;
+  // the audio data
+  bytes buffer = 8;
+}

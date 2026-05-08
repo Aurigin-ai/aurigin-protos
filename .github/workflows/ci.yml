@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  buf:
+    name: buf lint + breaking + format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # buf breaking needs history to compare against main
+
+      - uses: bufbuild/buf-setup-action@v1
+
+      - name: buf lint
+        run: buf lint
+
+      - name: buf format (check)
+        run: buf format --diff --exit-code
+
+      - name: buf breaking (against origin/main)
+        # Skip on push to main itself — there's no parent to diff against.
+        if: github.event_name == 'pull_request'
+        run: buf breaking --against ".git#branch=main,subdir=."
+
+  typescript:
+    name: TypeScript build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bufbuild/buf-setup-action@v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generate stubs
+        run: make generate
+
+      - name: Build TS package
+        working-directory: gen/ts
+        run: npm run build
+
+      - name: tsc strict check on examples
+        working-directory: examples/typescript
+        run: |
+          npm install --no-save ../../gen/ts/*.tgz tsx typescript @grpc/grpc-js \
+            || (cd ../../gen/ts && npm pack && cd - && npm install --no-save ../../gen/ts/aurigin-protos-*.tgz tsx typescript @grpc/grpc-js)
+          npx tsc --noEmit
+
+  python:
+    name: Python build + import smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bufbuild/buf-setup-action@v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python build deps
+        run: pip install --upgrade build grpcio protobuf
+
+      - name: Generate stubs
+        run: make generate
+
+      - name: Build wheel + sdist
+        working-directory: gen/py
+        run: python -m build
+
+      - name: Import smoke test
+        working-directory: gen/py
+        run: |
+          python -c "
+          from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
+          from aurigin.deepfake_detection.v1 import deepfake_detection_pb2_grpc as pb_grpc
+          from twilio.tme.extensions.common.v1 import audio_buffer_pb2 as ab
+          msgs = [n for n in dir(pb) if n[0].isupper() and not n.startswith('_')]
+          assert 'AnalysisResult' in msgs and 'DetectDeepfakeRequest' in msgs, msgs
+          assert pb_grpc.DeepfakeDetectionStub.__name__ == 'DeepfakeDetectionStub'
+          assert [f.name for f in ab.AudioBuffer.DESCRIPTOR.fields] == [
+              'type', 'format', 'channels', 'rate',
+              'duration_ns', 'pts_ns', 'size', 'buffer',
+          ]
+          print('OK')
+          "
+
+  shellcheck:
+    name: shellcheck publish scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck scripts/*.sh

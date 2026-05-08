@@ -1,0 +1,36 @@
+[project]
+name = "aurigin-protos-examples"
+version = "0.0.0"
+description = "Reference server/client examples for aurigin-protos."
+requires-python = ">=3.10"
+dependencies = [
+    "aurigin-protos",
+    "grpcio>=1.62",
+]
+
+# Mirrors the TypeScript example's `npm run server` / `npm run client`.
+# After `uv sync`, run with `uv run server` or `uv run client`.
+[project.scripts]
+server = "server:serve"
+client = "client:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["server.py", "client.py"]
+
+# CodeArtifact registry for `aurigin-protos`. Refresh the token before `uv sync`
+# (CodeArtifact tokens expire after 12h):
+#   export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
+#     --domain $AURIGIN_CA_DOMAIN \
+#     --domain-owner $AURIGIN_CA_DOMAIN_OWNER \
+#     --query authorizationToken --output text)
+[[tool.uv.index]]
+name = "aurigin"
+url = "https://aws:${CODEARTIFACT_AUTH_TOKEN}@<domain>-<owner>.d.codeartifact.<region>.amazonaws.com/pypi/<repo>/simple/"
+explicit = true
+
+[tool.uv.sources]
+aurigin-protos = { index = "aurigin" }
