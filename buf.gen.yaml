@@ -18,3 +18,5 @@ plugins:
       - exportCommonSymbols=false
       # Required for NodeNext module resolution: relative imports must end in .js
       - importSuffix=.js
+      # int64/uint64 -> bigint (default `number` truncates values above 2^53)
+      - forceLong=bigint
