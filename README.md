@@ -115,10 +115,14 @@ Then:
 make publish-ts
 make publish-py
 # or both:
-make publish
+make publish-codeartifact
 ```
 
 The publish scripts call `aws codeartifact login` to write the auth token into `~/.npmrc` / `~/.pypirc`, then `npm publish` / `twine upload`. The TS package is published as `@aurigin/protos`.
+
+To publish to **both** CodeArtifact and GitHub Packages/Releases in a single
+shot from your laptop, `make publish` chains them (CodeArtifact first, then
+GitHub). For CI, prefer the dedicated workflows — see Option B below.
 
 #### Option B — GitHub Packages + Releases (preferred for CI)
 
