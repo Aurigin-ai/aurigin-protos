@@ -76,7 +76,9 @@ To run against real audio (real ML server required, e.g. backend-app's gRPC serv
 Files:
 - `python/server.py` — `DeepfakeDetectionServicer` impl with stub analysis, listens on `[::]:50051`
 - `python/client.py` — streams every `.wav` in `examples/python/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty.
-- `python/phone_call.py` — simulates a live mobile call: streams a single audio file looped to fill `--duration` (default 30 s) at real-time pace, in 100 ms frames, using `grpc.aio` so analysis events print as they arrive.
+- `python/phone_call.py` — simulates a live mobile call. Two input modes:
+  - **File mode** (default): streams a WAV file looped to fill `--duration` (default 30 s) at real-time pace.
+  - **FIFO mode** (`--fifo /path/to/pipe` `--codec mulaw|pcm16`): reads from a named pipe until the writer closes — designed for FreeSWITCH `record_session` G.711 μ-law output. Pacing is implicit (writer-driven), no `--duration` cap by default.
 
 ### Audio fixtures
 
@@ -104,8 +106,16 @@ The phone-call example mimics the steady-state behaviour of a live audio source:
 # Run against backend-app's gRPC server (assumes a real ML server on :50051)
 uv run phone-call --duration 30 --chunk-ms 100 --audio audio/your_call.wav
 
-# Or pick the first .wav in examples/python/audio/ automatically
+# Or pick the first .wav in examples/audio/ automatically
 uv run phone-call --duration 30
+
+# FIFO mode — tail a FreeSWITCH record_session pipe (G.711 μ-law @ 8 kHz)
+uv run phone-call --fifo /var/lib/freeswitch/recordings/live.r16 --codec mulaw
+
+# Local FIFO smoke-test using ffmpeg as the writer
+mkfifo /tmp/test.fifo
+ffmpeg -re -i examples/audio/conversation_8khz.wav -f mulaw -ar 8000 -ac 1 /tmp/test.fifo &
+uv run phone-call --fifo /tmp/test.fifo --codec mulaw
 ```
 
 Sample output:

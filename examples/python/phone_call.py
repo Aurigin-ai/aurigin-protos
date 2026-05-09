@@ -1,31 +1,35 @@
 """
-Simulate a mobile phone call: stream an audio file (looped to fill the
-configured duration) to DetectDeepfake at real-time pace, and print
-analysis events as they arrive.
+Simulate a mobile phone call by streaming audio to DetectDeepfake.
 
-Differences from `client.py`:
-  - One continuous gRPC session for the whole call, not one per file.
-  - Real-time pacing: ~1 second of audio sent per second of wallclock,
-    matching how a live phone call would feed the service.
-  - Loops the input file if it's shorter than `--duration`.
-  - 100 ms frames by default — closer to telephony cadence (typical RTP
-    payloads are 20 ms; 100 ms gives readable analysis output without
-    flooding the terminal).
-  - Uses grpc.aio so analysis results print concurrently with sends,
-    rather than queuing up until the stream closes.
+Default mode reads a WAV file (looped to fill --duration, paced in real
+time). With --fifo, reads from a named pipe instead — designed for a
+FreeSWITCH `record_session <fifo>` source feeding G.711 μ-law at 8 kHz.
+
+In both modes analysis events print as they arrive, thanks to grpc.aio's
+concurrent send/recv tasks.
 
 CLI:
-    python phone_call.py [--audio path/to.wav] [--duration 30] \
+    # File mode (default)
+    python phone_call.py [--audio path/to.wav] [--duration 30] \\
         [--chunk-ms 100] [--target localhost:50051]
 
-If --audio is not provided, picks the first .wav in
-`examples/audio/`. The dir is gitignored — drop a fixture in.
+    # FIFO mode (overrides file mode when supplied)
+    python phone_call.py --fifo /var/lib/freeswitch/recordings/live.r16 \\
+        [--codec mulaw|pcm16] [--chunk-ms 100] [--target localhost:50051]
+
+Defaults:
+  - File mode: if --audio is omitted, picks the first .wav in
+    `examples/audio/` (gitignored — drop a fixture in).
+  - FIFO mode: --codec defaults to `mulaw` (G.711 narrowband, the
+    FreeSWITCH default). `pcm16` forwards bytes as 16-bit linear PCM
+    without decoding.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import audioop  # stdlib; deprecated in 3.13, still present in 3.11/3.12
 import sys
 import wave
 from pathlib import Path
@@ -38,6 +42,10 @@ from twilio.tme.extensions.common.v1 import audio_buffer_pb2 as ab_pb
 
 DEFAULT_CHUNK_MS = 100
 DEFAULT_DURATION_S = 30.0
+
+# FreeSWITCH narrowband defaults for FIFO mode; both codec paths assume mono.
+FIFO_SAMPLE_RATE = 8000
+FIFO_CHANNELS = 1
 
 
 def _load_pcm(path: Path) -> tuple[bytes, int, int]:
@@ -119,6 +127,61 @@ async def _send_call(
     await call.done_writing()
 
 
+async def _send_fifo(call, fifo_path: Path, codec: str, chunk_ms: int) -> None:
+    """Stream a FreeSWITCH-style named pipe until the writer closes.
+
+    The writer (FreeSWITCH `record_session`, or anything pumping audio at
+    real-time rate) provides natural pacing — we just read, decode if
+    needed, and forward as AudioBuffers.
+    """
+    samples_per_chunk = int(FIFO_SAMPLE_RATE * chunk_ms / 1000)
+    if codec == "mulaw":
+        bytes_per_input_chunk = samples_per_chunk * FIFO_CHANNELS  # 1 byte/sample
+    elif codec == "pcm16":
+        bytes_per_input_chunk = samples_per_chunk * FIFO_CHANNELS * 2  # 2 bytes/sample
+    else:
+        raise ValueError(f"Unknown codec: {codec}")
+
+    await call.write(pb.DetectDeepfakeRequest(create_session_request=pb.CreateSessionRequest()))
+
+    loop = asyncio.get_running_loop()
+    print(f"⏳ Waiting for writer on {fifo_path} (open() blocks)...")
+    fifo = await loop.run_in_executor(None, lambda: open(str(fifo_path), "rb"))
+    print(">>> Writer connected, streaming audio")
+    try:
+        pts_ns = 0
+        while True:
+            data = await loop.run_in_executor(None, fifo.read, bytes_per_input_chunk)
+            if not data:
+                print("<<< FIFO closed by writer")
+                break
+
+            # Decode μ-law -> linear S16LE; pcm16 passes through unchanged.
+            pcm = audioop.ulaw2lin(data, 2) if codec == "mulaw" else data
+            actual_frames = len(pcm) // (2 * FIFO_CHANNELS)
+            duration_ns = int(actual_frames / FIFO_SAMPLE_RATE * 1e9)
+
+            await call.write(
+                pb.DetectDeepfakeRequest(
+                    audio=ab_pb.AudioBuffer(
+                        type="audio/x-raw",
+                        format="S16LE",
+                        channels=FIFO_CHANNELS,
+                        rate=FIFO_SAMPLE_RATE,
+                        duration_ns=duration_ns,
+                        pts_ns=pts_ns,
+                        size=len(pcm),
+                        buffer=pcm,
+                    ),
+                )
+            )
+            pts_ns += duration_ns
+    finally:
+        fifo.close()
+
+    await call.done_writing()
+
+
 async def _recv_call(call) -> None:
     """Print every server response as it arrives."""
     async for response in call:
@@ -143,29 +206,37 @@ async def _recv_call(call) -> None:
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     parser.add_argument("--audio", type=Path, default=None, help="WAV file to stream (defaults to first in audio/)")
-    parser.add_argument("--duration", type=float, default=DEFAULT_DURATION_S, help="Call length in seconds")
+    parser.add_argument("--duration", type=float, default=DEFAULT_DURATION_S, help="Call length in seconds (file mode only)")
     parser.add_argument("--chunk-ms", type=int, default=DEFAULT_CHUNK_MS, help="Audio frame size in milliseconds")
     parser.add_argument("--target", default="localhost:50051", help="gRPC server host:port")
+    parser.add_argument("--fifo", type=Path, default=None, help="Read live audio from a named pipe instead of a WAV file")
+    parser.add_argument("--codec", choices=["mulaw", "pcm16"], default="mulaw", help="FIFO codec (file mode auto-detects)")
     args = parser.parse_args()
-
-    audio_path = _resolve_audio(args.audio)
-    pcm, rate, channels = _load_pcm(audio_path)
-
-    print(
-        f"📞 Calling {args.target} | source={audio_path.name} "
-        f"({len(pcm) / (rate * 2 * channels):.2f}s @ {rate}Hz/{channels}ch) "
-        f"| duration={args.duration:.1f}s | frame={args.chunk_ms}ms"
-    )
-    print("─" * 70)
 
     async with grpc.aio.insecure_channel(args.target) as channel:
         stub = pb_grpc.DeepfakeDetectionStub(channel)
         call = stub.DetectDeepfake()
-        try:
-            await asyncio.gather(
-                _send_call(call, pcm, rate, channels, args.chunk_ms, args.duration),
-                _recv_call(call),
+
+        if args.fifo is not None:
+            print(
+                f"📞 Calling {args.target} | source={args.fifo} (FIFO, {args.codec}, "
+                f"{FIFO_SAMPLE_RATE}Hz/{FIFO_CHANNELS}ch) | frame={args.chunk_ms}ms"
             )
+            print("─" * 70)
+            sender = _send_fifo(call, args.fifo, args.codec, args.chunk_ms)
+        else:
+            audio_path = _resolve_audio(args.audio)
+            pcm, rate, channels = _load_pcm(audio_path)
+            print(
+                f"📞 Calling {args.target} | source={audio_path.name} "
+                f"({len(pcm) / (rate * 2 * channels):.2f}s @ {rate}Hz/{channels}ch) "
+                f"| duration={args.duration:.1f}s | frame={args.chunk_ms}ms"
+            )
+            print("─" * 70)
+            sender = _send_call(call, pcm, rate, channels, args.chunk_ms, args.duration)
+
+        try:
+            await asyncio.gather(sender, _recv_call(call))
         except grpc.aio.AioRpcError as e:
             print(f"gRPC error: {e.code().name}: {e.details()}", file=sys.stderr)
             sys.exit(1)
