@@ -13,6 +13,27 @@ Source of truth for Aurigin's gRPC service definitions. Generates and publishes 
 - **TypeScript** package: `@aurigin/protos` (CodeArtifact) · `@<owner>/protos` (GitHub Packages)
 - **Python** package: `aurigin-protos` (CodeArtifact) · wheel attached to GitHub Releases
 
+## Latest published version
+
+The version stamped into the published packages always matches the most recent `v*` tag — see the **Latest release** badge above (it auto-updates from the [GitHub Releases page](https://github.com/Aurigin-ai/aurigin-protos/releases/latest)).
+
+Quick install (replace nothing — the registries always serve the latest):
+
+```bash
+# TypeScript via CodeArtifact (after `aws codeartifact login --tool npm ...`)
+npm install @aurigin/protos
+
+# TypeScript via GitHub Packages (after .npmrc setup, see "Consuming" below)
+npm install @aurigin-ai/protos
+
+# Python via CodeArtifact (after `aws codeartifact login --tool pip ...`)
+uv pip install aurigin-protos
+
+# Python wheel pinned to a specific GH Release tag (no PyPI on GitHub)
+gh release download v<x.y.z> -R Aurigin-ai/aurigin-protos -p '*.whl' \
+  && uv pip install ./aurigin_protos-*.whl
+```
+
 ## Layout
 
 ```
@@ -191,11 +212,11 @@ uv pip install aurigin-protos
 
 For project-managed deps, declare the CodeArtifact index in `pyproject.toml` — see [examples/README.md](examples/README.md#option-b--project-managed-pyprojecttoml) for the full snippet.
 
-**From a GitHub Release** (no PyPI registry on GitHub Packages):
+**From a GitHub Release** (no PyPI registry on GitHub Packages). Pick a tag from [the Releases page](https://github.com/Aurigin-ai/aurigin-protos/releases/latest) (badge at the top of this README is always current) and substitute it for `<x.y.z>`:
 
 ```bash
 uv pip install \
-  "https://github.com/<owner>/<repo>/releases/download/v0.1.0/aurigin_protos-0.1.0-py3-none-any.whl"
+  "https://github.com/Aurigin-ai/aurigin-protos/releases/download/v<x.y.z>/aurigin_protos-<x.y.z>-py3-none-any.whl"
 ```
 
 Or in `pyproject.toml`:
@@ -203,11 +224,19 @@ Or in `pyproject.toml`:
 ```toml
 [project]
 dependencies = [
-    "aurigin-protos @ https://github.com/<owner>/<repo>/releases/download/v0.1.0/aurigin_protos-0.1.0-py3-none-any.whl",
+    "aurigin-protos @ https://github.com/Aurigin-ai/aurigin-protos/releases/download/v<x.y.z>/aurigin_protos-<x.y.z>-py3-none-any.whl",
 ]
 ```
 
-For private repos, set up `GH_TOKEN` and use the GitHub API URL pattern documented at [docs.github.com/en/rest/releases/assets](https://docs.github.com/en/rest/releases/assets), or fetch the asset with `gh release download` first.
+For private repos (or to always grab the latest without hardcoding), use `gh release download`:
+
+```bash
+gh release download v<x.y.z> -R Aurigin-ai/aurigin-protos -p '*.whl' \
+  && uv pip install ./aurigin_protos-*.whl
+# Or, omit the tag to download from the latest release:
+gh release download -R Aurigin-ai/aurigin-protos -p '*.whl' \
+  && uv pip install ./aurigin_protos-*.whl
+```
 
 ```python
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2, deepfake_detection_pb2_grpc

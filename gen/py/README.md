@@ -45,11 +45,11 @@ uv pip install aurigin-protos
 
 ### Option B — GitHub Release asset
 
-GitHub Packages doesn't host a Python registry, so the wheel + sdist are attached to a GitHub Release. Install directly via PEP 508 direct-URL:
+GitHub Packages doesn't host a Python registry, so the wheel + sdist are attached to a GitHub Release. Pick a tag from [the Releases page](https://github.com/Aurigin-ai/aurigin-protos/releases/latest) and substitute for `<x.y.z>`:
 
 ```bash
 uv pip install \
-  "https://github.com/Aurigin-ai/aurigin-protos/releases/download/v0.1.0/aurigin_protos-0.1.0-py3-none-any.whl"
+  "https://github.com/Aurigin-ai/aurigin-protos/releases/download/v<x.y.z>/aurigin_protos-<x.y.z>-py3-none-any.whl"
 ```
 
 Or in `pyproject.toml`:
@@ -57,11 +57,16 @@ Or in `pyproject.toml`:
 ```toml
 [project]
 dependencies = [
-    "aurigin-protos @ https://github.com/Aurigin-ai/aurigin-protos/releases/download/v0.1.0/aurigin_protos-0.1.0-py3-none-any.whl",
+    "aurigin-protos @ https://github.com/Aurigin-ai/aurigin-protos/releases/download/v<x.y.z>/aurigin_protos-<x.y.z>-py3-none-any.whl",
 ]
 ```
 
-For private repos, fetch the asset first with `gh release download v0.1.0 -R Aurigin-ai/aurigin-protos -p '*.whl'` and `uv pip install ./aurigin_protos-*.whl`.
+For private repos (or to grab the latest without hardcoding), use `gh release download` — omit the tag to default to the latest release:
+
+```bash
+gh release download -R Aurigin-ai/aurigin-protos -p '*.whl' \
+  && uv pip install ./aurigin_protos-*.whl
+```
 
 ## Usage
 
