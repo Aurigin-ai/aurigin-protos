@@ -8,6 +8,9 @@ dependencies = [
     "grpcio>=1.62",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
 # Mirrors the TypeScript example's `npm run server` / `npm run client`.
 # After `uv sync`, run with `uv run server` / `uv run client` / `uv run phone-call`.
 [project.scripts]

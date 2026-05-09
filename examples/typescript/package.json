@@ -7,7 +7,8 @@
   "scripts": {
     "server": "tsx server.ts",
     "client": "tsx client.ts",
-    "phone-call": "tsx phone_call.ts"
+    "phone-call": "tsx phone_call.ts",
+    "test": "node --import tsx --test tests/smoke.test.ts"
   },
   "dependencies": {
     "@aurigin/protos": "*",
