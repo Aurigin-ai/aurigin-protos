@@ -76,6 +76,33 @@ To run against real audio (real ML server required, e.g. backend-app's gRPC serv
 Files:
 - `python/server.py` — `DeepfakeDetectionServicer` impl with stub analysis, listens on `[::]:50051`
 - `python/client.py` — streams every `.wav` in `examples/python/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty.
+- `python/phone_call.py` — simulates a live mobile call: streams a single audio file looped to fill `--duration` (default 30 s) at real-time pace, in 100 ms frames, using `grpc.aio` so analysis events print as they arrive.
+
+### Phone-call simulation
+
+The phone-call example mimics the steady-state behaviour of a live audio source: it sends ~1 s of audio per second of wallclock, loops the input if it's shorter than the requested call duration, and prints `AnalysisResult` events the moment they come back from the server. Useful for validating that the streaming pipeline keeps up with real-time without backlog.
+
+```bash
+# Run against backend-app's gRPC server (assumes a real ML server on :50051)
+uv run phone-call --duration 30 --chunk-ms 100 --audio audio/your_call.wav
+
+# Or pick the first .wav in examples/python/audio/ automatically
+uv run phone-call --duration 30
+```
+
+Sample output:
+
+```
+📞 Calling localhost:50051 | source=your_call.wav (4.16s @ 24000Hz/1ch) | duration=12.0s | frame=100ms
+──────────────────────────────────────────────────────────────────────
+📞 Session: 538a241b-ebdf-4e9a-83a2-259352bd0b01
+   Analysis @   0.00s | score=0.945 | label=spoofed            | confidence=1.00
+   Analysis @   2.90s | score=0.323 | label=bonafide           | confidence=1.00
+   Analysis @   5.96s | score=0.240 | label=bonafide           | confidence=1.00
+   Analysis @   9.01s | score=0.622 | label=partially_spoofed  | confidence=1.00
+──────────────────────────────────────────────────────────────────────
+☎️  Call ended | total=12.01s | score=0.532 | label=partially_spoofed | analyses=4
+```
 
 ## TypeScript
 
