@@ -242,7 +242,16 @@ A few conventions enforced at the repo level — worth knowing before opening a 
 
 ## Adding a new service
 
-1. Create `proto/<package-path>/<service>.proto` (file path must mirror the proto `package`)
-2. `make lint && make generate` — verify it builds
-3. Open a PR. CI runs lint, breaking-check, and both language builds.
-4. After merge, tag the release: `git tag v<x.y.z> && git push --tags`. The publish workflows stamp the version into both packages and push to CodeArtifact + GitHub Packages / Releases.
+1. Create `proto/<package-path>/<service>.proto` (file path must mirror the proto `package`).
+2. `make lint` — fail fast on naming, package, version-suffix and other STANDARD-rule violations before generating anything.
+3. `make generate` — produce Python and TypeScript stubs.
+4. Wire the new RPC into the example server and at least one example client in **both** languages (`examples/python/` and `examples/typescript/`). Stub logic only — no real ML in this repo.
+5. Add an end-to-end smoke test for the new RPC in **both** test suites (`examples/python/tests/test_smoke.py`, `examples/typescript/tests/smoke.test.ts`). The existing `DetectDeepfake` test is the template.
+6. Run everything locally before pushing:
+   ```bash
+   make lint && make generate && \
+     pytest examples/python/tests/ && \
+     (cd examples/typescript && npm test)
+   ```
+7. Open a PR. CI runs `buf lint + breaking + format`, both language builds, and both end-to-end smoke tests.
+8. After merge, tag the release: `git tag v<x.y.z> && git push --tags`. The publish workflows stamp the version into both packages and push to CodeArtifact + GitHub Packages / Releases.
