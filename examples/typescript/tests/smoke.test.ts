@@ -56,6 +56,22 @@ function runProc(scriptPath: string, args: string[] = []): Promise<{ code: numbe
   });
 }
 
+async function killAndWait(proc: ChildProcess, timeoutMs = 2000): Promise<void> {
+  if (proc.exitCode !== null || proc.signalCode !== null) return;
+  const exited = new Promise<void>((resolve) => proc.once("exit", () => resolve()));
+  proc.kill("SIGTERM");
+  // tsx wraps the node child and doesn't always forward SIGTERM, so escalate
+  // to SIGKILL if the process is still alive after the grace period — without
+  // this, lingering server sockets keep the test runner from exiting.
+  await Promise.race([
+    exited,
+    sleep(timeoutMs).then(() => {
+      if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+    }),
+  ]);
+  await exited;
+}
+
 async function withServer<T>(fn: () => Promise<T>): Promise<T> {
   const server = startServer();
   let serverOutput = "";
@@ -66,8 +82,7 @@ async function withServer<T>(fn: () => Promise<T>): Promise<T> {
     assert.ok(reachable, `Server didn't bind on :${PORT} within 15 s.\n${serverOutput}`);
     return await fn();
   } finally {
-    server.kill();
-    await sleep(200);
+    await killAndWait(server);
   }
 }
 
