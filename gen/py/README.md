@@ -8,7 +8,16 @@ This package is published in two places. Pick whichever your team authenticates 
 
 ### Option A — AWS CodeArtifact
 
-Configure CodeArtifact as an extra index in your `pyproject.toml`:
+Aurigin's CodeArtifact setup:
+
+| | |
+|---|---|
+| Domain | `aurigin-ai-domain` |
+| Domain owner | `717279723333` |
+| Repository | `aurigin-shared` |
+| Region | `eu-west-1` |
+
+Configure as an extra index in your `pyproject.toml`:
 
 ```toml
 [project]
@@ -19,7 +28,7 @@ dependencies = [
 
 [[tool.uv.index]]
 name = "aurigin"
-url = "https://aws:${CODEARTIFACT_AUTH_TOKEN}@<domain>-<owner>.d.codeartifact.<region>.amazonaws.com/pypi/<repo>/simple/"
+url = "https://aws:${CODEARTIFACT_AUTH_TOKEN}@aurigin-ai-domain-717279723333.d.codeartifact.eu-west-1.amazonaws.com/pypi/aurigin-shared/simple/"
 explicit = true
 
 [tool.uv.sources]
@@ -30,14 +39,15 @@ Refresh the auth token (CodeArtifact tokens expire after 12h) and sync:
 
 ```bash
 export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
-  --domain $AURIGIN_CA_DOMAIN \
-  --domain-owner $AURIGIN_CA_DOMAIN_OWNER \
+  --domain aurigin-ai-domain \
+  --domain-owner 717279723333 \
+  --region eu-west-1 \
   --query authorizationToken --output text)
 
 uv sync
 ```
 
-For ad-hoc use, after `aws codeartifact login --tool pip ...`:
+For ad-hoc use, after `aws codeartifact login --tool pip --domain aurigin-ai-domain --domain-owner 717279723333 --repository aurigin-shared --region eu-west-1`:
 
 ```bash
 uv pip install aurigin-protos

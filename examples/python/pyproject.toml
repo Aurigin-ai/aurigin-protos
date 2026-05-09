@@ -28,12 +28,11 @@ only-include = ["server.py", "client.py", "phone_call.py"]
 # CodeArtifact registry for `aurigin-protos`. Refresh the token before `uv sync`
 # (CodeArtifact tokens expire after 12h):
 #   export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
-#     --domain $AURIGIN_CA_DOMAIN \
-#     --domain-owner $AURIGIN_CA_DOMAIN_OWNER \
-#     --query authorizationToken --output text)
+#     --domain aurigin-ai-domain --domain-owner 717279723333 \
+#     --region eu-west-1 --query authorizationToken --output text)
 [[tool.uv.index]]
 name = "aurigin"
-url = "https://aws:${CODEARTIFACT_AUTH_TOKEN}@<domain>-<owner>.d.codeartifact.<region>.amazonaws.com/pypi/<repo>/simple/"
+url = "https://aws:${CODEARTIFACT_AUTH_TOKEN}@aurigin-ai-domain-717279723333.d.codeartifact.eu-west-1.amazonaws.com/pypi/aurigin-shared/simple/"
 explicit = true
 
 [tool.uv.sources]

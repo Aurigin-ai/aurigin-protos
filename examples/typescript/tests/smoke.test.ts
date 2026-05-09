@@ -20,9 +20,23 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXAMPLES_DIR = path.resolve(__dirname, "..");
-const PORT = 50062; // avoid clashing with a dev server on 50051 / Python test on 50061
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Ask the OS for an unused TCP port. There's a tiny TOCTOU window between
+// here and when the server child binds, but it's vastly safer than a fixed
+// port — Linux's default ephemeral range is 32768–60999, so any fixed port
+// in there can be stolen by a transient outbound socket on a busy CI runner.
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once("error", reject);
+    s.listen(0, "localhost", () => {
+      const port = (s.address() as net.AddressInfo).port;
+      s.close(() => resolve(port));
+    });
+  });
+}
 
 async function waitForPort(port: number, timeoutMs = 15_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
@@ -38,9 +52,9 @@ async function waitForPort(port: number, timeoutMs = 15_000): Promise<boolean> {
   return false;
 }
 
-function startServer(): ChildProcess {
+function startServer(port: number): ChildProcess {
   return spawn("npx", ["tsx", path.join(EXAMPLES_DIR, "server.ts")], {
-    env: { ...process.env, PORT: String(PORT) },
+    env: { ...process.env, PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
   });
 }
@@ -72,25 +86,26 @@ async function killAndWait(proc: ChildProcess, timeoutMs = 2000): Promise<void> 
   await exited;
 }
 
-async function withServer<T>(fn: () => Promise<T>): Promise<T> {
-  const server = startServer();
+async function withServer<T>(fn: (port: number) => Promise<T>): Promise<T> {
+  const port = await freePort();
+  const server = startServer(port);
   let serverOutput = "";
   server.stdout?.on("data", (d: Buffer) => { serverOutput += d.toString(); });
   server.stderr?.on("data", (d: Buffer) => { serverOutput += d.toString(); });
   try {
-    const reachable = await waitForPort(PORT);
-    assert.ok(reachable, `Server didn't bind on :${PORT} within 15 s.\n${serverOutput}`);
-    return await fn();
+    const reachable = await waitForPort(port);
+    assert.ok(reachable, `Server didn't bind on :${port} within 15 s.\n${serverOutput}`);
+    return await fn(port);
   } finally {
     await killAndWait(server);
   }
 }
 
 test("client streams silence and roundtrips analyses", async () => {
-  await withServer(async () => {
+  await withServer(async (port) => {
     const { code, stdout, stderr } = await runProc(
       path.join(EXAMPLES_DIR, "client.ts"),
-      ["--target", `localhost:${PORT}`],
+      ["--target", `localhost:${port}`],
     );
     assert.equal(code, 0, `client failed: stderr=${stderr}`);
     assert.match(stdout, /Session: demo-session-0001/);
@@ -104,10 +119,10 @@ test("phone_call streams a WAV fixture and roundtrips analyses", async () => {
   const fixture = path.join(repoRoot, "examples", "audio", "fixtures", "test_call.wav");
   assert.ok(fs.existsSync(fixture), `missing test fixture: ${fixture}`);
 
-  await withServer(async () => {
+  await withServer(async (port) => {
     const { code, stdout, stderr } = await runProc(
       path.join(EXAMPLES_DIR, "phone_call.ts"),
-      ["--audio", fixture, "--duration", "1", "--chunk-ms", "100", "--target", `localhost:${PORT}`],
+      ["--audio", fixture, "--duration", "1", "--chunk-ms", "100", "--target", `localhost:${port}`],
     );
     assert.equal(code, 0, `phone_call failed: stderr=${stderr}`);
     // Header confirms the WAV reader parsed sr/channels correctly.

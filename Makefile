@@ -1,10 +1,21 @@
-.PHONY: help install lint generate breaking clean build-ts build-py \
+.PHONY: help info install lint generate breaking clean build-ts build-py \
         publish-ts-codeartifact publish-py-codeartifact publish-codeartifact \
         publish-ts-github publish-py-github publish-github \
         publish
 
+# Aurigin's registry configuration. Mirrors the GitHub Actions repository
+# variables (Settings → Variables) and the trust/permissions policies on
+# the IAM role; if any of these change in AWS, update here too.
+CA_DOMAIN       := aurigin-ai-domain
+CA_DOMAIN_OWNER := 717279723333
+CA_REPO         := aurigin-shared
+CA_REGION       := eu-west-1
+GH_OWNER        := aurigin-ai
+GH_REPO         := aurigin-protos
+
 help:
 	@echo "Targets:"
+	@echo "  info                      Print this repo's CodeArtifact + GitHub Packages config"
 	@echo "  install                   Install ts-proto into gen/ts (one-time / on plugin updates)"
 	@echo "  lint                      Run buf lint over proto/"
 	@echo "  breaking                  Check breaking changes against main branch"
@@ -26,6 +37,26 @@ help:
 	@echo "    publish                 publish-codeartifact + publish-github"
 	@echo ""
 	@echo "  clean                     Remove generated and built artifacts"
+
+info:
+	@echo "AWS CodeArtifact"
+	@echo "  Domain         $(CA_DOMAIN)"
+	@echo "  Domain owner   $(CA_DOMAIN_OWNER)"
+	@echo "  Repository     $(CA_REPO)"
+	@echo "  Region         $(CA_REGION)"
+	@echo "  npm endpoint   https://$(CA_DOMAIN)-$(CA_DOMAIN_OWNER).d.codeartifact.$(CA_REGION).amazonaws.com/npm/$(CA_REPO)/"
+	@echo "  pypi endpoint  https://$(CA_DOMAIN)-$(CA_DOMAIN_OWNER).d.codeartifact.$(CA_REGION).amazonaws.com/pypi/$(CA_REPO)/simple/"
+	@echo ""
+	@echo "GitHub Packages / Releases"
+	@echo "  Owner          $(GH_OWNER)"
+	@echo "  Repo           $(GH_OWNER)/$(GH_REPO)"
+	@echo "  npm scope      @$(GH_OWNER)/protos"
+	@echo "  npm registry   https://npm.pkg.github.com"
+	@echo "  Release URL    https://github.com/$(GH_OWNER)/$(GH_REPO)/releases"
+	@echo ""
+	@echo "Login one-liners (need AWS / gh credentials in env):"
+	@echo "  aws codeartifact login --tool npm  --domain $(CA_DOMAIN) --domain-owner $(CA_DOMAIN_OWNER) --repository $(CA_REPO) --region $(CA_REGION)"
+	@echo "  aws codeartifact login --tool pip  --domain $(CA_DOMAIN) --domain-owner $(CA_DOMAIN_OWNER) --repository $(CA_REPO) --region $(CA_REGION)"
 
 install:
 	cd gen/ts && npm install

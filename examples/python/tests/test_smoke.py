@@ -22,7 +22,17 @@ import pytest
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = EXAMPLES_DIR.parent.parent
-PORT = 50061  # avoid clashing with a dev backend-app on 50051
+
+
+def _free_port() -> int:
+    """Ask the OS for an unused TCP port. There's a tiny TOCTOU window between
+    here and when the server child binds, but it's vastly safer than a fixed
+    port — Linux's default ephemeral range is 32768–60999, so any fixed port
+    in there can be stolen by a transient outbound socket on a busy CI runner.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("localhost", 0))
+        return s.getsockname()[1]
 
 
 def _wait_for_port(port: int, timeout: float = 15.0) -> bool:
@@ -53,20 +63,21 @@ def env() -> dict[str, str]:
 
 @pytest.fixture
 def server(env: dict[str, str]):
-    """Spawn the example server on PORT and tear it down at the end."""
+    """Spawn the example server on a free port and tear it down at the end."""
+    port = _free_port()
     proc = subprocess.Popen(
         [sys.executable, str(EXAMPLES_DIR / "server.py")],
-        env={**env, "PORT": str(PORT)},
+        env={**env, "PORT": str(port)},
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
     )
-    if not _wait_for_port(PORT):
+    if not _wait_for_port(port):
         proc.terminate()
         out = proc.stdout.read() if proc.stdout else ""
-        pytest.fail(f"Server didn't bind on :{PORT} within 15 s. Output:\n{out}")
+        pytest.fail(f"Server didn't bind on :{port} within 15 s. Output:\n{out}")
     try:
-        yield proc
+        yield proc, port
     finally:
         proc.terminate()
         try:
@@ -77,8 +88,9 @@ def server(env: dict[str, str]):
 
 def test_client_silence_roundtrip(server, env: dict[str, str]):
     """The stub client streams 3 s of silence and prints session/analysis/final."""
+    _, port = server
     result = subprocess.run(
-        [sys.executable, str(EXAMPLES_DIR / "client.py"), "--target", f"localhost:{PORT}"],
+        [sys.executable, str(EXAMPLES_DIR / "client.py"), "--target", f"localhost:{port}"],
         env=env,
         capture_output=True,
         text=True,
@@ -93,6 +105,7 @@ def test_client_silence_roundtrip(server, env: dict[str, str]):
 
 def test_phone_call_wav_roundtrip(server, env: dict[str, str]):
     """phone_call.py reads a real WAV fixture and streams it to the server."""
+    _, port = server
     fixture = REPO_ROOT / "examples" / "audio" / "fixtures" / "test_call.wav"
     assert fixture.is_file(), f"missing test fixture: {fixture}"
 
@@ -103,7 +116,7 @@ def test_phone_call_wav_roundtrip(server, env: dict[str, str]):
             "--audio", str(fixture),
             "--duration", "1",
             "--chunk-ms", "100",
-            "--target", f"localhost:{PORT}",
+            "--target", f"localhost:{port}",
         ],
         env=env,
         capture_output=True,

@@ -10,10 +10,10 @@ This package is published in two places. Pick whichever your team authenticates 
 
 ```bash
 aws codeartifact login --tool npm \
-  --domain $AURIGIN_CA_DOMAIN \
-  --domain-owner $AURIGIN_CA_DOMAIN_OWNER \
-  --repository $AURIGIN_CA_REPO \
-  --region $AWS_REGION
+  --domain aurigin-ai-domain \
+  --domain-owner 717279723333 \
+  --repository aurigin-shared \
+  --region eu-west-1
 
 npm install @aurigin/protos @grpc/grpc-js
 ```

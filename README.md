@@ -132,29 +132,12 @@ GitHub Packages doesn't host a Python registry, so the Python wheel/sdist take t
 
 For `publish-codeartifact.yml` to authenticate (it uses GitHub OIDC, not a static AWS key), add at repo Settings → Secrets and variables → Actions:
 
-- **Secret:** `AWS_ROLE_TO_ASSUME` — IAM role ARN trusting `repo:<owner>/<repo>:*` via the GitHub OIDC provider, with `codeartifact:GetAuthorizationToken` / `PublishPackageVersion` / `ReadFromRepository` and `sts:GetServiceBearerToken`.
-- **Variables:** `AWS_REGION`, `AURIGIN_CA_DOMAIN`, `AURIGIN_CA_DOMAIN_OWNER`, `AURIGIN_CA_REPO`.
+- **Secret:** `AWS_ROLE_TO_ASSUME` — IAM role ARN trusting GitHub OIDC, scoped to `repo:Aurigin-ai/aurigin-protos:ref:refs/tags/v*` (release path) **and** `repo:Aurigin-ai/aurigin-protos:ref:refs/heads/main` (manual `workflow_dispatch` from main). The role's permissions policy needs `codeartifact:GetAuthorizationToken` / `GetRepositoryEndpoint` / `ReadFromRepository` / `PublishPackageVersion` / `PutPackageMetadata`, plus `sts:GetServiceBearerToken` (with `StringEquals` condition `sts:AWSServiceName = codeartifact.amazonaws.com`).
+- **Variables:** `AWS_REGION = eu-west-1`, `AURIGIN_CA_DOMAIN = aurigin-ai-domain`, `AURIGIN_CA_DOMAIN_OWNER = 717279723333`, `AURIGIN_CA_REPO = aurigin-shared`.
 
 `publish.yml` only needs the workflow's auto-issued `GITHUB_TOKEN` — no setup.
 
-#### Local dry-runs
-
-Useful when CI is unavailable or you want to test a publish script change before tagging. Each script reads env vars and shells out the same way the workflow would:
-
-```bash
-# AWS CodeArtifact
-export AURIGIN_CA_DOMAIN=<domain> AURIGIN_CA_DOMAIN_OWNER=<acct-id> \
-       AURIGIN_CA_REPO=<repo>     AWS_REGION=eu-west-1
-make publish-codeartifact      # = publish-ts-codeartifact + publish-py-codeartifact
-
-# GitHub Packages + Release
-export GITHUB_TOKEN=$(gh auth token) \
-       GITHUB_REPO=Aurigin-ai/aurigin-protos GITHUB_TAG=v0.1.0
-make publish-github            # = publish-ts-github + publish-py-github
-
-# Both at once (CodeArtifact first, then GitHub)
-make publish
-```
+> Tip: `make info` prints the repo's CodeArtifact and GitHub Packages configuration in one place — handy for `aws codeartifact login` from a developer machine.
 
 ## Consuming the packages
 
@@ -164,10 +147,10 @@ make publish
 
 ```bash
 aws codeartifact login --tool npm \
-  --domain $AURIGIN_CA_DOMAIN \
-  --domain-owner $AURIGIN_CA_DOMAIN_OWNER \
-  --repository $AURIGIN_CA_REPO \
-  --region $AWS_REGION
+  --domain aurigin-ai-domain \
+  --domain-owner 717279723333 \
+  --repository aurigin-shared \
+  --region eu-west-1
 
 npm install @aurigin/protos
 ```
@@ -205,10 +188,10 @@ Full server + client snippets: [examples/typescript/](examples/typescript/).
 
 ```bash
 aws codeartifact login --tool pip \
-  --domain $AURIGIN_CA_DOMAIN \
-  --domain-owner $AURIGIN_CA_DOMAIN_OWNER \
-  --repository $AURIGIN_CA_REPO \
-  --region $AWS_REGION
+  --domain aurigin-ai-domain \
+  --domain-owner 717279723333 \
+  --repository aurigin-shared \
+  --region eu-west-1
 
 uv venv
 uv pip install aurigin-protos

@@ -28,8 +28,9 @@ The `examples/python/` directory ships a `pyproject.toml` (with placeholders for
 cd examples/python
 
 export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
-  --domain $AURIGIN_CA_DOMAIN \
-  --domain-owner $AURIGIN_CA_DOMAIN_OWNER \
+  --domain aurigin-ai-domain \
+  --domain-owner 717279723333 \
+  --region eu-west-1 \
   --query authorizationToken --output text)
 
 uv sync                                   # creates .venv/, installs deps
@@ -51,7 +52,7 @@ dependencies = [
 
 [[tool.uv.index]]
 name = "aurigin"
-url = "https://aws:${CODEARTIFACT_AUTH_TOKEN}@<domain>-<owner>.d.codeartifact.<region>.amazonaws.com/pypi/<repo>/simple/"
+url = "https://aws:${CODEARTIFACT_AUTH_TOKEN}@aurigin-ai-domain-717279723333.d.codeartifact.eu-west-1.amazonaws.com/pypi/aurigin-shared/simple/"
 explicit = true
 
 [tool.uv.sources]
@@ -141,10 +142,10 @@ cd examples/typescript
 
 # After authenticating to CodeArtifact (one-time per machine):
 aws codeartifact login --tool npm \
-  --domain $AURIGIN_CA_DOMAIN \
-  --domain-owner $AURIGIN_CA_DOMAIN_OWNER \
-  --repository $AURIGIN_CA_REPO \
-  --region $AWS_REGION
+  --domain aurigin-ai-domain \
+  --domain-owner 717279723333 \
+  --repository aurigin-shared \
+  --region eu-west-1
 
 npm install
 ```
