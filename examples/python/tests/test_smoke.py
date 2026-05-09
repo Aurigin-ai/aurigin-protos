@@ -75,7 +75,7 @@ def server(env: dict[str, str]):
             proc.kill()
 
 
-def test_client_roundtrip(server, env: dict[str, str]):
+def test_client_silence_roundtrip(server, env: dict[str, str]):
     """The stub client streams 3 s of silence and prints session/analysis/final."""
     result = subprocess.run(
         [sys.executable, str(EXAMPLES_DIR / "client.py"), f"localhost:{PORT}"],
@@ -89,3 +89,29 @@ def test_client_roundtrip(server, env: dict[str, str]):
     assert "Analysis | offset=" in result.stdout
     assert "FINAL" in result.stdout
     assert "demo-session-0001" in result.stdout, "stub server should return its hardcoded session id"
+
+
+def test_phone_call_wav_roundtrip(server, env: dict[str, str]):
+    """phone_call.py reads a real WAV fixture and streams it to the server."""
+    fixture = REPO_ROOT / "examples" / "audio" / "fixtures" / "test_call.wav"
+    assert fixture.is_file(), f"missing test fixture: {fixture}"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(EXAMPLES_DIR / "phone_call.py"),
+            "--audio", str(fixture),
+            "--duration", "1",
+            "--chunk-ms", "100",
+            "--target", f"localhost:{PORT}",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, f"phone_call failed: stderr={result.stderr}"
+    # The header line confirms the WAV reader parsed sr/channels correctly.
+    assert "8000Hz/1ch" in result.stdout, f"WAV reader didn't pick up 8 kHz mono:\n{result.stdout}"
+    assert "📞 Session:" in result.stdout
+    assert "Call ended" in result.stdout
