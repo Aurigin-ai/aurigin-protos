@@ -137,26 +137,7 @@ For `publish-codeartifact.yml` to authenticate (it uses GitHub OIDC, not a stati
 
 `publish.yml` only needs the workflow's auto-issued `GITHUB_TOKEN` — no setup.
 
-#### Local dry-runs
-
-Useful when CI is unavailable or you want to test a publish script change before tagging. Each script reads env vars and shells out the same way the workflow would:
-
-```bash
-# AWS CodeArtifact (values for this repo's setup)
-export AURIGIN_CA_DOMAIN=aurigin-ai-domain \
-       AURIGIN_CA_DOMAIN_OWNER=717279723333 \
-       AURIGIN_CA_REPO=aurigin-shared \
-       AWS_REGION=eu-west-1
-make publish-codeartifact      # = publish-ts-codeartifact + publish-py-codeartifact
-
-# GitHub Packages + Release
-export GITHUB_TOKEN=$(gh auth token) \
-       GITHUB_REPO=Aurigin-ai/aurigin-protos GITHUB_TAG=v0.1.0
-make publish-github            # = publish-ts-github + publish-py-github
-
-# Both at once (CodeArtifact first, then GitHub)
-make publish
-```
+> Tip: `make info` prints the repo's CodeArtifact and GitHub Packages configuration in one place — handy for `aws codeartifact login` from a developer machine.
 
 ## Consuming the packages
 
