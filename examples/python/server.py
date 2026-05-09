@@ -84,4 +84,5 @@ def serve(port: int = 50051) -> None:
 
 
 if __name__ == "__main__":
-    serve()
+    import os
+    serve(int(os.environ.get("PORT", "50051")))

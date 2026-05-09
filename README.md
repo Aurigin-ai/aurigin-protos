@@ -5,13 +5,34 @@
 [![Publish (CodeArtifact)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/publish-codeartifact.yml/badge.svg)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/publish-codeartifact.yml)
 [![Latest release](https://img.shields.io/github/v/release/Aurigin-ai/aurigin-protos?sort=semver)](https://github.com/Aurigin-ai/aurigin-protos/releases/latest)
 [![Built with buf](https://img.shields.io/badge/built%20with-buf-1A2B49?logo=buf&logoColor=white)](https://buf.build)
-[![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Node ≥ 22](https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Python ≥ 3.10](https://img.shields.io/badge/python-%E2%89%A53.10-3776AB?logo=python&logoColor=white)](https://www.python.org)
 
 Source of truth for Aurigin's gRPC service definitions. Generates and publishes language-specific client/server stubs to AWS CodeArtifact and GitHub Packages.
 
-- **TypeScript** package: `@aurigin/protos` (CodeArtifact) · `@<owner>/protos` (GitHub Packages)
+- **TypeScript** package: `@aurigin/protos` (CodeArtifact) · `@aurigin-ai/protos` (GitHub Packages)
 - **Python** package: `aurigin-protos` (CodeArtifact) · wheel attached to GitHub Releases
+
+## Latest published version
+
+The version stamped into the published packages always matches the most recent `v*` tag — see the **Latest release** badge above (it auto-updates from the [GitHub Releases page](https://github.com/Aurigin-ai/aurigin-protos/releases/latest)).
+
+Quick install (replace nothing — the registries always serve the latest):
+
+```bash
+# TypeScript via CodeArtifact (after `aws codeartifact login --tool npm ...`)
+npm install @aurigin/protos
+
+# TypeScript via GitHub Packages (after .npmrc setup, see "Consuming" below)
+npm install @aurigin-ai/protos
+
+# Python via CodeArtifact (after `aws codeartifact login --tool pip ...`)
+uv pip install aurigin-protos
+
+# Python wheel pinned to a specific GH Release tag (no PyPI on GitHub)
+gh release download v<x.y.z> -R Aurigin-ai/aurigin-protos -p '*.whl' \
+  && uv pip install ./aurigin_protos-*.whl
+```
 
 ## Layout
 
@@ -29,26 +50,33 @@ aurigin-protos/
 │   └── py/                   # Python package (grpcio + protobuf)
 │       ├── pyproject.toml
 │       ├── README.md         # shipped to PyPI/CodeArtifact page
-│       └── aurigin/          # generated (gitignored)
+│       ├── aurigin/          # generated (gitignored)
+│       └── twilio/           # generated (gitignored) — vendored Twilio types
 ├── examples/                 # consumer-side reference snippets
-│   ├── python/               # uv-managed: `uv run server` / `uv run client`
-│   └── typescript/           # npm-managed: `npm run server` / `npm run client`
+│   ├── audio/                # shared .wav fixtures (gitignored)
+│   ├── python/               # uv-managed: `uv run server|client|phone-call`
+│   └── typescript/           # npm-managed: `npm run server|client`
 ├── buf.yaml                  # buf config + lint rules
 ├── buf.gen.yaml              # codegen targets
 ├── Makefile                  # lint / generate / build / publish
 └── scripts/
-    ├── publish-ts.sh
-    └── publish-py.sh
+    ├── publish-ts-codeartifact.sh  # CodeArtifact (npm)
+    ├── publish-py-codeartifact.sh  # CodeArtifact (twine)
+    ├── publish-ts-github.sh        # GitHub Packages (npm)
+    └── publish-py-github.sh        # GitHub Release asset (wheel + sdist)
 ```
+
+> The `examples/audio/` dir is shared between the Python and TypeScript examples. Drop `.wav` fixtures in (gitignored) and the clients glob them automatically. `examples/audio/generate-conversation.sh` is a small `ffmpeg` helper that stitches the dir's other `.wav`s into a FreeSWITCH-style 8 kHz mono call.
 
 ## Prerequisites
 
 For maintainers (publishing):
 
 - `buf` — `brew install bufbuild/buf/buf`
-- Node 20+ — used to run `ts-proto` and build the TS package
+- Node 22+ — used to run `ts-proto` and build the TS package
 - Python 3.10+ with `build` + `twine` — `uv pip install build twine` (or `pip install build twine`)
-- AWS CLI v2 with credentials for the CodeArtifact account
+- AWS CLI v2 with credentials for the CodeArtifact account (CodeArtifact path only)
+- `gh` CLI authenticated against the `Aurigin-ai` org (GitHub Packages / Releases path only)
 
 For consumers, see [Consuming the packages](#consuming-the-packages) below.
 
@@ -78,63 +106,54 @@ make generate
 
 This installs `ts-proto` if needed, runs `buf generate` to produce both Python and TypeScript stubs, and creates `__init__.py` files for the Python package.
 
-### 4. Bump version
+### 4. Release (tag → both workflows fire in parallel)
 
-Update both:
-- `gen/ts/package.json` → `version`
-- `gen/py/pyproject.toml` → `version`
-
-(They should track each other so consumers can coordinate upgrades.)
-
-### 5. Publish
-
-There are two registries supported. Pick whichever your downstream services authenticate against — the same source tree drives both.
-
-#### Option A — AWS CodeArtifact
-
-Set the CodeArtifact env vars (replace placeholders with real values, or export them in your shell):
-
-```bash
-export AURIGIN_CA_DOMAIN=<domain-name>
-export AURIGIN_CA_DOMAIN_OWNER=<aws-account-id>
-export AURIGIN_CA_REPO=<repo-name>
-export AWS_REGION=eu-west-1
-export AWS_PROFILE=aurigin-shared        # whichever account hosts CodeArtifact
-```
-
-Then:
-
-```bash
-make publish-ts
-make publish-py
-# or both:
-make publish
-```
-
-The publish scripts call `aws codeartifact login` to write the auth token into `~/.npmrc` / `~/.pypirc`, then `npm publish` / `twine upload`. The TS package is published as `@aurigin/protos`.
-
-#### Option B — GitHub Packages + Releases (preferred for CI)
-
-GitHub Packages hosts the npm registry; **GitHub does not have a Python registry**, so the Python wheel + sdist are attached to a GitHub Release instead and consumers install via the release URL.
-
-The recommended path is the workflow at `.github/workflows/publish.yml`, which fires on `v*` tag push or via the Actions "Run workflow" button:
+Versions live **only in tags**. `gen/ts/package.json` and `gen/py/pyproject.toml` stay at `0.0.0` on `main`; the publish workflows stamp the version from the `v*` tag at publish time. Pushing one tag publishes to **all four** outputs simultaneously:
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-That single tag publishes:
-- **TS:** `@<repo-owner>/protos@0.1.0` to `https://npm.pkg.github.com` (the workflow rewrites the package name from `@aurigin/protos` to `@<owner>/protos` so it matches the GitHub Packages scope rule, without touching the source `package.json`).
-- **Python:** `aurigin_protos-0.1.0-py3-none-any.whl` + `aurigin_protos-0.1.0.tar.gz` attached to the `v0.1.0` GitHub Release.
+| Output | Workflow | Triggered by |
+|---|---|---|
+| `aurigin-protos@0.1.0` (npm) on AWS CodeArtifact | `.github/workflows/publish-codeartifact.yml` | `v*` tag push |
+| `aurigin-protos==0.1.0` (PyPI) on AWS CodeArtifact | `.github/workflows/publish-codeartifact.yml` | `v*` tag push |
+| `@<repo-owner>/protos@0.1.0` on GitHub Packages | `.github/workflows/publish.yml` | `v*` tag push |
+| `aurigin_protos-0.1.0-py3-none-any.whl` + `.tar.gz` attached to GitHub Release `v0.1.0` | `.github/workflows/publish.yml` | `v*` tag push |
 
-For local dry-runs, use:
+Both workflows also support manual runs via the Actions → Run workflow button (with a version input).
+
+#### Why two workflows
+
+GitHub Packages doesn't host a Python registry, so the Python wheel/sdist take the **GitHub Release asset** path instead. The TS scope is also rewritten at publish time: source `package.json` says `@aurigin/protos` (CodeArtifact-friendly); the GH Packages workflow rewrites it to `@aurigin-ai/protos` (matches the GitHub Packages scope rule) without touching the file on `main`.
+
+#### What you have to configure once
+
+For `publish-codeartifact.yml` to authenticate (it uses GitHub OIDC, not a static AWS key), add at repo Settings → Secrets and variables → Actions:
+
+- **Secret:** `AWS_ROLE_TO_ASSUME` — IAM role ARN trusting `repo:<owner>/<repo>:*` via the GitHub OIDC provider, with `codeartifact:GetAuthorizationToken` / `PublishPackageVersion` / `ReadFromRepository` and `sts:GetServiceBearerToken`.
+- **Variables:** `AWS_REGION`, `AURIGIN_CA_DOMAIN`, `AURIGIN_CA_DOMAIN_OWNER`, `AURIGIN_CA_REPO`.
+
+`publish.yml` only needs the workflow's auto-issued `GITHUB_TOKEN` — no setup.
+
+#### Local dry-runs
+
+Useful when CI is unavailable or you want to test a publish script change before tagging. Each script reads env vars and shells out the same way the workflow would:
 
 ```bash
-export GITHUB_TOKEN=<PAT with write:packages>     # or `gh auth token`
-export GITHUB_REPO=<owner>/<repo>                 # e.g. Aurigin-ai/aurigin-protos
-export GITHUB_TAG=v0.1.0
-make publish-github
+# AWS CodeArtifact
+export AURIGIN_CA_DOMAIN=<domain> AURIGIN_CA_DOMAIN_OWNER=<acct-id> \
+       AURIGIN_CA_REPO=<repo>     AWS_REGION=eu-west-1
+make publish-codeartifact      # = publish-ts-codeartifact + publish-py-codeartifact
+
+# GitHub Packages + Release
+export GITHUB_TOKEN=$(gh auth token) \
+       GITHUB_REPO=Aurigin-ai/aurigin-protos GITHUB_TAG=v0.1.0
+make publish-github            # = publish-ts-github + publish-py-github
+
+# Both at once (CodeArtifact first, then GitHub)
+make publish
 ```
 
 ## Consuming the packages
@@ -153,25 +172,29 @@ aws codeartifact login --tool npm \
 npm install @aurigin/protos
 ```
 
-**From GitHub Packages** (`@<owner>/protos`):
+**From GitHub Packages** (`@aurigin-ai/protos`):
 
 Add to your project's `.npmrc`:
 
 ```
-@<owner>:registry=https://npm.pkg.github.com
+@aurigin-ai:registry=https://npm.pkg.github.com
 //npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
 ```
 
 then:
 
 ```bash
-npm install @<owner>/protos
+npm install @aurigin-ai/protos
 ```
 
-In both cases:
+Either install gives the same generated code under the registry's scope. Substitute the scope you used when you import:
 
 ```ts
-import { DeepfakeDetectionClient } from "@<scope>/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+// CodeArtifact:
+import { DeepfakeDetectionClient } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+
+// GitHub Packages:
+import { DeepfakeDetectionClient } from "@aurigin-ai/protos/aurigin/deepfake_detection/v1/deepfake_detection";
 ```
 
 Full server + client snippets: [examples/typescript/](examples/typescript/).
@@ -193,11 +216,11 @@ uv pip install aurigin-protos
 
 For project-managed deps, declare the CodeArtifact index in `pyproject.toml` — see [examples/README.md](examples/README.md#option-b--project-managed-pyprojecttoml) for the full snippet.
 
-**From a GitHub Release** (no PyPI registry on GitHub Packages):
+**From a GitHub Release** (no PyPI registry on GitHub Packages). Pick a tag from [the Releases page](https://github.com/Aurigin-ai/aurigin-protos/releases/latest) (badge at the top of this README is always current) and substitute it for `<x.y.z>`:
 
 ```bash
 uv pip install \
-  "https://github.com/<owner>/<repo>/releases/download/v0.1.0/aurigin_protos-0.1.0-py3-none-any.whl"
+  "https://github.com/Aurigin-ai/aurigin-protos/releases/download/v<x.y.z>/aurigin_protos-<x.y.z>-py3-none-any.whl"
 ```
 
 Or in `pyproject.toml`:
@@ -205,11 +228,19 @@ Or in `pyproject.toml`:
 ```toml
 [project]
 dependencies = [
-    "aurigin-protos @ https://github.com/<owner>/<repo>/releases/download/v0.1.0/aurigin_protos-0.1.0-py3-none-any.whl",
+    "aurigin-protos @ https://github.com/Aurigin-ai/aurigin-protos/releases/download/v<x.y.z>/aurigin_protos-<x.y.z>-py3-none-any.whl",
 ]
 ```
 
-For private repos, set up `GH_TOKEN` and use the GitHub API URL pattern documented at [docs.github.com/en/rest/releases/assets](https://docs.github.com/en/rest/releases/assets), or fetch the asset with `gh release download` first.
+For private repos (or to always grab the latest without hardcoding), use `gh release download`:
+
+```bash
+gh release download v<x.y.z> -R Aurigin-ai/aurigin-protos -p '*.whl' \
+  && uv pip install ./aurigin_protos-*.whl
+# Or, omit the tag to download from the latest release:
+gh release download -R Aurigin-ai/aurigin-protos -p '*.whl' \
+  && uv pip install ./aurigin_protos-*.whl
+```
 
 ```python
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2, deepfake_detection_pb2_grpc
@@ -218,9 +249,29 @@ from twilio.tme.extensions.common.v1 import audio_buffer_pb2
 
 Full server + client snippets: [examples/python/](examples/python/).
 
+## Git workflow
+
+A few conventions enforced at the repo level — worth knowing before opening a PR:
+
+- **PR-only.** Direct pushes to `main` are blocked by branch protection. Push your work to a feature branch and open a PR.
+- **Squash-merge only.** "Create a merge commit" and "Rebase and merge" are disabled. Each merge produces exactly one commit on `main`, with the **PR title as the subject** and the **PR body as the message body** — pick descriptive PR titles, they become permanent history.
+- **Branches auto-delete on merge.** Don't worry about cleanup; GitHub removes the source branch the moment the PR merges.
+- **CI must be green.** `buf lint + breaking + format`, `TypeScript build`, `Python build + import smoke test`, and `shellcheck publish scripts` are required status checks. `buf breaking` runs against `main`, so a wire-incompatible proto change will fail CI unless it's intentional and reviewed.
+- **PR template.** `.github/pull_request_template.md` pre-fills sections for summary, changes, wire/API impact (additive vs breaking — please be honest), and verification. Reviewers rely on the wire-impact tickbox to gate downstream upgrades.
+- **Versioning happens in publish workflows, not on `main`.** `gen/ts/package.json` and `gen/py/pyproject.toml` stay at `0.0.0` in the source tree; the version is stamped in by `publish.yml` / `publish-codeartifact.yml` from the `v*` tag that triggered the run.
+
 ## Adding a new service
 
-1. Create `proto/<package-path>/<service>.proto` (file path must mirror the proto `package`)
-2. `make lint && make generate` — verify it builds
-3. Bump versions in `gen/ts/package.json` and `gen/py/pyproject.toml`
-4. `make publish`
+1. Create `proto/<package-path>/<service>.proto` (file path must mirror the proto `package`).
+2. `make lint` — fail fast on naming, package, version-suffix and other STANDARD-rule violations before generating anything.
+3. `make generate` — produce Python and TypeScript stubs.
+4. Wire the new RPC into the example server and at least one example client in **both** languages (`examples/python/` and `examples/typescript/`). Stub logic only — no real ML in this repo.
+5. Add an end-to-end smoke test for the new RPC in **both** test suites (`examples/python/tests/test_smoke.py`, `examples/typescript/tests/smoke.test.ts`). The existing `DetectDeepfake` test is the template.
+6. Run everything locally before pushing:
+   ```bash
+   make lint && make generate && \
+     pytest examples/python/tests/ && \
+     (cd examples/typescript && npm test)
+   ```
+7. Open a PR. CI runs `buf lint + breaking + format`, both language builds, and both end-to-end smoke tests.
+8. After merge, tag the release: `git tag v<x.y.z> && git push --tags`. Both publish workflows fire in parallel — the same tag pushes to **all four** outputs (CodeArtifact npm + Py, GitHub Packages npm, Python wheel as GH Release asset). Source files stay at `0.0.0`; the workflows stamp the version from the tag.

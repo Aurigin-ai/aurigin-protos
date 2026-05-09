@@ -81,7 +81,7 @@ const impl: DeepfakeDetectionServer = {
 const server = new Server();
 server.addService(DeepfakeDetectionService, impl);
 
-const port = 50051;
+const port = Number(process.env.PORT ?? 50051);
 server.bindAsync(
   `0.0.0.0:${port}`,
   ServerCredentials.createInsecure(),
