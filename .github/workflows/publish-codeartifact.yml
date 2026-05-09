@@ -32,6 +32,12 @@ permissions:
   id-token: write   # required for OIDC role assumption
   contents: read
 
+# One in-flight run per tag/version. A second push of the same tag (or a
+# manual dispatch racing a tag push) queues behind the first.
+concurrency:
+  group: publish-codeartifact-${{ github.event.inputs.version || github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -42,6 +48,37 @@ jobs:
       AURIGIN_CA_REPO: ${{ vars.AURIGIN_CA_REPO }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Need history to verify the tag points at a commit on main.
+          fetch-depth: 0
+
+      - name: Verify tag is on main
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/heads/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" main; then
+            echo "::error::Tag $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main." >&2
+            echo "::error::Releases must be tagged on commits that have landed on main." >&2
+            exit 1
+          fi
+
+      - name: Resolve and validate version
+        id: ver
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          # Reject anything that isn't strict semver (numbers + optional
+          # pre-release / build metadata). Catches typos like v0.1 or
+          # v0.1.0-rc? before twine/npm bail out with confusing errors.
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version '$VERSION' is not valid semver (X.Y.Z[-prerelease][+build])." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version resolved: $VERSION"
 
       - uses: bufbuild/buf-setup-action@v1
         with:
@@ -54,16 +91,6 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-
-      - name: Resolve version
-        id: ver
-        run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          else
-            VERSION="${GITHUB_REF_NAME#v}"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Install Python build deps
         run: pip install --upgrade build twine
@@ -97,3 +124,16 @@ jobs:
 
       - name: Publish Python to CodeArtifact
         run: bash scripts/publish-py-codeartifact.sh
+
+      - name: Step summary
+        run: |
+          {
+            echo "## Published to AWS CodeArtifact"
+            echo ""
+            echo "| Package | Version |"
+            echo "|---|---|"
+            echo "| \`@aurigin/protos\` (npm) | \`${{ steps.ver.outputs.version }}\` |"
+            echo "| \`aurigin-protos\` (PyPI) | \`${{ steps.ver.outputs.version }}\` |"
+            echo ""
+            echo "**Domain:** \`${AURIGIN_CA_DOMAIN}\` · **Repository:** \`${AURIGIN_CA_REPO}\` · **Region:** \`${AWS_REGION}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
