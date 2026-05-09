@@ -6,7 +6,8 @@
   "description": "Reference server/client examples for @aurigin/protos.",
   "scripts": {
     "server": "tsx server.ts",
-    "client": "tsx client.ts"
+    "client": "tsx client.ts",
+    "phone-call": "tsx phone_call.ts"
   },
   "dependencies": {
     "@aurigin/protos": "*",

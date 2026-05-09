@@ -158,7 +158,8 @@ npm run client    # in another
 
 Files:
 - `typescript/server.ts` — `Server` from `@grpc/grpc-js` + `addService(DeepfakeDetectionService, impl)` with bidi stream handling
-- `typescript/client.ts` — streams every `.wav` in `examples/typescript/audio/` (one session per file) using `DeepfakeDetectionClient.detectDeepfake()`; falls back to 6 × 500 ms of silence when the dir is empty. The `audio/` dir is gitignored.
+- `typescript/client.ts` — streams every `.wav` in `examples/audio/` (one session per file) using `DeepfakeDetectionClient.detectDeepfake()`; falls back to 6 × 500 ms of silence when the dir is empty
+- `typescript/phone_call.ts` — TS twin of `python/phone_call.py`: file mode (paced WAV looped to fill `--duration`) and FIFO mode (`--fifo PATH` `--codec mulaw|pcm16`). Built-in μ-law lookup table replaces `audioop`. Run with `npm run phone-call -- --audio ../audio/your.wav`
 
 ### Notes on ts-proto naming
 
