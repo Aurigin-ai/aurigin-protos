@@ -32,8 +32,9 @@ aurigin-protos/
 │       ├── aurigin/          # generated (gitignored)
 │       └── twilio/           # generated (gitignored) — vendored Twilio types
 ├── examples/                 # consumer-side reference snippets
-│   ├── python/               # uv-managed: `uv run server` / `uv run client`
-│   └── typescript/           # npm-managed: `npm run server` / `npm run client`
+│   ├── audio/                # shared .wav fixtures (gitignored)
+│   ├── python/               # uv-managed: `uv run server|client|phone-call`
+│   └── typescript/           # npm-managed: `npm run server|client`
 ├── buf.yaml                  # buf config + lint rules
 ├── buf.gen.yaml              # codegen targets
 ├── Makefile                  # lint / generate / build / publish
@@ -43,6 +44,8 @@ aurigin-protos/
     ├── publish-ts-github.sh  # GitHub Packages (npm)
     └── publish-py-github.sh  # GitHub Release asset (wheel + sdist)
 ```
+
+> The `examples/audio/` dir is shared between the Python and TypeScript examples. Drop `.wav` fixtures in (gitignored) and the clients glob them automatically. `examples/audio/generate-conversation.sh` is a small `ffmpeg` helper that stitches the dir's other `.wav`s into a FreeSWITCH-style 8 kHz mono call.
 
 ## Prerequisites
 

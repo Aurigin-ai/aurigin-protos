@@ -1,8 +1,8 @@
 """Minimal gRPC client using the generated aurigin-protos package.
 
-If `audio/` (next to this script) contains .wav files, opens one session per
-file and streams its PCM through DetectDeepfake. Otherwise streams 3 s of
-silence as a connectivity smoke-test.
+If `examples/audio/` contains .wav files, opens one session per file and
+streams its PCM through DetectDeepfake. Otherwise streams 3 s of silence
+as a connectivity smoke-test.
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ def _run_session(stub, request_iter, label: str) -> None:
 
 
 def main(target: str = "localhost:50051") -> None:
-    audio_dir = Path(__file__).resolve().parent / "audio"
+    audio_dir = Path(__file__).resolve().parent.parent / "audio"
     wavs = sorted(audio_dir.glob("*.wav")) if audio_dir.is_dir() else []
 
     with grpc.insecure_channel(target) as channel:

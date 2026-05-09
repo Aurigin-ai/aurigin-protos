@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Stitch every .wav in examples/python/audio/ into a single 8 kHz mono
-# S16LE WAV that mimics a FreeSWITCH-style narrowband phone call: each
-# input chunk becomes a "turn", separated by a short silence to suggest
+# Stitch every .wav in examples/audio/ into a single 8 kHz mono S16LE
+# WAV that mimics a FreeSWITCH-style narrowband phone call: each input
+# chunk becomes a "turn", separated by a short silence to suggest
 # turn-taking, with the whole thing resampled to G.711-compatible
 # 8 kHz / mono / 16-bit PCM (linear, not companded).
 #
-# Output: examples/python/audio/conversation_8khz.wav
+# Output: examples/audio/conversation_8khz.wav (next to this script)
 #
 # Usage:
-#   bash examples/python/generate_conversation.sh [--gap-ms 500] [--repeat 1]
+#   bash examples/audio/generate-conversation.sh [--gap-ms 500] [--repeat 1]
 #
 # Prerequisites: ffmpeg.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AUDIO_DIR="$SCRIPT_DIR/audio"
+AUDIO_DIR="$SCRIPT_DIR"
 OUT="$AUDIO_DIR/conversation_8khz.wav"
 
 GAP_MS=500

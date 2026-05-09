@@ -1,8 +1,8 @@
 // Minimal gRPC client using the generated @aurigin/protos package.
 //
-// If `audio/` (next to this script) contains .wav files, opens one session
-// per file and streams its PCM through DetectDeepfake. Otherwise streams
-// 3 s of silence as a connectivity smoke-test.
+// If `examples/audio/` contains .wav files, opens one session per file
+// and streams its PCM through DetectDeepfake. Otherwise streams 3 s of
+// silence as a connectivity smoke-test.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -125,7 +125,7 @@ function runSession(
 
 async function main() {
   const target = process.argv[2] ?? "localhost:50051";
-  const audioDir = path.join(__dirname, "audio");
+  const audioDir = path.join(__dirname, "..", "audio");
   const wavs = fs.existsSync(audioDir)
     ? fs.readdirSync(audioDir).filter((f) => f.endsWith(".wav")).sort().map((f) => path.join(audioDir, f))
     : [];

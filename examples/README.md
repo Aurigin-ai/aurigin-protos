@@ -78,19 +78,23 @@ Files:
 - `python/client.py` — streams every `.wav` in `examples/python/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty.
 - `python/phone_call.py` — simulates a live mobile call: streams a single audio file looped to fill `--duration` (default 30 s) at real-time pace, in 100 ms frames, using `grpc.aio` so analysis events print as they arrive.
 
+### Audio fixtures
+
+The `examples/audio/` directory is shared between the Python and TypeScript examples — both clients glob it for `*.wav`. The directory is gitignored, so drop fixtures in locally without worrying about committing customer audio.
+
 ### Generating a FreeSWITCH-style conversation
 
-`examples/python/generate_conversation.sh` stitches every `.wav` already in `examples/python/audio/` into a single **8 kHz mono S16LE** WAV (the FreeSWITCH narrowband default) with brief silence between turns, so you can drive the phone-call simulator with realistic telephony cadence and bandwidth.
+`examples/audio/generate-conversation.sh` (colocated with the audio it produces) stitches every other `.wav` in the same dir into a single **8 kHz mono S16LE** WAV — the FreeSWITCH narrowband default — with brief silence between turns. Drives the phone-call simulator with realistic telephony cadence and bandwidth.
 
 ```bash
-# Defaults: 500 ms gap between turns, no looping. Output: audio/conversation_8khz.wav
-bash examples/python/generate_conversation.sh
+# Defaults: 500 ms gap between turns, no looping. Output: examples/audio/conversation_8khz.wav
+bash examples/audio/generate-conversation.sh
 
 # Longer gap, repeat the whole conversation 3 times
-bash examples/python/generate_conversation.sh --gap-ms 800 --repeat 3
+bash examples/audio/generate-conversation.sh --gap-ms 800 --repeat 3
 ```
 
-Requires `ffmpeg` on `$PATH`. Output file is gitignored along with the rest of `audio/`.
+Requires `ffmpeg` on `$PATH`. The output `.wav` is gitignored along with all other audio in the dir; the script itself is committed.
 
 ### Phone-call simulation
 

@@ -19,7 +19,7 @@ CLI:
         [--chunk-ms 100] [--target localhost:50051]
 
 If --audio is not provided, picks the first .wav in
-`examples/python/audio/`. The dir is gitignored — drop a fixture in.
+`examples/audio/`. The dir is gitignored — drop a fixture in.
 """
 
 from __future__ import annotations
@@ -53,12 +53,12 @@ def _resolve_audio(arg: Path | None) -> Path:
         if not arg.is_file():
             raise FileNotFoundError(arg)
         return arg
-    audio_dir = Path(__file__).resolve().parent / "audio"
+    audio_dir = Path(__file__).resolve().parent.parent / "audio"
     wavs = sorted(audio_dir.glob("*.wav")) if audio_dir.is_dir() else []
     if not wavs:
         raise SystemExit(
-            "No --audio supplied and no .wav files found in examples/python/audio/. "
-            "Drop a 16-bit PCM WAV in audio/ or pass one with --audio."
+            "No --audio supplied and no .wav files found in examples/audio/. "
+            "Drop a 16-bit PCM WAV in examples/audio/ or pass one with --audio."
         )
     return wavs[0]
 
