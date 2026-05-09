@@ -7,7 +7,7 @@ making changes — it'll stop you re-discovering rules the hard way.
 
 Source of truth for Aurigin's gRPC service definitions. Generates Python
 (`aurigin-protos`) and TypeScript (`@aurigin/protos` on CodeArtifact,
-`@<owner>/protos` on GitHub Packages) client/server stubs. Currently exposes
+`@aurigin-ai/protos` on GitHub Packages) client/server stubs. Currently exposes
 one service: `aurigin.deepfake_detection.v1.DeepfakeDetection.DetectDeepfake`
 (bidi streaming), with a vendored `twilio.tme.extensions.common.v1.AudioBuffer`
 message used as the audio carrier so we interop with Twilio Media Extensions.

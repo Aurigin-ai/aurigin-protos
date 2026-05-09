@@ -18,7 +18,7 @@ aws codeartifact login --tool npm \
 npm install @aurigin/protos @grpc/grpc-js
 ```
 
-### Option B — GitHub Packages (`@<owner>/protos`, e.g. `@aurigin-ai/protos`)
+### Option B — GitHub Packages (`@aurigin-ai/protos`)
 
 Add to your project's `.npmrc`:
 
@@ -62,10 +62,12 @@ Server-side: import `DeepfakeDetectionService` (the service definition) and `Dee
 | `service DeepfakeDetection` | `DeepfakeDetectionService` / `DeepfakeDetectionServer` / `DeepfakeDetectionClient` |
 | `oneof response { ... }` | discriminated optional fields on the message (e.g. `response.analysisResult`) |
 
-Currently published modules (substitute `@<scope>` for whichever scope matches the registry you installed from):
+Currently published modules — same files under either scope, depending on which registry you installed from:
 
-- `@<scope>/protos/aurigin/deepfake_detection/v1/deepfake_detection`
-- `@<scope>/protos/twilio/tme/extensions/common/v1/audio_buffer` (vendored Twilio Media Extensions message)
+| Registry | Scope | Deepfake detection module | Twilio AudioBuffer module |
+|---|---|---|---|
+| AWS CodeArtifact | `@aurigin` | `@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection` | `@aurigin/protos/twilio/tme/extensions/common/v1/audio_buffer` |
+| GitHub Packages | `@aurigin-ai` | `@aurigin-ai/protos/aurigin/deepfake_detection/v1/deepfake_detection` | `@aurigin-ai/protos/twilio/tme/extensions/common/v1/audio_buffer` |
 
 ## Source
 

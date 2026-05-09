@@ -18,7 +18,7 @@ help:
 	@echo "    publish-codeartifact    Both of the above"
 	@echo ""
 	@echo "  Publishing — GitHub Packages / Releases:"
-	@echo "    publish-ts-github       Publish @<owner>/protos to GitHub Packages (npm)"
+	@echo "    publish-ts-github       Publish @aurigin-ai/protos to GitHub Packages (npm)"
 	@echo "    publish-py-github       Build wheel + sdist and attach to GitHub Release"
 	@echo "    publish-github          Both of the above"
 	@echo ""

@@ -10,7 +10,7 @@
 
 Source of truth for Aurigin's gRPC service definitions. Generates and publishes language-specific client/server stubs to AWS CodeArtifact and GitHub Packages.
 
-- **TypeScript** package: `@aurigin/protos` (CodeArtifact) · `@<owner>/protos` (GitHub Packages)
+- **TypeScript** package: `@aurigin/protos` (CodeArtifact) · `@aurigin-ai/protos` (GitHub Packages)
 - **Python** package: `aurigin-protos` (CodeArtifact) · wheel attached to GitHub Releases
 
 ## Latest published version
@@ -126,7 +126,7 @@ Both workflows also support manual runs via the Actions → Run workflow button 
 
 #### Why two workflows
 
-GitHub Packages doesn't host a Python registry, so the Python wheel/sdist take the **GitHub Release asset** path instead. The TS scope is also rewritten at publish time: source `package.json` says `@aurigin/protos` (CodeArtifact-friendly); the GH Packages workflow rewrites it to `@<owner>/protos` (matches the GitHub Packages scope rule) without touching the file on `main`.
+GitHub Packages doesn't host a Python registry, so the Python wheel/sdist take the **GitHub Release asset** path instead. The TS scope is also rewritten at publish time: source `package.json` says `@aurigin/protos` (CodeArtifact-friendly); the GH Packages workflow rewrites it to `@aurigin-ai/protos` (matches the GitHub Packages scope rule) without touching the file on `main`.
 
 #### What you have to configure once
 
@@ -172,25 +172,29 @@ aws codeartifact login --tool npm \
 npm install @aurigin/protos
 ```
 
-**From GitHub Packages** (`@<owner>/protos`):
+**From GitHub Packages** (`@aurigin-ai/protos`):
 
 Add to your project's `.npmrc`:
 
 ```
-@<owner>:registry=https://npm.pkg.github.com
+@aurigin-ai:registry=https://npm.pkg.github.com
 //npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
 ```
 
 then:
 
 ```bash
-npm install @<owner>/protos
+npm install @aurigin-ai/protos
 ```
 
-In both cases:
+Either install gives the same generated code under the registry's scope. Substitute the scope you used when you import:
 
 ```ts
-import { DeepfakeDetectionClient } from "@<scope>/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+// CodeArtifact:
+import { DeepfakeDetectionClient } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+
+// GitHub Packages:
+import { DeepfakeDetectionClient } from "@aurigin-ai/protos/aurigin/deepfake_detection/v1/deepfake_detection";
 ```
 
 Full server + client snippets: [examples/typescript/](examples/typescript/).
