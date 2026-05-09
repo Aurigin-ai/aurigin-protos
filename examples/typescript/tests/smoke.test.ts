@@ -75,7 +75,7 @@ test("client streams silence and roundtrips analyses", async () => {
   await withServer(async () => {
     const { code, stdout, stderr } = await runProc(
       path.join(EXAMPLES_DIR, "client.ts"),
-      [`localhost:${PORT}`],
+      ["--target", `localhost:${PORT}`],
     );
     assert.equal(code, 0, `client failed: stderr=${stderr}`);
     assert.match(stdout, /Session: demo-session-0001/);

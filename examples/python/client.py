@@ -3,11 +3,14 @@
 If `examples/audio/` contains .wav files, opens one session per file and
 streams its PCM through DetectDeepfake. Otherwise streams 3 s of silence
 as a connectivity smoke-test.
+
+CLI:
+    python client.py [--target HOST:PORT]
 """
 
 from __future__ import annotations
 
-import sys
+import argparse
 import wave
 from pathlib import Path
 
@@ -100,4 +103,7 @@ def main(target: str = "localhost:50051") -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "localhost:50051")
+    parser = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
+    parser.add_argument("--target", default="localhost:50051", help="gRPC server host:port (default: localhost:50051)")
+    args = parser.parse_args()
+    main(args.target)

@@ -78,7 +78,7 @@ def server(env: dict[str, str]):
 def test_client_silence_roundtrip(server, env: dict[str, str]):
     """The stub client streams 3 s of silence and prints session/analysis/final."""
     result = subprocess.run(
-        [sys.executable, str(EXAMPLES_DIR / "client.py"), f"localhost:{PORT}"],
+        [sys.executable, str(EXAMPLES_DIR / "client.py"), "--target", f"localhost:{PORT}"],
         env=env,
         capture_output=True,
         text=True,

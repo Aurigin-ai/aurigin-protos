@@ -75,7 +75,7 @@ To run against real audio (real ML server required, e.g. backend-app's gRPC serv
 
 Files:
 - `python/server.py` — `DeepfakeDetectionServicer` impl with stub analysis, listens on `[::]:50051`
-- `python/client.py` — streams every `.wav` in `examples/python/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty.
+- `python/client.py` — streams every `.wav` in `examples/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` to point at a non-default server (default `localhost:50051`).
 - `python/phone_call.py` — simulates a live mobile call. Two input modes:
   - **File mode** (default): streams a WAV file looped to fill `--duration` (default 30 s) at real-time pace.
   - **FIFO mode** (`--fifo /path/to/pipe` `--codec mulaw|pcm16`): reads from a named pipe until the writer closes — designed for FreeSWITCH `record_session` G.711 μ-law output. Pacing is implicit (writer-driven), no `--duration` cap by default.
@@ -158,7 +158,7 @@ npm run client    # in another
 
 Files:
 - `typescript/server.ts` — `Server` from `@grpc/grpc-js` + `addService(DeepfakeDetectionService, impl)` with bidi stream handling
-- `typescript/client.ts` — streams every `.wav` in `examples/audio/` (one session per file) using `DeepfakeDetectionClient.detectDeepfake()`; falls back to 6 × 500 ms of silence when the dir is empty
+- `typescript/client.ts` — streams every `.wav` in `examples/audio/` (one session per file) using `DeepfakeDetectionClient.detectDeepfake()`; falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` (e.g. `npm run client -- --target localhost:50051`) to point at a non-default server.
 - `typescript/phone_call.ts` — TS twin of `python/phone_call.py`: file mode (paced WAV looped to fill `--duration`) and FIFO mode (`--fifo PATH` `--codec mulaw|pcm16`). Built-in μ-law lookup table replaces `audioop`. Run with `npm run phone-call -- --audio ../audio/your.wav`
 
 ### Notes on ts-proto naming
