@@ -85,67 +85,54 @@ make generate
 
 This installs `ts-proto` if needed, runs `buf generate` to produce both Python and TypeScript stubs, and creates `__init__.py` files for the Python package.
 
-### 4. Bump version
+### 4. Release (tag → both workflows fire in parallel)
 
-Update both:
-- `gen/ts/package.json` → `version`
-- `gen/py/pyproject.toml` → `version`
-
-(They should track each other so consumers can coordinate upgrades.)
-
-### 5. Publish
-
-There are two registries supported. Pick whichever your downstream services authenticate against — the same source tree drives both.
-
-#### Option A — AWS CodeArtifact
-
-Set the CodeArtifact env vars (replace placeholders with real values, or export them in your shell):
-
-```bash
-export AURIGIN_CA_DOMAIN=<domain-name>
-export AURIGIN_CA_DOMAIN_OWNER=<aws-account-id>
-export AURIGIN_CA_REPO=<repo-name>
-export AWS_REGION=eu-west-1
-export AWS_PROFILE=aurigin-shared        # whichever account hosts CodeArtifact
-```
-
-Then:
-
-```bash
-make publish-ts
-make publish-py
-# or both:
-make publish-codeartifact
-```
-
-The publish scripts call `aws codeartifact login` to write the auth token into `~/.npmrc` / `~/.pypirc`, then `npm publish` / `twine upload`. The TS package is published as `@aurigin/protos`.
-
-To publish to **both** CodeArtifact and GitHub Packages/Releases in a single
-shot from your laptop, `make publish` chains them (CodeArtifact first, then
-GitHub). For CI, prefer the dedicated workflows — see Option B below.
-
-#### Option B — GitHub Packages + Releases (preferred for CI)
-
-GitHub Packages hosts the npm registry; **GitHub does not have a Python registry**, so the Python wheel + sdist are attached to a GitHub Release instead and consumers install via the release URL.
-
-The recommended path is the workflow at `.github/workflows/publish.yml`, which fires on `v*` tag push or via the Actions "Run workflow" button:
+Versions live **only in tags**. `gen/ts/package.json` and `gen/py/pyproject.toml` stay at `0.0.0` on `main`; the publish workflows stamp the version from the `v*` tag at publish time. Pushing one tag publishes to **all four** outputs simultaneously:
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-That single tag publishes:
-- **TS:** `@<repo-owner>/protos@0.1.0` to `https://npm.pkg.github.com` (the workflow rewrites the package name from `@aurigin/protos` to `@<owner>/protos` so it matches the GitHub Packages scope rule, without touching the source `package.json`).
-- **Python:** `aurigin_protos-0.1.0-py3-none-any.whl` + `aurigin_protos-0.1.0.tar.gz` attached to the `v0.1.0` GitHub Release.
+| Output | Workflow | Triggered by |
+|---|---|---|
+| `aurigin-protos@0.1.0` (npm) on AWS CodeArtifact | `.github/workflows/publish-codeartifact.yml` | `v*` tag push |
+| `aurigin-protos==0.1.0` (PyPI) on AWS CodeArtifact | `.github/workflows/publish-codeartifact.yml` | `v*` tag push |
+| `@<repo-owner>/protos@0.1.0` on GitHub Packages | `.github/workflows/publish.yml` | `v*` tag push |
+| `aurigin_protos-0.1.0-py3-none-any.whl` + `.tar.gz` attached to GitHub Release `v0.1.0` | `.github/workflows/publish.yml` | `v*` tag push |
 
-For local dry-runs, use:
+Both workflows also support manual runs via the Actions → Run workflow button (with a version input).
+
+#### Why two workflows
+
+GitHub Packages doesn't host a Python registry, so the Python wheel/sdist take the **GitHub Release asset** path instead. The TS scope is also rewritten at publish time: source `package.json` says `@aurigin/protos` (CodeArtifact-friendly); the GH Packages workflow rewrites it to `@<owner>/protos` (matches the GitHub Packages scope rule) without touching the file on `main`.
+
+#### What you have to configure once
+
+For `publish-codeartifact.yml` to authenticate (it uses GitHub OIDC, not a static AWS key), add at repo Settings → Secrets and variables → Actions:
+
+- **Secret:** `AWS_ROLE_TO_ASSUME` — IAM role ARN trusting `repo:<owner>/<repo>:*` via the GitHub OIDC provider, with `codeartifact:GetAuthorizationToken` / `PublishPackageVersion` / `ReadFromRepository` and `sts:GetServiceBearerToken`.
+- **Variables:** `AWS_REGION`, `AURIGIN_CA_DOMAIN`, `AURIGIN_CA_DOMAIN_OWNER`, `AURIGIN_CA_REPO`.
+
+`publish.yml` only needs the workflow's auto-issued `GITHUB_TOKEN` — no setup.
+
+#### Local dry-runs
+
+Useful when CI is unavailable or you want to test a publish script change before tagging. Each script reads env vars and shells out the same way the workflow would:
 
 ```bash
-export GITHUB_TOKEN=<PAT with write:packages>     # or `gh auth token`
-export GITHUB_REPO=<owner>/<repo>                 # e.g. Aurigin-ai/aurigin-protos
-export GITHUB_TAG=v0.1.0
-make publish-github
+# AWS CodeArtifact
+export AURIGIN_CA_DOMAIN=<domain> AURIGIN_CA_DOMAIN_OWNER=<acct-id> \
+       AURIGIN_CA_REPO=<repo>     AWS_REGION=eu-west-1
+make publish-codeartifact      # = publish-ts + publish-py
+
+# GitHub Packages + Release
+export GITHUB_TOKEN=$(gh auth token) \
+       GITHUB_REPO=Aurigin-ai/aurigin-protos GITHUB_TAG=v0.1.0
+make publish-github            # = publish-ts-github + publish-py-github
+
+# Both at once (CodeArtifact first, then GitHub)
+make publish
 ```
 
 ## Consuming the packages
@@ -254,4 +241,4 @@ A few conventions enforced at the repo level — worth knowing before opening a 
      (cd examples/typescript && npm test)
    ```
 7. Open a PR. CI runs `buf lint + breaking + format`, both language builds, and both end-to-end smoke tests.
-8. After merge, tag the release: `git tag v<x.y.z> && git push --tags`. The publish workflows stamp the version into both packages and push to CodeArtifact + GitHub Packages / Releases.
+8. After merge, tag the release: `git tag v<x.y.z> && git push --tags`. Both publish workflows fire in parallel — the same tag pushes to **all four** outputs (CodeArtifact npm + Py, GitHub Packages npm, Python wheel as GH Release asset). Source files stay at `0.0.0`; the workflows stamp the version from the tag.
