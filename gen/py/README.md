@@ -91,4 +91,4 @@ Currently published modules:
 
 ## Source
 
-This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/Aurigin-ai/aurigin-protos), then bump the version and republish via `make publish-py` (CodeArtifact) or `make publish-py-github` (GitHub Release).
+This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/Aurigin-ai/aurigin-protos), tag a release (`git tag v<x.y.z> && git push --tags`); both publish workflows fire in parallel and ship to CodeArtifact + GitHub Release. For local dry-runs, `make publish-py-codeartifact` (CodeArtifact) or `make publish-py-github` (GitHub Release).

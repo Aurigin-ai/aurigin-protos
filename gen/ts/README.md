@@ -69,4 +69,4 @@ Currently published modules (substitute `@<scope>` for whichever scope matches t
 
 ## Source
 
-This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/Aurigin-ai/aurigin-protos), then bump the version and republish via `make publish-ts` (CodeArtifact) or `make publish-ts-github` (GitHub Packages).
+This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/Aurigin-ai/aurigin-protos), tag a release (`git tag v<x.y.z> && git push --tags`); both publish workflows fire in parallel and ship to CodeArtifact + GitHub Packages. For local dry-runs, `make publish-ts-codeartifact` (CodeArtifact) or `make publish-ts-github` (GitHub Packages).

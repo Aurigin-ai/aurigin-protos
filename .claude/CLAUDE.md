@@ -23,7 +23,7 @@ examples/
   audio/generate-conversation.sh  # ffmpeg helper for FreeSWITCH-style 8 kHz call
   python/                         # Python example server/client + phone-call sim + tests
   typescript/                     # TS example server/client + phone-call sim + tests
-scripts/                          # publish-{ts,py}{,-github}.sh
+scripts/                          # publish-{ts,py}-{codeartifact,github}.sh
 .github/workflows/                # ci, publish (GH Packages), publish-codeartifact
 buf.yaml / buf.gen.yaml           # buf v2 config; STANDARD lint with SERVICE_SUFFIX exempted
 Makefile                          # lint / generate / build / publish
@@ -103,12 +103,13 @@ Concretely, for a new language `XYZ`:
    (CodeArtifact and the language's GitHub Packages support, if any). If
    GitHub Packages doesn't host that ecosystem (e.g., no PyPI), use the
    Release-asset pattern that `gen/py/README.md` documents.
-4. **`scripts/publish-xyz.sh`** and **`scripts/publish-xyz-github.sh`** —
-   one per registry, following the same env-var convention
-   (`AURIGIN_CA_*` for CodeArtifact, `GITHUB_TOKEN` / `GITHUB_REPO` /
-   `GITHUB_TAG` for GitHub).
-5. **`Makefile`** — add `build-xyz`, `publish-xyz`, `publish-xyz-github`
-   targets and update `help`.
+4. **`scripts/publish-xyz-codeartifact.sh`** and
+   **`scripts/publish-xyz-github.sh`** — one per registry, following the
+   same env-var convention (`AURIGIN_CA_*` for CodeArtifact,
+   `GITHUB_TOKEN` / `GITHUB_REPO` / `GITHUB_TAG` for GitHub).
+5. **`Makefile`** — add `build-xyz`, `publish-xyz-codeartifact`,
+   `publish-xyz-github` targets, fold them into the existing
+   `publish-codeartifact` / `publish-github` aggregates, and update `help`.
 6. **`.github/workflows/`** — add a CI job for the new language alongside
    the existing `python` / `typescript` jobs (build + import smoke test +
    end-to-end test). Add the same job to `publish.yml` and

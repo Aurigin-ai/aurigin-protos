@@ -84,7 +84,7 @@ jobs:
           npm run build
 
       - name: Publish TS to CodeArtifact
-        run: bash scripts/publish-ts.sh
+        run: bash scripts/publish-ts-codeartifact.sh
 
       - name: Stamp Python package version
         working-directory: gen/py
@@ -96,4 +96,4 @@ jobs:
           "
 
       - name: Publish Python to CodeArtifact
-        run: bash scripts/publish-py.sh
+        run: bash scripts/publish-py-codeartifact.sh

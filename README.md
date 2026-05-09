@@ -39,10 +39,10 @@ aurigin-protos/
 ├── buf.gen.yaml              # codegen targets
 ├── Makefile                  # lint / generate / build / publish
 └── scripts/
-    ├── publish-ts.sh         # CodeArtifact (npm)
-    ├── publish-py.sh         # CodeArtifact (twine)
-    ├── publish-ts-github.sh  # GitHub Packages (npm)
-    └── publish-py-github.sh  # GitHub Release asset (wheel + sdist)
+    ├── publish-ts-codeartifact.sh  # CodeArtifact (npm)
+    ├── publish-py-codeartifact.sh  # CodeArtifact (twine)
+    ├── publish-ts-github.sh        # GitHub Packages (npm)
+    └── publish-py-github.sh        # GitHub Release asset (wheel + sdist)
 ```
 
 > The `examples/audio/` dir is shared between the Python and TypeScript examples. Drop `.wav` fixtures in (gitignored) and the clients glob them automatically. `examples/audio/generate-conversation.sh` is a small `ffmpeg` helper that stitches the dir's other `.wav`s into a FreeSWITCH-style 8 kHz mono call.
@@ -124,7 +124,7 @@ Useful when CI is unavailable or you want to test a publish script change before
 # AWS CodeArtifact
 export AURIGIN_CA_DOMAIN=<domain> AURIGIN_CA_DOMAIN_OWNER=<acct-id> \
        AURIGIN_CA_REPO=<repo>     AWS_REGION=eu-west-1
-make publish-codeartifact      # = publish-ts + publish-py
+make publish-codeartifact      # = publish-ts-codeartifact + publish-py-codeartifact
 
 # GitHub Packages + Release
 export GITHUB_TOKEN=$(gh auth token) \
