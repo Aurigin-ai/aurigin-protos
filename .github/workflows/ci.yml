@@ -90,7 +90,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python build deps
-        run: pip install --upgrade build grpcio protobuf pytest
+        # pyyaml + jsonschema are needed by examples/python/sim/loader.py at
+        # server startup (scenario YAML + schema validation).
+        run: pip install --upgrade build grpcio protobuf pytest pyyaml jsonschema
 
       - name: Generate stubs
         run: make generate
