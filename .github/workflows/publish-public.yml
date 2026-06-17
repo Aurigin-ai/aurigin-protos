@@ -1,0 +1,151 @@
+name: Publish to public registries (PyPI + npm)
+
+# Manual promote-to-public publish for a version that has already been
+# released to the internal CodeArtifact channel via publish-codeartifact.yml.
+#
+# Triggered ONLY via the Actions "Run workflow" button — never automatic.
+# Pauses on the `public-release` GitHub Environment for human approval
+# before either registry sees a request.
+#
+# Publishes:
+#   - aurigin-protos  to https://pypi.org/project/aurigin-protos/   (PEP 740 attestations)
+#   - @aurigin/protos to https://www.npmjs.com/package/@aurigin/protos (sigstore provenance)
+#
+# Trust configuration (one-time, no secrets in this repo):
+#   - PyPI Trusted Publisher    → see infra/public/02-pypi-trusted-publisher.md
+#   - npm Trusted Publisher     → see infra/public/03-npm-oidc-publisher.md
+#   - GitHub Environment gate   → see infra/public/04-public-release-checklist.md
+#
+# No AWS, no PYPI_API_TOKEN, no NPM_TOKEN. The full trust chain is short-lived
+# OIDC tokens minted at job start, validated by each registry against the
+# Trusted Publisher binding (owner/repo/workflow filename/environment).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (must match a v<version> tag on main, e.g. 0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  id-token: write   # OIDC token for PyPI Trusted Publisher + npm --provenance
+  contents: read
+
+# One in-flight publish per version. A second dispatch of the same version
+# queues behind the first instead of racing it.
+concurrency:
+  group: publish-public-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: public-release
+      url: https://pypi.org/project/aurigin-protos/${{ inputs.version }}/
+    steps:
+      - name: Validate version is strict semver
+        run: |
+          VERSION="${{ inputs.version }}"
+          # Strict semver: numbers + optional pre-release / build metadata.
+          # Catches typos like 0.1 or 0.1.0-rc? before either registry bails
+          # out with a confusing error.
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version '$VERSION' is not valid semver (X.Y.Z[-prerelease][+build])."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+        with:
+          ref: v${{ inputs.version }}
+          # Full history so we can verify the tag is reachable from main.
+          fetch-depth: 0
+
+      - name: Verify tag is on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/heads/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" main; then
+            echo "::error::Tag v${{ inputs.version }} ($GITHUB_SHA) is not reachable from main." >&2
+            echo "::error::Only commits that have landed on main can be promoted to public registries." >&2
+            exit 1
+          fi
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          # Forces the public npm registry. Without this, a leftover .npmrc
+          # from the CodeArtifact path could redirect publish to AWS.
+          # Also required for --provenance (works only against npmjs.org).
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python build backend
+        run: python -m pip install --upgrade build
+
+      - name: Generate language stubs
+        run: make generate
+
+      # ─── Python ────────────────────────────────────────────────────────
+      - name: Stamp Python package version
+        working-directory: gen/py
+        run: |
+          python -c "
+          import pathlib, re
+          p = pathlib.Path('pyproject.toml')
+          p.write_text(re.sub(r'(?m)^version = .*', 'version = \"${{ inputs.version }}\"', p.read_text()))
+          "
+
+      - name: Build sdist + wheel
+        working-directory: gen/py
+        run: python -m build
+
+      - name: Publish to PyPI (Trusted Publisher + PEP 740 attestations)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: gen/py/dist
+          attestations: true
+          # No `password` / `api-token` — the action mints an OIDC token
+          # and PyPI validates it against the Trusted Publisher binding.
+
+      # ─── TypeScript / npm ──────────────────────────────────────────────
+      - name: Stamp TS package version
+        working-directory: gen/ts
+        run: npm pkg set version="${{ inputs.version }}"
+
+      - name: Install + build TS
+        working-directory: gen/ts
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Publish to npm (Trusted Publisher + sigstore provenance)
+        working-directory: gen/ts
+        # --provenance attaches sigstore attestation of commit + workflow.
+        # --access public required on first publish of a scoped package;
+        #   no-op on subsequent publishes.
+        # No NODE_AUTH_TOKEN / NPM_TOKEN — npm validates the OIDC token
+        # against the Trusted Publisher binding.
+        run: npm publish --provenance --access public
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Published to public registries"
+            echo ""
+            echo "| Package | Version | Where |"
+            echo "|---|---|---|"
+            echo "| \`aurigin-protos\` (PyPI)    | \`${{ inputs.version }}\` | https://pypi.org/project/aurigin-protos/${{ inputs.version }}/ |"
+            echo "| \`@aurigin/protos\` (npm) | \`${{ inputs.version }}\` | https://www.npmjs.com/package/@aurigin/protos/v/${{ inputs.version }} |"
+            echo ""
+            echo "Both artifacts include build provenance / sigstore attestations."
+            echo ""
+            echo "**Tag:** \`v${{ inputs.version }}\` · **Commit:** \`${{ github.sha }}\` · **Workflow:** \`${{ github.workflow }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

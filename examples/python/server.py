@@ -1,88 +1,83 @@
-"""Minimal gRPC server using the generated aurigin-protos package.
+"""Scenario-driven gRPC simulator for DeepfakeDetection.DetectDeepfake.
 
-Implements DeepfakeDetection.DetectDeepfake (bidi streaming) with stub
-analysis logic so the example is runnable without an ML model. A real
-service would replace _analyze() with actual inference.
+Loads YAML scenarios from a directory at startup, validates each against
+the JSON Schema in `examples/scenarios/scenario.schema.json`, and serves
+them per session.
 
-Run after `pip install aurigin-protos` (or with the local generated code on PYTHONPATH).
+Client selects a scenario via the `x-scenario-id` request metadata header.
+If the header is missing or names an unknown scenario, the server falls
+back to the scenario whose id matches `SCENARIO_DEFAULT` (default `default`).
+
+Env vars:
+    PORT             gRPC listen port              (default 50051)
+    SCENARIOS_DIR    directory of *.yaml scenarios (default <repo>/examples/scenarios)
+    SCENARIO_DEFAULT id of the fallback scenario   (default "default")
 """
 
-from concurrent import futures
+from __future__ import annotations
+
+import asyncio
+import os
+from pathlib import Path
 
 import grpc
 
-from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2_grpc as pb_grpc
 
-
-def _bytes_to_ms(audio_bytes: int, *, channels: int, rate: int) -> int:
-    """S16LE PCM: 2 bytes per sample per channel."""
-    if rate <= 0 or channels <= 0:
-        return 0
-    return int(audio_bytes / 2 / channels / rate * 1000)
+from sim import Scenario, load_scenarios, run_session
 
 
-def _analyze(window_ms: int) -> tuple[float, str, float]:
-    """Stub analysis: returns a fixed bonafide score. Replace with ML inference."""
-    return 0.05, "bonafide", 1.0
+DEFAULT_SCENARIOS_DIR = Path(__file__).resolve().parent.parent / "scenarios"
+
+
+def _pick_scenario(
+    metadata: tuple[tuple[str, str], ...],
+    scenarios: dict[str, Scenario],
+    default_id: str,
+) -> Scenario:
+    requested = next((v for k, v in metadata if k.lower() == "x-scenario-id"), None)
+    if requested and requested in scenarios:
+        return scenarios[requested]
+    return scenarios[default_id]
 
 
 class DeepfakeDetectionImpl(pb_grpc.DeepfakeDetectionServicer):
-    def DetectDeepfake(self, request_iterator, context):  # noqa: N802 — gRPC RPC name
-        # 1. First message must be CreateSessionRequest.
-        first = next(request_iterator, None)
-        if first is None or not first.HasField("create_session_request"):
-            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Expected CreateSessionRequest first")
-            return
-        session_id = "demo-session-0001"
-        yield pb.DetectDeepfakeResponse(
-            create_session_response=pb.CreateSessionResponse(session_id=session_id),
-        )
+    def __init__(self, scenarios: dict[str, Scenario], default_id: str) -> None:
+        self._scenarios = scenarios
+        self._default_id = default_id
 
-        # 2. Stream audio buffers, emit one AnalysisResult per buffer in this stub.
-        total_ms = 0
-        count = 0
-        scores: list[float] = []
-        for msg in request_iterator:
-            if not msg.HasField("audio"):
-                continue
-            buf = msg.audio
-            window_ms = _bytes_to_ms(len(buf.buffer), channels=buf.channels or 1, rate=buf.rate or 16000)
-            score, label, confidence = _analyze(window_ms)
-            scores.append(score)
-            count += 1
-            total_ms += window_ms
-            yield pb.DetectDeepfakeResponse(
-                analysis_result=pb.AnalysisResult(
-                    audio_offset_ms=int(buf.pts_ns // 1_000_000),
-                    duration_ms=window_ms,
-                    score=score,
-                    label=label,
-                    confidence=confidence,
-                ),
-            )
+    async def DetectDeepfake(self, request_iterator, context):  # noqa: N802 - gRPC RPC name
+        scenario = _pick_scenario(context.invocation_metadata(), self._scenarios, self._default_id)
+        async for response in run_session(scenario, request_iterator, context):
+            yield response
 
-        # 3. Final aggregate when client closes the stream.
-        overall = sum(scores) / len(scores) if scores else 0.0
-        yield pb.DetectDeepfakeResponse(
-            final_result=pb.FinalResult(
-                total_audio_ms=total_ms,
-                overall_score=overall,
-                overall_label="bonafide" if overall < 0.4 else "spoofed",
-                analysis_count=count,
-            ),
+
+async def _serve_async(port: int, scenarios_dir: Path, default_id: str) -> None:
+    scenarios = load_scenarios(scenarios_dir)
+    if default_id not in scenarios:
+        raise SystemExit(
+            f"Default scenario id '{default_id}' not found in {scenarios_dir}. "
+            f"Available: {sorted(scenarios)}"
         )
+    server = grpc.aio.server()
+    pb_grpc.add_DeepfakeDetectionServicer_to_server(
+        DeepfakeDetectionImpl(scenarios, default_id), server
+    )
+    server.add_insecure_port(f"[::]:{port}")
+    await server.start()
+    print(
+        f"DeepfakeDetection simulator listening on :{port} | "
+        f"{len(scenarios)} scenarios loaded from {scenarios_dir} | "
+        f"default='{default_id}'"
+    )
+    await server.wait_for_termination()
 
 
 def serve(port: int = 50051) -> None:
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    pb_grpc.add_DeepfakeDetectionServicer_to_server(DeepfakeDetectionImpl(), server)
-    server.add_insecure_port(f"[::]:{port}")
-    server.start()
-    print(f"DeepfakeDetection server listening on :{port}")
-    server.wait_for_termination()
+    scenarios_dir = Path(os.environ.get("SCENARIOS_DIR", str(DEFAULT_SCENARIOS_DIR)))
+    default_id = os.environ.get("SCENARIO_DEFAULT", "default")
+    asyncio.run(_serve_async(port, scenarios_dir, default_id))
 
 
 if __name__ == "__main__":
-    import os
     serve(int(os.environ.get("PORT", "50051")))

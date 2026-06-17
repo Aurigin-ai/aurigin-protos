@@ -1,0 +1,22 @@
+# gRPC deadline exceeded at 8 s — simulator never reaches the curve's
+# emit-every cadence. Tests client handling of premature DEADLINE_EXCEEDED.
+version: 1
+
+scenario:
+  id: grpc_deadline_exceeded
+  description: Server aborts with DEADLINE_EXCEEDED before any analysis emits.
+
+stream:
+  duration_ms: 30000
+  chunk_interval_ms: 100
+
+grpc:
+  terminate_at_ms: 8000
+  status_code: DEADLINE_EXCEEDED
+  status_message: simulated server-side deadline exceeded
+
+confidence_curve:
+  type: linear
+  emit_every_ms: 5000   # first emission would be at 5 s, second at 10 s — abort cuts it short
+  from: { at_ms: 0,     fake_probability: 0.10 }
+  to:   { at_ms: 30000, fake_probability: 0.50 }

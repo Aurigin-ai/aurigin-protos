@@ -1,4 +1,4 @@
-// Simulate a mobile phone call by streaming audio to DetectDeepfake.
+// Simulate one or more mobile phone calls by streaming audio to DetectDeepfake.
 //
 // Default mode reads a WAV file (looped to fill --duration, paced in real
 // time). With --fifo, reads from a named pipe instead — designed for a
@@ -7,10 +7,16 @@
 // In both modes analysis events print as they arrive (the client's "data"
 // listener fires concurrently with sends).
 //
+// With --concurrency N, opens N concurrent bidi streams over a single
+// gRPC channel. Each stream gets a client-side label (`call-01`, `call-02`,
+// ...) that prefixes every log line so interleaved output stays readable.
+// FIFO mode is single-stream by nature and is rejected with --concurrency > 1.
+//
 // CLI:
 //   # File mode (default)
 //   tsx phone_call.ts [--audio path/to.wav] [--duration 30]
 //                     [--chunk-ms 100] [--target localhost:50051]
+//                     [--concurrency 1]
 //
 //   # FIFO mode
 //   tsx phone_call.ts --fifo /var/lib/freeswitch/recordings/live.r16
@@ -36,6 +42,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const DEFAULT_CHUNK_MS = 100;
 const DEFAULT_DURATION_S = 30;
+const DEFAULT_CONCURRENCY = 1;
 const FIFO_SAMPLE_RATE = 8000;
 const FIFO_CHANNELS = 1;
 
@@ -59,6 +66,11 @@ function ulawToPcm16(data: Buffer): Buffer {
     out.writeInt16LE(ULAW_TO_PCM16[data[i]], i * 2);
   }
   return out;
+}
+
+// ─── Per-stream logger ────────────────────────────────────────────────
+function log(label: string, message: string): void {
+  console.log(`[${label}] ${message}`);
 }
 
 // ─── WAV reader (16-bit PCM only) ─────────────────────────────────────
@@ -125,6 +137,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function sendFile(
   call: Call,
+  _label: string,
   wav: WavData,
   durationS: number,
   chunkMs: number,
@@ -176,6 +189,7 @@ async function sendFile(
 
 function sendFifo(
   call: Call,
+  label: string,
   fifoPath: string,
   codec: Codec,
   chunkMs: number,
@@ -186,7 +200,7 @@ function sendFifo(
 
   call.write({ createSessionRequest: {} });
 
-  console.log(`⏳ Waiting for writer on ${fifoPath} (open() blocks)...`);
+  log(label, `⏳ Waiting for writer on ${fifoPath} (open() blocks)...`);
   const stream = fs.createReadStream(fifoPath, { highWaterMark: bytesPerInputChunk });
 
   return new Promise<void>((resolve, reject) => {
@@ -195,7 +209,7 @@ function sendFifo(
 
     stream.on("data", (data) => {
       if (!connected) {
-        console.log(">>> Writer connected, streaming audio");
+        log(label, ">>> Writer connected, streaming audio");
         connected = true;
       }
       const buf = data as Buffer;
@@ -219,7 +233,7 @@ function sendFifo(
     });
 
     stream.on("end", () => {
-      console.log("<<< FIFO closed by writer");
+      log(label, "<<< FIFO closed by writer");
       call.end();
       resolve();
     });
@@ -229,22 +243,23 @@ function sendFifo(
 
 // ─── Receiver (concurrent with sender) ────────────────────────────────
 
-function listen(call: Call): Promise<void> {
+function listen(call: Call, label: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     call.on("data", (response: DetectDeepfakeResponse) => {
       if (response.createSessionResponse) {
-        console.log(`📞 Session: ${response.createSessionResponse.sessionId}`);
+        log(label, `📞 Session: ${response.createSessionResponse.sessionId}`);
       } else if (response.analysisResult) {
         const r = response.analysisResult;
         const offsetS = (Number(r.audioOffsetMs) / 1000).toFixed(2).padStart(6);
-        console.log(
+        log(
+          label,
           `   Analysis @ ${offsetS}s | score=${r.score.toFixed(3)} | ` +
             `label=${r.label.padEnd(18)} | confidence=${r.confidence.toFixed(2)}`,
         );
       } else if (response.finalResult) {
         const f = response.finalResult;
-        console.log("─".repeat(70));
-        console.log(
+        log(
+          label,
           `☎️  Call ended | total=${(Number(f.totalAudioMs) / 1000).toFixed(2)}s | ` +
             `score=${f.overallScore.toFixed(3)} | label=${f.overallLabel} | ` +
             `analyses=${f.analysisCount}`,
@@ -265,6 +280,7 @@ interface Args {
   duration: number;
   chunkMs: number;
   target: string;
+  concurrency: number;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -275,6 +291,7 @@ function parseArgs(argv: string[]): Args {
     duration: DEFAULT_DURATION_S,
     chunkMs: DEFAULT_CHUNK_MS,
     target: "localhost:50051",
+    concurrency: DEFAULT_CONCURRENCY,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -291,14 +308,48 @@ function parseArgs(argv: string[]): Args {
       case "--duration": out.duration = Number(next()); break;
       case "--chunk-ms": out.chunkMs = Number(next()); break;
       case "--target": out.target = next(); break;
+      case "-c": case "--concurrency": out.concurrency = Number(next()); break;
       case "-h": case "--help":
         console.log("Usage: tsx phone_call.ts [--audio FILE | --fifo PATH] [--codec mulaw|pcm16]");
         console.log("                         [--duration SEC] [--chunk-ms MS] [--target HOST:PORT]");
+        console.log("                         [--concurrency N | -c N]");
         process.exit(0);
       default: throw new Error(`Unknown arg: ${arg}`);
     }
   }
+  if (!Number.isInteger(out.concurrency) || out.concurrency < 1) {
+    throw new Error("--concurrency must be a positive integer");
+  }
+  if (out.fifo && out.concurrency > 1) {
+    throw new Error("--fifo is single-stream by nature; --concurrency > 1 is incompatible.");
+  }
   return out;
+}
+
+function makeLabels(n: number): string[] {
+  const width = Math.max(2, String(n).length);
+  return Array.from({ length: n }, (_, i) => `call-${String(i + 1).padStart(width, "0")}`);
+}
+
+// ─── Per-stream runner ────────────────────────────────────────────────
+
+interface CallResult {
+  label: string;
+  error: unknown | null;
+}
+
+async function runOneCall(
+  client: DeepfakeDetectionClient,
+  label: string,
+  senderFactory: (call: Call, label: string) => Promise<void>,
+): Promise<CallResult> {
+  const call = client.detectDeepfake();
+  try {
+    await Promise.all([senderFactory(call, label), listen(call, label)]);
+    return { label, error: null };
+  } catch (err) {
+    return { label, error: err };
+  }
 }
 
 // ─── main ─────────────────────────────────────────────────────────────
@@ -306,33 +357,49 @@ function parseArgs(argv: string[]): Args {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const client = new DeepfakeDetectionClient(args.target, credentials.createInsecure());
-  const call = client.detectDeepfake();
+  const labels = makeLabels(args.concurrency);
 
-  let sender: Promise<void>;
-  if (args.fifo) {
-    console.log(
-      `📞 Calling ${args.target} | source=${args.fifo} (FIFO, ${args.codec}, ` +
-        `${FIFO_SAMPLE_RATE}Hz/${FIFO_CHANNELS}ch) | frame=${args.chunkMs}ms`,
-    );
-    console.log("─".repeat(70));
-    sender = sendFifo(call, args.fifo, args.codec, args.chunkMs);
-  } else {
-    const audioPath = resolveAudio(args.audio);
-    const wav = readWav(audioPath);
-    const fileDur = wav.pcm.length / (wav.sampleRate * 2 * wav.channels);
-    console.log(
-      `📞 Calling ${args.target} | source=${path.basename(audioPath)} ` +
-        `(${fileDur.toFixed(2)}s @ ${wav.sampleRate}Hz/${wav.channels}ch) ` +
-        `| duration=${args.duration.toFixed(1)}s | frame=${args.chunkMs}ms`,
-    );
-    console.log("─".repeat(70));
-    sender = sendFile(call, wav, args.duration, args.chunkMs);
-  }
-
+  let results: CallResult[];
   try {
-    await Promise.all([sender, listen(call)]);
+    if (args.fifo) {
+      console.log(
+        `📞 Calling ${args.target} | source=${args.fifo} (FIFO, ${args.codec}, ` +
+          `${FIFO_SAMPLE_RATE}Hz/${FIFO_CHANNELS}ch) | frame=${args.chunkMs}ms`,
+      );
+      console.log("─".repeat(70));
+      const senderFactory = (call: Call, label: string) =>
+        sendFifo(call, label, args.fifo!, args.codec, args.chunkMs);
+      results = await Promise.all(labels.map((label) => runOneCall(client, label, senderFactory)));
+    } else {
+      const audioPath = resolveAudio(args.audio);
+      const wav = readWav(audioPath);
+      const fileDur = wav.pcm.length / (wav.sampleRate * 2 * wav.channels);
+      console.log(
+        `📞 Calling ${args.target} | source=${path.basename(audioPath)} ` +
+          `(${fileDur.toFixed(2)}s @ ${wav.sampleRate}Hz/${wav.channels}ch) ` +
+          `| duration=${args.duration.toFixed(1)}s | frame=${args.chunkMs}ms | ` +
+          `concurrency=${args.concurrency}`,
+      );
+      console.log("─".repeat(70));
+      const senderFactory = (call: Call, label: string) =>
+        sendFile(call, label, wav, args.duration, args.chunkMs);
+      results = await Promise.all(labels.map((label) => runOneCall(client, label, senderFactory)));
+    }
   } finally {
     client.close();
+  }
+
+  const failures = results.filter((r) => r.error !== null);
+  if (args.concurrency > 1) {
+    console.log("─".repeat(70));
+    const ok = args.concurrency - failures.length;
+    console.log(`Summary: ${ok}/${args.concurrency} streams OK, ${failures.length} failed`);
+    for (const { label, error } of failures) {
+      console.error(`  [${label}] ${(error as Error).message ?? String(error)}`);
+    }
+    if (failures.length > 0) process.exit(1);
+  } else if (failures.length > 0) {
+    throw failures[0].error;
   }
 }
 

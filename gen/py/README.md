@@ -4,79 +4,13 @@ Generated gRPC Python stubs for Aurigin services. Built from [`aurigin-protos`](
 
 ## Install (with `uv`)
 
-This package is published in two places. Pick whichever your team authenticates against.
-
-### Option A — AWS CodeArtifact
-
-Aurigin's CodeArtifact setup:
-
-| | |
-|---|---|
-| Domain | `aurigin-ai-domain` |
-| Domain owner | `717279723333` |
-| Repository | `aurigin-shared` |
-| Region | `eu-west-1` |
-
-Configure as an extra index in your `pyproject.toml`:
-
-```toml
-[project]
-dependencies = [
-    "aurigin-protos",
-    "grpcio>=1.62",
-]
-
-[[tool.uv.index]]
-name = "aurigin"
-url = "https://aws:${CODEARTIFACT_AUTH_TOKEN}@aurigin-ai-domain-717279723333.d.codeartifact.eu-west-1.amazonaws.com/pypi/aurigin-shared/simple/"
-explicit = true
-
-[tool.uv.sources]
-aurigin-protos = { index = "aurigin" }
-```
-
-Refresh the auth token (CodeArtifact tokens expire after 12h) and sync:
-
-```bash
-export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
-  --domain aurigin-ai-domain \
-  --domain-owner 717279723333 \
-  --region eu-west-1 \
-  --query authorizationToken --output text)
-
-uv sync
-```
-
-For ad-hoc use, after `aws codeartifact login --tool pip --domain aurigin-ai-domain --domain-owner 717279723333 --repository aurigin-shared --region eu-west-1`:
-
 ```bash
 uv pip install aurigin-protos
 ```
 
-### Option B — GitHub Release asset
+Ships with PEP 740 sigstore attestations — `pip 24.2+` verifies them automatically against the tagged commit on the repository's `publish-public.yml` workflow.
 
-GitHub Packages doesn't host a Python registry, so the wheel + sdist are attached to a GitHub Release. Pick a tag from [the Releases page](https://github.com/Aurigin-ai/aurigin-protos/releases/latest) and substitute for `<x.y.z>`:
-
-```bash
-uv pip install \
-  "https://github.com/Aurigin-ai/aurigin-protos/releases/download/v<x.y.z>/aurigin_protos-<x.y.z>-py3-none-any.whl"
-```
-
-Or in `pyproject.toml`:
-
-```toml
-[project]
-dependencies = [
-    "aurigin-protos @ https://github.com/Aurigin-ai/aurigin-protos/releases/download/v<x.y.z>/aurigin_protos-<x.y.z>-py3-none-any.whl",
-]
-```
-
-For private repos (or to grab the latest without hardcoding), use `gh release download` — omit the tag to default to the latest release:
-
-```bash
-gh release download -R Aurigin-ai/aurigin-protos -p '*.whl' \
-  && uv pip install ./aurigin_protos-*.whl
-```
+Aurigin services that need a pre-promotion (release-candidate) version can install from the internal AWS CodeArtifact mirror under the same name; see the [`infra/aws/`](https://github.com/Aurigin-ai/aurigin-protos/tree/main/infra/aws) runbook in the repo for the connection details.
 
 ## Usage
 
@@ -106,4 +40,4 @@ Currently published modules:
 
 ## Source
 
-This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/Aurigin-ai/aurigin-protos), tag a release (`git tag v<x.y.z> && git push --tags`); both publish workflows fire in parallel and ship to CodeArtifact + GitHub Release. For local dry-runs, `make publish-py-codeartifact` (CodeArtifact) or `make publish-py-github` (GitHub Release).
+This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/Aurigin-ai/aurigin-protos), tag a release (`git tag v<x.y.z> && git push --tags`); `publish-codeartifact.yml` ships to the internal CodeArtifact channel automatically, and `publish-public.yml` promotes the same version to public pypi.org on manual dispatch. For local dry-runs, `make publish-py-codeartifact`.

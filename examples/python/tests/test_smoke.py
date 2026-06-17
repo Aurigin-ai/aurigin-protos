@@ -86,11 +86,20 @@ def server(env: dict[str, str]):
             proc.kill()
 
 
-def test_client_silence_roundtrip(server, env: dict[str, str]):
-    """The stub client streams 3 s of silence and prints session/analysis/final."""
+def test_client_silence_roundtrip(server, env: dict[str, str], tmp_path):
+    """The stub client streams 3 s of silence and prints session/analysis/final.
+
+    Points the client at an empty tmp dir so the silence-fallback path runs
+    deterministically regardless of whatever WAVs the dev has dropped into
+    examples/audio/ locally.
+    """
     _, port = server
     result = subprocess.run(
-        [sys.executable, str(EXAMPLES_DIR / "client.py"), "--target", f"localhost:{port}"],
+        [
+            sys.executable, str(EXAMPLES_DIR / "client.py"),
+            "--target", f"localhost:{port}",
+            "--audio-dir", str(tmp_path),
+        ],
         env=env,
         capture_output=True,
         text=True,
@@ -98,9 +107,16 @@ def test_client_silence_roundtrip(server, env: dict[str, str]):
     )
     assert result.returncode == 0, f"client failed: stderr={result.stderr}"
     assert "Session:" in result.stdout, f"missing session line in:\n{result.stdout}"
-    assert "Analysis | offset=" in result.stdout
     assert "FINAL" in result.stdout
-    assert "demo-session-0001" in result.stdout, "stub server should return its hardcoded session id"
+    # Simulator issues per-session ids like 'sim-<8 hex>'. We don't pin the
+    # specific value — just that the server emitted one.
+    assert "sim-" in result.stdout, f"missing simulator session id prefix in:\n{result.stdout}"
+    # NOTE: we deliberately don't assert AnalysisResult lines here. The
+    # scenario-driven server emits curve samples at wallclock 1 s / 2 s / 3 s,
+    # but client.py's silence fallback sends all 6 × 500 ms chunks back-to-back
+    # without real-time pacing, so the client typically closes its write side
+    # before any sample fires. Analysis emission is covered by the phone-call
+    # test below, which paces audio in real time.
 
 
 def test_phone_call_wav_roundtrip(server, env: dict[str, str]):
