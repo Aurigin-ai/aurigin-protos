@@ -4,34 +4,13 @@ Generated gRPC TypeScript stubs for Aurigin services. Built from [`aurigin-proto
 
 ## Install
 
-This package is published in two places. Pick whichever your team authenticates against. The package scope differs by registry; the import path under that scope is identical.
-
-### Option A — AWS CodeArtifact (`@aurigin/protos`)
-
 ```bash
-aws codeartifact login --tool npm \
-  --domain aurigin-ai-domain \
-  --domain-owner 717279723333 \
-  --repository aurigin-shared \
-  --region eu-west-1
-
 npm install @aurigin/protos @grpc/grpc-js
 ```
 
-### Option B — GitHub Packages (`@aurigin-ai/protos`)
+Ships with sigstore-backed provenance — installers and registries can verify the published tarball was built from the tagged commit on the repository's `publish-public.yml` workflow.
 
-Add to your project's `.npmrc`:
-
-```
-@aurigin-ai:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
-```
-
-Then:
-
-```bash
-npm install @aurigin-ai/protos @grpc/grpc-js
-```
+Aurigin services that need a pre-promotion (release-candidate) version can install from the internal AWS CodeArtifact mirror under the same scope; see the [`infra/aws/`](https://github.com/Aurigin-ai/aurigin-protos/tree/main/infra/aws) runbook in the repo for the connection details.
 
 ## Usage
 
@@ -62,13 +41,11 @@ Server-side: import `DeepfakeDetectionService` (the service definition) and `Dee
 | `service DeepfakeDetection` | `DeepfakeDetectionService` / `DeepfakeDetectionServer` / `DeepfakeDetectionClient` |
 | `oneof response { ... }` | discriminated optional fields on the message (e.g. `response.analysisResult`) |
 
-Currently published modules — same files under either scope, depending on which registry you installed from:
+Currently published modules:
 
-| Registry | Scope | Deepfake detection module | Twilio AudioBuffer module |
-|---|---|---|---|
-| AWS CodeArtifact | `@aurigin` | `@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection` | `@aurigin/protos/twilio/tme/extensions/common/v1/audio_buffer` |
-| GitHub Packages | `@aurigin-ai` | `@aurigin-ai/protos/aurigin/deepfake_detection/v1/deepfake_detection` | `@aurigin-ai/protos/twilio/tme/extensions/common/v1/audio_buffer` |
+- `@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection`
+- `@aurigin/protos/twilio/tme/extensions/common/v1/audio_buffer`
 
 ## Source
 
-This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/Aurigin-ai/aurigin-protos), tag a release (`git tag v<x.y.z> && git push --tags`); both publish workflows fire in parallel and ship to CodeArtifact + GitHub Packages. For local dry-runs, `make publish-ts-codeartifact` (CodeArtifact) or `make publish-ts-github` (GitHub Packages).
+This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/Aurigin-ai/aurigin-protos), tag a release (`git tag v<x.y.z> && git push --tags`); `publish-codeartifact.yml` ships to the internal CodeArtifact channel automatically, and `publish-public.yml` promotes the same version to public npmjs.com on manual dispatch. For local dry-runs, `make publish-ts-codeartifact`.

@@ -1,0 +1,13 @@
+# Stream ends cleanly but the simulator never emits any AnalysisResult
+# (curve disabled, no events). Server still emits FinalResult on close,
+# but with overall_label='unknown' and analysis_count=0. Use to test how
+# clients render a verdict-less call.
+version: 1
+
+scenario:
+  id: stream_ends_no_verdict
+  description: No analyses emitted; FinalResult has zero count.
+
+stream:
+  duration_ms: 15000
+  chunk_interval_ms: 100

@@ -89,8 +89,8 @@ def _run_session(stub, request_iter, label: str) -> None:
             print(f"FINAL    | total={f.total_audio_ms}ms | score={f.overall_score:.3f} | label={f.overall_label} | analyses={f.analysis_count}")
 
 
-def main(target: str = "localhost:50051") -> None:
-    audio_dir = Path(__file__).resolve().parent.parent / "audio"
+def main(target: str = "localhost:50051", audio_dir: str | Path | None = None) -> None:
+    audio_dir = Path(audio_dir).resolve() if audio_dir else Path(__file__).resolve().parent.parent / "audio"
     wavs = sorted(audio_dir.glob("*.wav")) if audio_dir.is_dir() else []
 
     with grpc.insecure_channel(target) as channel:
@@ -105,5 +105,6 @@ def main(target: str = "localhost:50051") -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     parser.add_argument("--target", default="localhost:50051", help="gRPC server host:port (default: localhost:50051)")
+    parser.add_argument("--audio-dir", default=None, help="Directory to scan for *.wav (default: examples/audio/)")
     args = parser.parse_args()
-    main(args.target)
+    main(args.target, args.audio_dir)

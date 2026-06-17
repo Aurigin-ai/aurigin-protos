@@ -1,0 +1,42 @@
+# Fake audio. Confidence climbs sigmoidally and crosses the threshold around
+# 12 s, after which the simulator emits an explicit FAKE_DETECTED event with
+# 'vocoder_artifacts' reason. Use this as the canonical "happy fake" scenario.
+version: 1
+
+scenario:
+  id: fake_detected_rising_curve
+  description: Sigmoid rise crossing the threshold near 12 s, then FAKE_DETECTED.
+
+stream:
+  duration_ms: 30000
+  chunk_interval_ms: 100
+
+random:
+  seed: 42
+
+network:
+  base_latency_ms: 50
+  jitter_ms: 20
+
+grpc:
+  initial_metadata:
+    simulator: aurigin-protos-example
+  trailing_metadata:
+    scenario_id: fake_detected_rising_curve
+
+confidence_curve:
+  type: sigmoid
+  emit_every_ms: 1000
+  label_threshold: 0.5
+  steepness: 6
+  from: { at_ms: 0,     fake_probability: 0.05 }
+  to:   { at_ms: 12000, fake_probability: 0.94 }
+
+events:
+  - name: fake_detected
+    at_ms: 12000
+    type: FAKE_DETECTED
+    payload:
+      fake_probability: 0.93
+      label: spoofed
+      reason: vocoder_artifacts

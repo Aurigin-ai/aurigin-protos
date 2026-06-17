@@ -8,37 +8,45 @@ Reference snippets showing how to consume the generated packages.
 
 Install once: `brew install uv`.
 
-### Option A — quick, ad-hoc
-
-After running `aws codeartifact login --tool pip ...` (writes the index URL into `~/.config/pip/pip.conf`), `uv pip` reuses that config:
+### Quick install + run
 
 ```bash
-uv venv                                  # create .venv/
+uv venv                                   # create .venv/
 uv pip install aurigin-protos grpcio
 
 uv run python examples/python/server.py   # in one terminal
 uv run python examples/python/client.py   # in another
 ```
 
-### Option B — project-managed (`pyproject.toml`)
+### Self-contained uv project
 
-The `examples/python/` directory ships a `pyproject.toml` (with placeholders for the CodeArtifact URL) so you can run it as a self-contained uv project. `[project.scripts]` defines `server` and `client` entry points, mirroring the TypeScript example's `npm run server` / `npm run client`:
+The `examples/python/` directory ships a `pyproject.toml` so you can run it as a self-contained uv project. `[project.scripts]` defines `server`, `client`, and `phone-call` entry points, mirroring the TypeScript example's `npm run server` / `npm run client`:
+
+```bash
+cd examples/python
+uv sync                                   # creates .venv/, installs deps
+uv run server                             # scenario-driven simulator on :50051
+uv run client                             # client → localhost:50051
+uv run phone-call                         # paced WAV streamer → localhost:50051
+```
+
+### `just` wrapper
+
+`examples/python/Justfile` wraps the same `uv run …` commands so you don't have to remember the phone-call flags. `just --list` from `examples/python/` shows the full menu; the common cases:
 
 ```bash
 cd examples/python
 
-export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
-  --domain aurigin-ai-domain \
-  --domain-owner 717279723333 \
-  --region eu-west-1 \
-  --query authorizationToken --output text)
-
-uv sync                                   # creates .venv/, installs deps
-uv run server                             # in one terminal
-uv run client                             # in another
+just sync                                 # uv sync
+just server                               # scenario-driven simulator on :50051
+just client                               # client → localhost:50051
+just client 127.0.0.1:50051               # client → aurigin-router backend-simulator
+just smoke                                # end-to-end pytest
 ```
 
-For a downstream service, copy the same registry config into your service's `pyproject.toml`:
+### For a downstream service
+
+Add `aurigin-protos` like any other public PyPI dependency — no extra index, no auth:
 
 ```toml
 [project]
@@ -49,28 +57,22 @@ dependencies = [
     "aurigin-protos",
     "grpcio>=1.62",
 ]
-
-[[tool.uv.index]]
-name = "aurigin"
-url = "https://aws:${CODEARTIFACT_AUTH_TOKEN}@aurigin-ai-domain-717279723333.d.codeartifact.eu-west-1.amazonaws.com/pypi/aurigin-shared/simple/"
-explicit = true
-
-[tool.uv.sources]
-aurigin-protos = { index = "aurigin" }
 ```
 
-CodeArtifact tokens expire after 12h, so re-export `CODEARTIFACT_AUTH_TOKEN` before each `uv sync` (the same `aws codeartifact get-authorization-token` command shown above).
+> **Aurigin engineers** consuming a pre-promotion version from the internal AWS CodeArtifact mirror: see [`infra/aws/`](../infra/aws/) for the index URL and the `uv` configuration pattern.
 
-Expected client output (against `python/server.py`'s stub analysis, with no WAVs in `audio/`):
+Expected client output (against `examples/python/server.py` running the `default` scenario, with no WAVs in `audio/`):
 
 ```
 === silence (3 s @ 16 kHz) ===
-Session: demo-session-0001
-Analysis | offset=0ms     | score=0.050 | label=bonafide
-Analysis | offset=500ms   | score=0.050 | label=bonafide
-... (one Analysis line per audio buffer)
+Session: sim-1a2b3c4d
+Analysis | offset=1000ms  | score=0.050 | label=bonafide
+Analysis | offset=2000ms  | score=0.050 | label=bonafide
+Analysis | offset=3000ms  | score=0.050 | label=bonafide
 FINAL    | total=3000ms   | score=0.050 | label=bonafide
 ```
+
+The session id is generated per session (`sim-<8 hex>`) and the cadence comes from the loaded scenario (1 s by default). Pass `--scenario-id <id>` to `phone-call` to load a different scenario from `examples/scenarios/`.
 
 To run against real audio (real ML server required, e.g. backend-app's gRPC service), drop one or more `.wav` files (S16LE PCM, any sample rate, any channel count) into `examples/python/audio/` and re-run the client. It opens one session per file. The `audio/` dir is gitignored.
 
@@ -135,27 +137,17 @@ Sample output:
 
 ## TypeScript
 
-The `examples/typescript/` directory has its own `package.json` so you can install and run directly:
+The `examples/typescript/` directory has its own `package.json` so you can install and run directly — `@aurigin/protos` resolves from public npmjs.com, no auth:
 
 ```bash
 cd examples/typescript
-
-# After authenticating to CodeArtifact (one-time per machine):
-aws codeartifact login --tool npm \
-  --domain aurigin-ai-domain \
-  --domain-owner 717279723333 \
-  --repository aurigin-shared \
-  --region eu-west-1
-
 npm install
-```
 
-Then:
-
-```bash
 npm run server    # in one terminal
 npm run client    # in another
 ```
+
+> **Aurigin engineers** consuming a pre-promotion version from the internal AWS CodeArtifact mirror: see [`infra/aws/`](../infra/aws/) for the npm registry config.
 
 Files:
 - `typescript/server.ts` — `Server` from `@grpc/grpc-js` + `addService(DeepfakeDetectionService, impl)` with bidi stream handling

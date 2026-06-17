@@ -1,0 +1,16 @@
+aurigin-protos
+Copyright 2024-2026 Aurigin.ai
+
+This product includes software developed by Aurigin (https://aurigin.ai).
+
+------------------------------------------------------------------------
+Vendored third-party Protocol Buffers definitions
+------------------------------------------------------------------------
+
+This repository includes the following third-party Protocol Buffers
+definitions, redistributed under their original licenses:
+
+- Twilio Media Extensions (proto/twilio/tme/extensions/common/v1/audio_buffer.proto)
+  Copyright Twilio, Inc.
+  Distributed under the terms of the Apache License, Version 2.0.
+  Source: https://github.com/twilio/twilio-media-extensions

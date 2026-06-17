@@ -6,6 +6,8 @@ requires-python = ">=3.10"
 dependencies = [
     "aurigin-protos",
     "grpcio>=1.62",
+    "pyyaml>=6.0",
+    "jsonschema>=4.20",
 ]
 
 [project.optional-dependencies]
@@ -23,16 +25,23 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-only-include = ["server.py", "client.py", "phone_call.py"]
+only-include = ["server.py", "client.py", "phone_call.py", "sim"]
 
-# CodeArtifact registry for `aurigin-protos`. Refresh the token before `uv sync`
-# (CodeArtifact tokens expire after 12h):
-#   export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
+# CodeArtifact registry for `aurigin-protos`. The URL stays clean here —
+# auth is supplied at `uv sync` time via uv's native indexed-auth env vars
+# (modern uv no longer substitutes `${VAR}` inside index URLs):
+#
+#   export UV_INDEX_AURIGIN_USERNAME=aws
+#   export UV_INDEX_AURIGIN_PASSWORD=$(aws codeartifact get-authorization-token \
 #     --domain aurigin-ai-domain --domain-owner 717279723333 \
 #     --region eu-west-1 --query authorizationToken --output text)
+#   uv sync
+#
+# Or just run `eval "$(just token)" && just sync` — the Justfile does
+# both exports for you. (CodeArtifact tokens expire after 12h.)
 [[tool.uv.index]]
 name = "aurigin"
-url = "https://aws:${CODEARTIFACT_AUTH_TOKEN}@aurigin-ai-domain-717279723333.d.codeartifact.eu-west-1.amazonaws.com/pypi/aurigin-shared/simple/"
+url = "https://aurigin-ai-domain-717279723333.d.codeartifact.eu-west-1.amazonaws.com/pypi/aurigin-shared/simple/"
 explicit = true
 
 [tool.uv.sources]

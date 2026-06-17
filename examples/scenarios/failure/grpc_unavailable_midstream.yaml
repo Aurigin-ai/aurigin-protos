@@ -1,0 +1,23 @@
+# gRPC stream is aborted mid-call with UNAVAILABLE at 15 s. Use to test
+# client reconnect / retry behaviour. Curve emits 14 samples before the
+# abort, so the client has data to work with at termination time.
+version: 1
+
+scenario:
+  id: grpc_unavailable_midstream
+  description: gRPC stream aborts with UNAVAILABLE at 15 s.
+
+stream:
+  duration_ms: 30000
+  chunk_interval_ms: 100
+
+grpc:
+  terminate_at_ms: 15000
+  status_code: UNAVAILABLE
+  status_message: simulated backend unavailable
+
+confidence_curve:
+  type: linear
+  emit_every_ms: 1000
+  from: { at_ms: 0,     fake_probability: 0.10 }
+  to:   { at_ms: 15000, fake_probability: 0.70 }

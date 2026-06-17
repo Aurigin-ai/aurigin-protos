@@ -1,0 +1,22 @@
+# Confidence oscillates around the 0.5 threshold for 30 s. Clients that
+# react to every threshold crossing will produce a noisy verdict — use this
+# to test debouncing / hysteresis logic.
+version: 1
+
+scenario:
+  id: confidence_oscillating
+  description: Noise around the threshold; reveals flappy client logic.
+
+stream:
+  duration_ms: 30000
+  chunk_interval_ms: 100
+
+random:
+  seed: 7
+
+confidence_curve:
+  type: noise
+  emit_every_ms: 500
+  label_threshold: 0.5
+  base: 0.50
+  amplitude: 0.15

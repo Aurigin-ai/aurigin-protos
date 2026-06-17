@@ -1,5 +1,5 @@
 """
-Simulate a mobile phone call by streaming audio to DetectDeepfake.
+Simulate one or more mobile phone calls by streaming audio to DetectDeepfake.
 
 Default mode reads a WAV file (looped to fill --duration, paced in real
 time). With --fifo, reads from a named pipe instead — designed for a
@@ -8,10 +8,16 @@ FreeSWITCH `record_session <fifo>` source feeding G.711 μ-law at 8 kHz.
 In both modes analysis events print as they arrive, thanks to grpc.aio's
 concurrent send/recv tasks.
 
+With --concurrency N, opens N concurrent bidi streams over a single
+gRPC channel. Each stream gets a client-side label (`call-01`, `call-02`,
+...) that prefixes every log line so interleaved output stays readable.
+The server-issued session_id is logged per stream alongside the label.
+FIFO mode is single-stream by nature and is rejected with `--concurrency > 1`.
+
 CLI:
     # File mode (default)
     python phone_call.py [--audio path/to.wav] [--duration 30] \\
-        [--chunk-ms 100] [--target localhost:50051]
+        [--chunk-ms 100] [--target localhost:50051] [--concurrency 1]
 
     # FIFO mode (overrides file mode when supplied)
     python phone_call.py --fifo /var/lib/freeswitch/recordings/live.r16 \\
@@ -42,10 +48,16 @@ from twilio.tme.extensions.common.v1 import audio_buffer_pb2 as ab_pb
 
 DEFAULT_CHUNK_MS = 100
 DEFAULT_DURATION_S = 30.0
+DEFAULT_CONCURRENCY = 1
 
 # FreeSWITCH narrowband defaults for FIFO mode; both codec paths assume mono.
 FIFO_SAMPLE_RATE = 8000
 FIFO_CHANNELS = 1
+
+
+def _log(label: str, message: str, *, file=None) -> None:
+    """Print one line prefixed by the per-stream label."""
+    print(f"[{label}] {message}", file=file)
 
 
 def _load_pcm(path: Path) -> tuple[bytes, int, int]:
@@ -73,6 +85,7 @@ def _resolve_audio(arg: Path | None) -> Path:
 
 async def _send_call(
     call,
+    label: str,
     pcm: bytes,
     sample_rate: int,
     channels: int,
@@ -80,6 +93,7 @@ async def _send_call(
     duration_s: float,
 ) -> None:
     """Send CreateSession + paced AudioBuffers for `duration_s` seconds, then close write side."""
+    del label  # silent sender; only the receiver prints per-stream output
     bytes_per_sample = 2 * channels
     bytes_per_chunk = max(1, int(sample_rate * chunk_ms / 1000) * bytes_per_sample)
     chunk_seconds = chunk_ms / 1000
@@ -127,7 +141,7 @@ async def _send_call(
     await call.done_writing()
 
 
-async def _send_fifo(call, fifo_path: Path, codec: str, chunk_ms: int) -> None:
+async def _send_fifo(call, label: str, fifo_path: Path, codec: str, chunk_ms: int) -> None:
     """Stream a FreeSWITCH-style named pipe until the writer closes.
 
     The writer (FreeSWITCH `record_session`, or anything pumping audio at
@@ -145,15 +159,15 @@ async def _send_fifo(call, fifo_path: Path, codec: str, chunk_ms: int) -> None:
     await call.write(pb.DetectDeepfakeRequest(create_session_request=pb.CreateSessionRequest()))
 
     loop = asyncio.get_running_loop()
-    print(f"⏳ Waiting for writer on {fifo_path} (open() blocks)...")
+    _log(label, f"⏳ Waiting for writer on {fifo_path} (open() blocks)...")
     fifo = await loop.run_in_executor(None, lambda: open(str(fifo_path), "rb"))
-    print(">>> Writer connected, streaming audio")
+    _log(label, ">>> Writer connected, streaming audio")
     try:
         pts_ns = 0
         while True:
             data = await loop.run_in_executor(None, fifo.read, bytes_per_input_chunk)
             if not data:
-                print("<<< FIFO closed by writer")
+                _log(label, "<<< FIFO closed by writer")
                 break
 
             # Decode μ-law -> linear S16LE; pcm16 passes through unchanged.
@@ -182,25 +196,46 @@ async def _send_fifo(call, fifo_path: Path, codec: str, chunk_ms: int) -> None:
     await call.done_writing()
 
 
-async def _recv_call(call) -> None:
-    """Print every server response as it arrives."""
+async def _recv_call(call, label: str) -> None:
+    """Print every server response as it arrives, prefixed with the stream label."""
     async for response in call:
         kind = response.WhichOneof("response")
         if kind == "create_session_response":
-            print(f"📞 Session: {response.create_session_response.session_id}")
+            _log(label, f"📞 Session: {response.create_session_response.session_id}")
         elif kind == "analysis_result":
             r = response.analysis_result
-            print(
+            _log(
+                label,
                 f"   Analysis @ {r.audio_offset_ms / 1000:6.2f}s "
-                f"| score={r.score:.3f} | label={r.label:18s} | confidence={r.confidence:.2f}"
+                f"| score={r.score:.3f} | label={r.label:18s} | confidence={r.confidence:.2f}",
             )
         elif kind == "final_result":
             f = response.final_result
-            print("─" * 70)
-            print(
+            _log(
+                label,
                 f"☎️  Call ended | total={f.total_audio_ms / 1000:.2f}s "
-                f"| score={f.overall_score:.3f} | label={f.overall_label} | analyses={f.analysis_count}"
+                f"| score={f.overall_score:.3f} | label={f.overall_label} | analyses={f.analysis_count}",
             )
+
+
+async def _run_one_call(
+    stub,
+    label: str,
+    sender_factory,
+    metadata: tuple[tuple[str, str], ...] = (),
+) -> tuple[str, BaseException | None]:
+    """Open one bidi stream, run sender + receiver concurrently. Return (label, exception_or_none)."""
+    call = stub.DetectDeepfake(metadata=metadata) if metadata else stub.DetectDeepfake()
+    try:
+        await asyncio.gather(sender_factory(call, label), _recv_call(call, label))
+        return label, None
+    except BaseException as exc:  # includes asyncio.CancelledError, grpc.aio.AioRpcError
+        return label, exc
+
+
+def _make_labels(n: int) -> list[str]:
+    width = max(2, len(str(n)))
+    return [f"call-{i:0{width}d}" for i in range(1, n + 1)]
 
 
 async def main() -> None:
@@ -211,35 +246,82 @@ async def main() -> None:
     parser.add_argument("--target", default="localhost:50051", help="gRPC server host:port")
     parser.add_argument("--fifo", type=Path, default=None, help="Read live audio from a named pipe instead of a WAV file")
     parser.add_argument("--codec", choices=["mulaw", "pcm16"], default="mulaw", help="FIFO codec (file mode auto-detects)")
+    parser.add_argument(
+        "-c", "--concurrency", type=int, default=DEFAULT_CONCURRENCY,
+        help="Number of concurrent streams to open over a single channel (file mode only).",
+    )
+    parser.add_argument(
+        "--scenario-id", default=None,
+        help="Server-side simulator scenario to request (sent as x-scenario-id metadata).",
+    )
     args = parser.parse_args()
+
+    if args.concurrency < 1:
+        parser.error("--concurrency must be >= 1")
+    if args.fifo is not None and args.concurrency > 1:
+        parser.error("--fifo is single-stream by nature; --concurrency > 1 is incompatible.")
+
+    labels = _make_labels(args.concurrency)
+    metadata: tuple[tuple[str, str], ...] = (
+        (("x-scenario-id", args.scenario_id),) if args.scenario_id else ()
+    )
+    scenario_suffix = f" | scenario={args.scenario_id}" if args.scenario_id else ""
 
     async with grpc.aio.insecure_channel(args.target) as channel:
         stub = pb_grpc.DeepfakeDetectionStub(channel)
-        call = stub.DetectDeepfake()
 
         if args.fifo is not None:
             print(
                 f"📞 Calling {args.target} | source={args.fifo} (FIFO, {args.codec}, "
-                f"{FIFO_SAMPLE_RATE}Hz/{FIFO_CHANNELS}ch) | frame={args.chunk_ms}ms"
+                f"{FIFO_SAMPLE_RATE}Hz/{FIFO_CHANNELS}ch) | frame={args.chunk_ms}ms{scenario_suffix}"
             )
             print("─" * 70)
-            sender = _send_fifo(call, args.fifo, args.codec, args.chunk_ms)
+
+            def fifo_sender(call, label):
+                return _send_fifo(call, label, args.fifo, args.codec, args.chunk_ms)
+
+            results = await asyncio.gather(
+                *(_run_one_call(stub, label, fifo_sender, metadata) for label in labels),
+                return_exceptions=False,
+            )
         else:
             audio_path = _resolve_audio(args.audio)
             pcm, rate, channels = _load_pcm(audio_path)
             print(
                 f"📞 Calling {args.target} | source={audio_path.name} "
                 f"({len(pcm) / (rate * 2 * channels):.2f}s @ {rate}Hz/{channels}ch) "
-                f"| duration={args.duration:.1f}s | frame={args.chunk_ms}ms"
+                f"| duration={args.duration:.1f}s | frame={args.chunk_ms}ms | "
+                f"concurrency={args.concurrency}{scenario_suffix}"
             )
             print("─" * 70)
-            sender = _send_call(call, pcm, rate, channels, args.chunk_ms, args.duration)
 
-        try:
-            await asyncio.gather(sender, _recv_call(call))
-        except grpc.aio.AioRpcError as e:
-            print(f"gRPC error: {e.code().name}: {e.details()}", file=sys.stderr)
+            def file_sender(call, label):
+                return _send_call(call, label, pcm, rate, channels, args.chunk_ms, args.duration)
+
+            results = await asyncio.gather(
+                *(_run_one_call(stub, label, file_sender, metadata) for label in labels),
+                return_exceptions=False,
+            )
+
+    failures = [(label, exc) for label, exc in results if exc is not None]
+    if args.concurrency > 1:
+        print("─" * 70)
+        ok = args.concurrency - len(failures)
+        print(f"Summary: {ok}/{args.concurrency} streams OK, {len(failures)} failed")
+        for label, exc in failures:
+            if isinstance(exc, grpc.aio.AioRpcError):
+                print(f"  [{label}] gRPC error: {exc.code().name}: {exc.details()}", file=sys.stderr)
+            else:
+                print(f"  [{label}] {type(exc).__name__}: {exc}", file=sys.stderr)
+        if failures:
             sys.exit(1)
+    elif failures:
+        _, exc = failures[0]
+        if isinstance(exc, grpc.aio.AioRpcError):
+            print(f"gRPC error: {exc.code().name}: {exc.details()}", file=sys.stderr)
+        else:
+            print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 def cli() -> None:
