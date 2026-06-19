@@ -1,7 +1,7 @@
 # 03 - Configure npm OIDC Trusted Publisher + provenance
 
 Wire `npmjs.com` to accept uploads of `@aurigin/protos` from the
-`publish-public.yml` workflow via short-lived OIDC tokens, with
+`publish-npm.yml` workflow via short-lived OIDC tokens, with
 build provenance attached via sigstore. After this step, no
 `NPM_TOKEN` or other static credential exists.
 
@@ -40,7 +40,7 @@ binds it atomically.
    | Provider | GitHub Actions |
    | Repository owner | `Aurigin-ai` |
    | Repository name | `aurigin-protos` |
-   | Workflow filename | `publish-public.yml` |
+   | Workflow filename | `publish-npm.yml` |
    | Environment | `public-release` |
 
 5. Tick **"Require provenance for publishes from this publisher"**.
@@ -69,9 +69,8 @@ have one.
      `gh api meta --jq .actions[]`) or leave open and accept the
      wider attack surface
 
-2. Store it in the repo (NOT environment-scoped — environment-scoped
-   doesn't help here because the token grants full publish; the
-   environment gate is on the workflow run, not the secret):
+2. Store it as a repo secret (no env scoping — the token grants
+   full publish, so the env wouldn't add anything):
 
    ```bash
    gh secret set NPM_TOKEN --body "<token>" \
@@ -85,7 +84,7 @@ have one.
 ## Verify
 
 As with PyPI, the only true verification is a successful publish.
-Until `publish-public.yml` exists and runs once, check:
+Until `publish-npm.yml` exists and runs once, check:
 
 1. https://www.npmjs.com/settings/aurigin/packages — the trusted
    publisher row shows the package `@aurigin/protos` and all six
@@ -102,7 +101,7 @@ Until `publish-public.yml` exists and runs once, check:
    **"Built and signed on GitHub Actions"** badge appears next to
    the version.
 
-## What `publish-public.yml` needs on the workflow side
+## What `publish-npm.yml` needs on the workflow side
 
 ```yaml
 permissions:

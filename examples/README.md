@@ -77,11 +77,9 @@ The session id is generated per session (`sim-<8 hex>`) and the cadence comes fr
 To run against real audio (real ML server required, e.g. backend-app's gRPC service), drop one or more `.wav` files (S16LE PCM, any sample rate, any channel count) into `examples/python/audio/` and re-run the client. It opens one session per file. The `audio/` dir is gitignored.
 
 Files:
-- `python/server.py` — `DeepfakeDetectionServicer` impl with stub analysis, listens on `[::]:50051`
+- `python/server.py` — scenario-driven simulator: loads YAML scenarios from `examples/scenarios/` at startup, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Listens on `[::]:50051`. Env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`.
 - `python/client.py` — streams every `.wav` in `examples/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` to point at a non-default server (default `localhost:50051`).
-- `python/phone_call.py` — simulates a live mobile call. Two input modes:
-  - **File mode** (default): streams a WAV file looped to fill `--duration` (default 30 s) at real-time pace.
-  - **FIFO mode** (`--fifo /path/to/pipe` `--codec mulaw|pcm16`): reads from a named pipe until the writer closes — designed for FreeSWITCH `record_session` G.711 μ-law output. Pacing is implicit (writer-driven), no `--duration` cap by default.
+- `python/phone_call.py` — simulates a live mobile call. Streams a WAV file looped to fill `--duration` (default 30 s) at real-time pace.
 
 ### Audio fixtures
 
@@ -112,13 +110,8 @@ uv run phone-call --duration 30 --chunk-ms 100 --audio audio/your_call.wav
 # Or pick the first .wav in examples/audio/ automatically
 uv run phone-call --duration 30
 
-# FIFO mode — tail a FreeSWITCH record_session pipe (G.711 μ-law @ 8 kHz)
-uv run phone-call --fifo /var/lib/freeswitch/recordings/live.r16 --codec mulaw
-
-# Local FIFO smoke-test using ffmpeg as the writer
-mkfifo /tmp/test.fifo
-ffmpeg -re -i examples/audio/conversation_8khz.wav -f mulaw -ar 8000 -ac 1 /tmp/test.fifo &
-uv run phone-call --fifo /tmp/test.fifo --codec mulaw
+# Drive the scenario-driven simulator on :50051 with a specific scenario
+uv run phone-call --duration 30 --scenario-id fake_detected_rising_curve
 ```
 
 Sample output:
@@ -143,16 +136,26 @@ The `examples/typescript/` directory has its own `package.json` so you can insta
 cd examples/typescript
 npm install
 
-npm run server    # in one terminal
-npm run client    # in another
+npm run server                         # scenario-driven simulator on :50051
+npm run client                         # client → localhost:50051
+npm run phone-call                     # paced WAV streamer → localhost:50051
+npm run scenarios                      # list available scenarios
+npm run call -- fake_detected_rising_curve       # 10 s call against that scenario
+npm run call -- fake_detected_rising_curve --duration 30   # override duration
+npm run burst -- --concurrency 5 --scenario-id fake_detected_rising_curve              # 5 simultaneous calls
+npm run burst -- --concurrency 5 --scenario-id fake_detected_rising_curve --stagger-ms 500   # 5, 500ms apart
+npm run tls                            # regenerate the committed self-signed certs (server + client)
+MTLS=1 npm run server                  # same server, demands a client cert (see TLS section)
+MTLS=1 npm run call -- default         # client presents its cert, transport=mTLS
+npm test                               # end-to-end smoke test
 ```
 
 > **Aurigin engineers** consuming a pre-promotion version from the internal AWS CodeArtifact mirror: see [`infra/aws/`](../infra/aws/) for the npm registry config.
 
 Files:
-- `typescript/server.ts` — `Server` from `@grpc/grpc-js` + `addService(DeepfakeDetectionService, impl)` with bidi stream handling
+- `typescript/server.ts` — TS twin of `python/server.py`: scenario-driven simulator that loads YAML scenarios from `examples/scenarios/`, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Same env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`. Sim logic in `typescript/sim/{curves,loader,runner}.ts` mirrors `python/sim/`.
 - `typescript/client.ts` — streams every `.wav` in `examples/audio/` (one session per file) using `DeepfakeDetectionClient.detectDeepfake()`; falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` (e.g. `npm run client -- --target localhost:50051`) to point at a non-default server.
-- `typescript/phone_call.ts` — TS twin of `python/phone_call.py`: file mode (paced WAV looped to fill `--duration`) and FIFO mode (`--fifo PATH` `--codec mulaw|pcm16`). Built-in μ-law lookup table replaces `audioop`. Run with `npm run phone-call -- --audio ../audio/your.wav`
+- `typescript/phone_call.ts` — TS twin of `python/phone_call.py`: streams a paced WAV looped to fill `--duration`. Run with `npm run phone-call -- --audio ../audio/your.wav`
 
 ### Notes on ts-proto naming
 
@@ -164,3 +167,193 @@ Files:
 | `oneof response { ... }` | discriminated optional fields on the message (e.g. `response.analysisResult`) |
 
 Deep imports use the proto path: `@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection`.
+
+## TLS (on by default) and mTLS (opt-in)
+
+The example ships with four self-signed ECDSA P-256 files committed under [`certs/`](certs/):
+
+| File | Used when | Purpose |
+|---|---|---|
+| `server.crt` + `server.key` | always (TLS-by-default) | Server's keypair. SANs cover `localhost`, `127.0.0.1`, `::1`. Doubles as the CA that clients trust. |
+| `client.crt` + `client.key` | only when `MTLS=1` | Client's keypair. Doubles as the CA the server verifies presented client certs against. |
+
+Both the Python and TypeScript servers + clients auto-detect these files. The transport mode shows in the startup header line:
+
+```
+# default (no env var) — plain TLS
+DeepfakeDetection simulator listening on :50051 | ... | transport=TLS (self-signed, examples/certs/)
+📞 Calling localhost:50051 | ... | transport=TLS (self-signed, examples/certs/)
+
+# with MTLS=1 on both sides
+DeepfakeDetection simulator listening on :50051 | ... | transport=mTLS (self-signed, examples/certs/)
+📞 Calling localhost:50051 | ... | transport=mTLS (self-signed, examples/certs/)
+```
+
+> **All four committed keys are public — DO NOT USE IN PRODUCTION.** They exist so the example is TLS-by-default with zero setup. See [`certs/README.md`](certs/README.md) for the trust model when shipping anything real (Let's Encrypt, internal CA, edge termination).
+
+### Plain TLS (default)
+
+Nothing to set. Start the server and client; the cert auto-detect kicks in.
+
+```bash
+# Python
+just server                            # transport=TLS
+just call default                      # transport=TLS
+
+# TypeScript
+npm run server                         # transport=TLS
+npm run call -- default                # transport=TLS
+```
+
+### mTLS (opt-in via `MTLS=1`)
+
+Set `MTLS=1` on the **server** and the **client** process. Asymmetric configuration fails fast:
+
+| Server `MTLS` | Client `MTLS` | Outcome |
+|---|---|---|
+| unset / 0 | unset / 0 | plain TLS — handshake succeeds, no client cert verified |
+| **1** | unset / 0 | client gets `UNAVAILABLE` — server demands a cert the client doesn't present |
+| unset / 0 | **1** | plain TLS — client sends a cert, server ignores it |
+| **1** | **1** | mTLS — both sides verify each other |
+
+```bash
+# Python
+MTLS=1 just server                     # transport=mTLS
+MTLS=1 just call default               # transport=mTLS
+MTLS=1 just burst 5 default            # 5 mTLS streams, all over the same channel
+
+# TypeScript
+MTLS=1 npm run server                  # transport=mTLS
+MTLS=1 npm run call -- default         # transport=mTLS
+```
+
+Both languages also expose dedicated `mtls-*` wrappers as `just mtls-server`, `just mtls-call ID`, `just mtls-burst N ID` and `npm run mtls-server` / `npm run mtls-call -- ID` / `npm run mtls-burst -- --concurrency N --scenario-id ID`.
+
+If `MTLS=1` is set but `client.{crt,key}` are missing (e.g. you deleted them), both sides fall back to plain TLS and the transport label calls it out: `transport=TLS (...) — MTLS=1 but client.{crt,key} missing, falling back`.
+
+### Regenerating
+
+```bash
+# from examples/python/
+just tls
+
+# or from examples/typescript/
+npm run tls
+```
+
+Both invoke the same OpenSSL commands and write all four files (`server.{crt,key}` + `client.{crt,key}`). Re-run only when you want to rotate keys or change SANs.
+
+### Forcing insecure
+
+Useful for benchmarking or for pointing the client at a server that's behind a TLS-terminating proxy:
+
+```bash
+rm examples/certs/server.{crt,key}                       # permanent — remove the cert from the tree
+TLS_CERT=/dev/null TLS_KEY=/dev/null just server         # one-shot override (server)
+TLS_CA=/dev/null just client                             # one-shot override (client / phone-call)
+```
+
+The server side reads `TLS_CERT` + `TLS_KEY` (TLS) and `TLS_CLIENT_CA` (mTLS). The client side reads `TLS_CA` (TLS) and `TLS_CLIENT_CERT` / `TLS_CLIENT_KEY` (mTLS). Pointing any of them at a non-existent path takes the insecure branch.
+
+### Using a real cert
+
+Drop your own `server.crt` and `server.key` (and `client.{crt,key}` if you want mTLS) into `examples/certs/`, overwriting the committed examples, and restart. The auto-detect logic doesn't care who signed them. For Let's Encrypt or internal CAs, see the trust-model breakdown in [`certs/README.md`](certs/README.md).
+
+## Configuring the server
+
+Both `python/server.py` and `typescript/server.ts` are the same scenario-driven simulator — same env vars, same `x-scenario-id` metadata selector, same YAML scenario format. Everything below applies to either implementation.
+
+### Env vars
+
+| Var | Default | Purpose |
+|---|---|---|
+| `PORT` | `50051` | gRPC listen port. |
+| `SCENARIOS_DIR` | `<repo>/examples/scenarios` | Directory the server walks at startup. Every `*.yaml` under it (recursive) is loaded and validated against `scenario.schema.json`. Duplicate `scenario.id` is a startup error. |
+| `SCENARIO_DEFAULT` | `default` | Scenario id used when the client doesn't send `x-scenario-id` or sends an unknown id. Must match one of the loaded scenarios or the server exits at startup. |
+
+Example — point both servers at a custom directory on a non-default port:
+
+```bash
+PORT=50061 SCENARIOS_DIR=$HOME/my-scenarios uv run server                 # Python
+PORT=50061 SCENARIOS_DIR=$HOME/my-scenarios npm run server                # TypeScript
+```
+
+### Selecting a scenario per session
+
+Clients pick a scenario by setting the `x-scenario-id` gRPC request-metadata header. Unknown or missing ids fall back to `SCENARIO_DEFAULT`. The selection happens at session creation, so every `CreateSessionRequest` can hit a different scenario on the same server.
+
+Python:
+```python
+import grpc
+metadata = [("x-scenario-id", "fake_detected_rising_curve")]
+stub.DetectDeepfake(request_iter(), metadata=metadata)
+```
+
+TypeScript:
+```ts
+import { Metadata } from "@grpc/grpc-js";
+const md = new Metadata();
+md.set("x-scenario-id", "fake_detected_rising_curve");
+client.detectDeepfake(md);
+```
+
+### Server-side logs
+
+Both implementations write structured per-session logs to **stderr** so process supervisors and pipe redirections don't drop them. Three log shapes; you'll see them in this order for a normal session, plus a fourth on fault-injection scenarios:
+
+```
+[incoming] peer=ipv6:[::1]:64813 | scenario=fake_detected_rising_curve
+[sim-1ab652ba] start | scenario=fake_detected_rising_curve | duration_target=30000ms | seed=42
+[sim-1ab652ba] end   | total=30000ms | analyses=29 | score=0.945 | label=spoofed
+```
+
+| Line | Emitted | What it tells you |
+|---|---|---|
+| `[incoming] peer=… \| …` | Right when the RPC arrives, before the runner spins up | The client's address and which scenario the server resolved. Three sub-shapes: `scenario=<id>` (client asked for a known id), `requested='<id>' unknown → fallback=<default>` (client asked for something we don't have), `requested=none → default=<default>` (no header). |
+| `[<sid>] start \| …` | After the server emits `CreateSessionResponse` | Session id (used to grep concurrent calls apart), scenario chosen, scenario's `duration_target`, RNG `seed` if pinned. |
+| `[<sid>] fault \| …` | When `grpc.terminate_at_ms` fires | The wallclock offset, the gRPC status code, the configured message, and how many analyses had already fired. |
+| `[<sid>] end   \| …` | Right before `FinalResult` is yielded | Total audio ms, count of `AnalysisResult`s emitted, the last score, the resolved overall label. |
+
+Per-emission logs (one line per `AnalysisResult` write) are opt-in via `SIM_LOG_ANALYSES=1` since they get noisy fast at default cadence.
+
+### Bundled scenarios
+
+Drop-in YAML files under `examples/scenarios/`. Names match the `scenario.id` field, not the path.
+
+| id | When to use |
+|---|---|
+| `default` | Flat low score, bonafide throughout. Safe baseline. Used when no `x-scenario-id` is sent. |
+| `confidence_linear_ramp` | Linear climb from 0.05 → 0.94 over 30 s. No explicit fake-detected event — client must infer detection from the threshold crossing. |
+| `fake_detected_rising_curve` | Canonical "happy fake": sigmoid curve crosses the threshold around 12 s, then a `FAKE_DETECTED` event with `reason=vocoder_artifacts` is emitted. |
+| `real_audio_detected_real` | Bonafide audio. Score stays in 0.02–0.10 with small jitter. Use to verify the happy path doesn't false-positive. |
+| `confidence_oscillating` | Confidence wobbles around 0.5 for 30 s. Use to test debounce / hysteresis logic. |
+| `duplicate_detection` | Same `FAKE_DETECTED` event emitted twice (8 s and 8.05 s). Verifies the client deduplicates by content rather than blindly trusting the wire. |
+| `stream_ends_no_verdict` | Curve disabled, no events. `FinalResult` arrives with `overall_label=unknown`, `analysis_count=0`. |
+| `grpc_deadline_exceeded` | gRPC `DEADLINE_EXCEEDED` at 8 s before the first curve sample fires. Tests premature-termination handling. |
+| `grpc_unavailable_midstream` | gRPC `UNAVAILABLE` at 15 s after ~14 analysis samples. Tests client reconnect / retry. |
+| `model_timeout_event_error` | Event-level `ERROR` mid-stream (not a gRPC fault). Stream stays open; curve continues afterwards. |
+
+### Writing a custom scenario
+
+1. Drop a `*.yaml` file anywhere under `SCENARIOS_DIR`. Subdirectories are walked recursively.
+2. Validate against [`scenarios/scenario.schema.json`](scenarios/scenario.schema.json) (Draft 2020-12). The server runs the same validation at startup and refuses to start on any failure.
+3. Pick a unique `scenario.id` matching `^[a-z0-9][a-z0-9_-]*$`. Duplicates across files are a startup error.
+
+Minimum viable shape:
+```yaml
+version: 1
+scenario:
+  id: my_scenario
+  description: One-line summary.
+stream:
+  duration_ms: 10000
+confidence_curve:
+  type: linear
+  emit_every_ms: 1000
+  from: { at_ms: 0,     fake_probability: 0.10 }
+  to:   { at_ms: 10000, fake_probability: 0.90 }
+```
+
+Optional blocks the schema accepts: `random.seed` (deterministic RNG), `network.{base_latency_ms,jitter_ms,...}` (per-emission latency), `grpc.{initial_metadata,trailing_metadata,terminate_at_ms,status_code,status_message}` (fault injection), `events[]` (explicit `CONFIDENCE_UPDATE` / `FAKE_DETECTED` / `ERROR` at specific `at_ms`). See the bundled scenarios for working examples of each.
+
+VS Code with the Red Hat YAML extension auto-validates against the schema if the workspace `yaml.schemas` setting maps `examples/scenarios/**/*.yaml` to `examples/scenarios/scenario.schema.json` (already configured in the workspace settings).

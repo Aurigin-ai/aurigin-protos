@@ -1,7 +1,8 @@
 # 04 - Public release checklist (repo visibility flip)
 
-The one-time pre-flight before the very first `publish-public.yml`
-run **and** the repo's visibility flip from Private to Public. Steps
+The one-time pre-flight before the very first `publish-pypi.yml` /
+`publish-npm.yml` run **and** the repo's visibility flip from Private
+to Public. Steps
 are independent — tick each off in any order — but every box must be
 green before either action.
 
@@ -79,7 +80,7 @@ any historic secret is exposed forever (git history is permanent).
   `examples/python/Justfile` and any `.env.example` — confirm they
   use placeholders, not real values.
 
-## C. Branch protection + environments
+## C. Branch protection + environment
 
 - [ ] **Branch protection on `main`:**
   - Require PR with at least 1 approving review.
@@ -90,12 +91,12 @@ any historic secret is exposed forever (git history is permanent).
 
 - [ ] **GitHub Environment `public-release` created** (Settings ->
   Environments -> New environment).
-  - **Required reviewers:** at least 2 people from a small,
-    explicit list. This is the manual gate that the public publish
-    pauses on.
+  - **Required reviewers:** none. We don't gate on human approval —
+    the env exists purely so the OIDC token carries an `environment`
+    claim that PyPI's and npm's Trusted Publisher bindings match
+    against.
   - **Deployment branches and tags:** restrict to `main` and tag
-    pattern `v*` so the environment can't be used from feature
-    branches.
+    pattern `v*` so the env can't be claimed from feature branches.
   - **Environment secrets:** none. The whole point of steps 02 + 03
     is that no static secrets exist.
 
@@ -116,9 +117,10 @@ any historic secret is exposed forever (git history is permanent).
 
 - [ ] **Dry-run the first public publish on a `0.0.1-rc1`**:
   ```bash
-  git tag v0.1.0-rc1 && git push origin v0.1.0-rc1
-  # Wait for publish-codeartifact.yml to land in CA, then:
-  gh workflow run publish-public.yml -f version=0.1.0-rc1
+  # Single dispatch: tags main as v0.1.0-rc1, creates the GitHub Release
+  # (auto --prerelease because of the hyphen), and dispatches all three
+  # publish workflows.
+  gh workflow run release.yml -f version=0.1.0-rc1
   ```
   - Approve the `public-release` environment gate.
   - Confirm both packages appear at

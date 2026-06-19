@@ -1,72 +1,38 @@
 // Simulate one or more mobile phone calls by streaming audio to DetectDeepfake.
 //
-// Default mode reads a WAV file (looped to fill --duration, paced in real
-// time). With --fifo, reads from a named pipe instead — designed for a
-// FreeSWITCH `record_session <fifo>` source feeding G.711 μ-law at 8 kHz.
-//
-// In both modes analysis events print as they arrive (the client's "data"
-// listener fires concurrently with sends).
+// Reads a WAV file (looped to fill --duration, paced in real time) and prints
+// analysis events as they arrive (the client's "data" listener fires
+// concurrently with sends).
 //
 // With --concurrency N, opens N concurrent bidi streams over a single
 // gRPC channel. Each stream gets a client-side label (`call-01`, `call-02`,
 // ...) that prefixes every log line so interleaved output stays readable.
-// FIFO mode is single-stream by nature and is rejected with --concurrency > 1.
 //
 // CLI:
-//   # File mode (default)
 //   tsx phone_call.ts [--audio path/to.wav] [--duration 30]
 //                     [--chunk-ms 100] [--target localhost:50051]
-//                     [--concurrency 1]
-//
-//   # FIFO mode
-//   tsx phone_call.ts --fifo /var/lib/freeswitch/recordings/live.r16
-//                     [--codec mulaw|pcm16] [--chunk-ms 100]
-//                     [--target localhost:50051]
+//                     [--concurrency 1] [--scenario-id ID]
 //
 // Defaults:
-//   - File mode: if --audio is omitted, picks the first .wav in
-//     `examples/audio/` (gitignored — drop a fixture in).
-//   - FIFO mode: --codec defaults to `mulaw`. `pcm16` skips the decode.
+//   - if --audio is omitted, picks the first .wav in `examples/audio/`
+//     (gitignored — drop a fixture in).
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { credentials, type ClientDuplexStream } from "@grpc/grpc-js";
+import { Metadata, type ClientDuplexStream } from "@grpc/grpc-js";
 import {
   DeepfakeDetectionClient,
   type DetectDeepfakeRequest,
   type DetectDeepfakeResponse,
 } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+import { channelCredentials, transportLabel } from "./tls.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const DEFAULT_CHUNK_MS = 100;
 const DEFAULT_DURATION_S = 30;
 const DEFAULT_CONCURRENCY = 1;
-const FIFO_SAMPLE_RATE = 8000;
-const FIFO_CHANNELS = 1;
-
-type Codec = "mulaw" | "pcm16";
-
-// ─── μ-law → S16LE lookup table (precomputed once at module load) ──────
-const ULAW_TO_PCM16 = new Int16Array(256);
-for (let i = 0; i < 256; i++) {
-  const u = ~i & 0xff;
-  const sign = u & 0x80;
-  const exp = (u >> 4) & 0x07;
-  const mant = u & 0x0f;
-  let s = ((mant << 3) + 0x84) << exp;
-  s -= 0x84;
-  ULAW_TO_PCM16[i] = sign ? -s : s;
-}
-
-function ulawToPcm16(data: Buffer): Buffer {
-  const out = Buffer.alloc(data.length * 2);
-  for (let i = 0; i < data.length; i++) {
-    out.writeInt16LE(ULAW_TO_PCM16[data[i]], i * 2);
-  }
-  return out;
-}
 
 // ─── Per-stream logger ────────────────────────────────────────────────
 function log(label: string, message: string): void {
@@ -129,7 +95,7 @@ function resolveAudio(arg: string | null): string {
   return path.join(audioDir, wavs[0]);
 }
 
-// ─── Senders ──────────────────────────────────────────────────────────
+// ─── Sender ───────────────────────────────────────────────────────────
 
 type Call = ClientDuplexStream<DetectDeepfakeRequest, DetectDeepfakeResponse>;
 
@@ -187,60 +153,6 @@ async function sendFile(
   call.end();
 }
 
-function sendFifo(
-  call: Call,
-  label: string,
-  fifoPath: string,
-  codec: Codec,
-  chunkMs: number,
-): Promise<void> {
-  const samplesPerChunk = Math.floor((FIFO_SAMPLE_RATE * chunkMs) / 1000);
-  const bytesPerInputChunk =
-    codec === "mulaw" ? samplesPerChunk * FIFO_CHANNELS : samplesPerChunk * FIFO_CHANNELS * 2;
-
-  call.write({ createSessionRequest: {} });
-
-  log(label, `⏳ Waiting for writer on ${fifoPath} (open() blocks)...`);
-  const stream = fs.createReadStream(fifoPath, { highWaterMark: bytesPerInputChunk });
-
-  return new Promise<void>((resolve, reject) => {
-    let ptsNs = 0n;
-    let connected = false;
-
-    stream.on("data", (data) => {
-      if (!connected) {
-        log(label, ">>> Writer connected, streaming audio");
-        connected = true;
-      }
-      const buf = data as Buffer;
-      const pcm = codec === "mulaw" ? ulawToPcm16(buf) : buf;
-      const actualFrames = pcm.length / (2 * FIFO_CHANNELS);
-      const durationNs = BigInt(Math.round((actualFrames / FIFO_SAMPLE_RATE) * 1e9));
-
-      call.write({
-        audio: {
-          type: "audio/x-raw",
-          format: "S16LE",
-          channels: FIFO_CHANNELS,
-          rate: FIFO_SAMPLE_RATE,
-          durationNs,
-          ptsNs,
-          size: BigInt(pcm.length),
-          buffer: pcm,
-        },
-      });
-      ptsNs += durationNs;
-    });
-
-    stream.on("end", () => {
-      log(label, "<<< FIFO closed by writer");
-      call.end();
-      resolve();
-    });
-    stream.on("error", reject);
-  });
-}
-
 // ─── Receiver (concurrent with sender) ────────────────────────────────
 
 function listen(call: Call, label: string): Promise<void> {
@@ -275,44 +187,40 @@ function listen(call: Call, label: string): Promise<void> {
 
 interface Args {
   audio: string | null;
-  fifo: string | null;
-  codec: Codec;
   duration: number;
   chunkMs: number;
   target: string;
   concurrency: number;
+  staggerMs: number;
+  scenarioId: string | null;
 }
 
 function parseArgs(argv: string[]): Args {
   const out: Args = {
     audio: null,
-    fifo: null,
-    codec: "mulaw",
     duration: DEFAULT_DURATION_S,
     chunkMs: DEFAULT_CHUNK_MS,
     target: "localhost:50051",
     concurrency: DEFAULT_CONCURRENCY,
+    staggerMs: 0,
+    scenarioId: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => argv[++i];
     switch (arg) {
       case "--audio": out.audio = next(); break;
-      case "--fifo": out.fifo = next(); break;
-      case "--codec": {
-        const v = next();
-        if (v !== "mulaw" && v !== "pcm16") throw new Error(`--codec must be mulaw|pcm16, got ${v}`);
-        out.codec = v;
-        break;
-      }
       case "--duration": out.duration = Number(next()); break;
       case "--chunk-ms": out.chunkMs = Number(next()); break;
       case "--target": out.target = next(); break;
       case "-c": case "--concurrency": out.concurrency = Number(next()); break;
+      case "--stagger-ms": out.staggerMs = Number(next()); break;
+      case "--scenario-id": out.scenarioId = next(); break;
       case "-h": case "--help":
-        console.log("Usage: tsx phone_call.ts [--audio FILE | --fifo PATH] [--codec mulaw|pcm16]");
-        console.log("                         [--duration SEC] [--chunk-ms MS] [--target HOST:PORT]");
-        console.log("                         [--concurrency N | -c N]");
+        console.log("Usage: tsx phone_call.ts [--audio FILE] [--duration SEC]");
+        console.log("                         [--chunk-ms MS] [--target HOST:PORT]");
+        console.log("                         [--concurrency N | -c N] [--stagger-ms MS]");
+        console.log("                         [--scenario-id ID]");
         process.exit(0);
       default: throw new Error(`Unknown arg: ${arg}`);
     }
@@ -320,8 +228,8 @@ function parseArgs(argv: string[]): Args {
   if (!Number.isInteger(out.concurrency) || out.concurrency < 1) {
     throw new Error("--concurrency must be a positive integer");
   }
-  if (out.fifo && out.concurrency > 1) {
-    throw new Error("--fifo is single-stream by nature; --concurrency > 1 is incompatible.");
+  if (!Number.isFinite(out.staggerMs) || out.staggerMs < 0) {
+    throw new Error("--stagger-ms must be >= 0");
   }
   return out;
 }
@@ -341,9 +249,21 @@ interface CallResult {
 async function runOneCall(
   client: DeepfakeDetectionClient,
   label: string,
+  metadata: Metadata | undefined,
   senderFactory: (call: Call, label: string) => Promise<void>,
+  delayMs: number = 0,
+  isShuttingDown: () => boolean = () => false,
+  registerCall: (call: Call) => void = () => {},
 ): Promise<CallResult> {
-  const call = client.detectDeepfake();
+  // With delayMs > 0, sleep before opening the stream — used by --stagger-ms
+  // to fan out start times across concurrent calls.
+  if (delayMs > 0) await sleep(delayMs);
+  // If a SIGINT/SIGTERM arrived during the stagger wait, skip opening this
+  // stream entirely. Without this we'd open a fresh call onto a channel that
+  // is about to be closed.
+  if (isShuttingDown()) return { label, error: new Error("Cancelled before start (signal)") };
+  const call = metadata ? client.detectDeepfake(metadata) : client.detectDeepfake();
+  registerCall(call);
   try {
     await Promise.all([senderFactory(call, label), listen(call, label)]);
     return { label, error: null };
@@ -356,40 +276,70 @@ async function runOneCall(
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const client = new DeepfakeDetectionClient(args.target, credentials.createInsecure());
+  const client = new DeepfakeDetectionClient(args.target, channelCredentials());
+  const transportSuffix = ` | transport=${transportLabel("client")}`;
   const labels = makeLabels(args.concurrency);
+
+  let metadata: Metadata | undefined;
+  if (args.scenarioId) {
+    metadata = new Metadata();
+    metadata.set("x-scenario-id", args.scenarioId);
+  }
+  const scenarioSuffix = args.scenarioId ? ` | scenario=${args.scenarioId}` : "";
+  const staggerSuffix = args.staggerMs ? ` | stagger=${args.staggerMs}ms` : "";
+
+  // Graceful Ctrl-C: cancel every in-flight stream. listen()'s "error" handler
+  // rejects, runOneCall catches, returns {label, error} — Promise.all still
+  // resolves and the summary prints normally.
+  const activeCalls: Call[] = [];
+  let shuttingDown = false;
+  const shutdown = (signame: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    process.stderr.write(`\nReceived ${signame}, cancelling streams...\n`);
+    for (const c of activeCalls) {
+      try { c.cancel(); } catch { /* best-effort */ }
+    }
+  };
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 
   let results: CallResult[];
   try {
-    if (args.fifo) {
-      console.log(
-        `📞 Calling ${args.target} | source=${args.fifo} (FIFO, ${args.codec}, ` +
-          `${FIFO_SAMPLE_RATE}Hz/${FIFO_CHANNELS}ch) | frame=${args.chunkMs}ms`,
-      );
-      console.log("─".repeat(70));
-      const senderFactory = (call: Call, label: string) =>
-        sendFifo(call, label, args.fifo!, args.codec, args.chunkMs);
-      results = await Promise.all(labels.map((label) => runOneCall(client, label, senderFactory)));
-    } else {
-      const audioPath = resolveAudio(args.audio);
-      const wav = readWav(audioPath);
-      const fileDur = wav.pcm.length / (wav.sampleRate * 2 * wav.channels);
-      console.log(
-        `📞 Calling ${args.target} | source=${path.basename(audioPath)} ` +
-          `(${fileDur.toFixed(2)}s @ ${wav.sampleRate}Hz/${wav.channels}ch) ` +
-          `| duration=${args.duration.toFixed(1)}s | frame=${args.chunkMs}ms | ` +
-          `concurrency=${args.concurrency}`,
-      );
-      console.log("─".repeat(70));
-      const senderFactory = (call: Call, label: string) =>
-        sendFile(call, label, wav, args.duration, args.chunkMs);
-      results = await Promise.all(labels.map((label) => runOneCall(client, label, senderFactory)));
-    }
+    const audioPath = resolveAudio(args.audio);
+    const wav = readWav(audioPath);
+    const fileDur = wav.pcm.length / (wav.sampleRate * 2 * wav.channels);
+    console.log(
+      `📞 Calling ${args.target} | source=${path.basename(audioPath)} ` +
+        `(${fileDur.toFixed(2)}s @ ${wav.sampleRate}Hz/${wav.channels}ch) ` +
+        `| duration=${args.duration.toFixed(1)}s | frame=${args.chunkMs}ms | ` +
+        `concurrency=${args.concurrency}${staggerSuffix}${scenarioSuffix}${transportSuffix}`,
+    );
+    console.log("─".repeat(70));
+    const senderFactory = (call: Call, label: string) =>
+      sendFile(call, label, wav, args.duration, args.chunkMs);
+    results = await Promise.all(
+      labels.map((label, i) =>
+        runOneCall(
+          client, label, metadata, senderFactory, i * args.staggerMs,
+          () => shuttingDown, (c) => activeCalls.push(c),
+        ),
+      ),
+    );
   } finally {
     client.close();
   }
 
   const failures = results.filter((r) => r.error !== null);
+  if (shuttingDown) {
+    // Cancellation paths look like errors; treat them as a clean exit since
+    // SIGINT was intentional.
+    process.stderr.write("─".repeat(70) + "\n");
+    process.stderr.write(
+      `Shutdown complete (${args.concurrency - failures.length}/${args.concurrency} streams finished cleanly).\n`,
+    );
+    return;
+  }
   if (args.concurrency > 1) {
     console.log("─".repeat(70));
     const ok = args.concurrency - failures.length;

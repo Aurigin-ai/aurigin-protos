@@ -11,12 +11,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { credentials } from "@grpc/grpc-js";
 import {
   DeepfakeDetectionClient,
   type DetectDeepfakeRequest,
   type DetectDeepfakeResponse,
 } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+import { channelCredentials, transportLabel } from "./tls.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -139,7 +139,8 @@ async function main() {
     ? fs.readdirSync(audioDir).filter((f) => f.endsWith(".wav")).sort().map((f) => path.join(audioDir, f))
     : [];
 
-  const client = new DeepfakeDetectionClient(target, credentials.createInsecure());
+  console.error(`# transport=${transportLabel("client")}`);
+  const client = new DeepfakeDetectionClient(target, channelCredentials());
   try {
     if (wavs.length === 0) {
       await runSession(client, silentChunks(), "silence (3 s @ 16 kHz)");

@@ -2,6 +2,7 @@
   "name": "@aurigin/protos",
   "version": "0.0.0",
   "description": "Generated gRPC TypeScript stubs for Aurigin services",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,7 +14,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc",

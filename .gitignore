@@ -4,6 +4,7 @@ gen/ts/dist/
 gen/ts/node_modules/
 gen/ts/package-lock.json
 gen/ts/*.tgz
+gen/ts/LICENSE
 
 # Generated Python code & build artifacts
 gen/py/aurigin/
@@ -11,6 +12,7 @@ gen/py/twilio/
 gen/py/dist/
 gen/py/build/
 gen/py/*.egg-info/
+gen/py/LICENSE
 
 # Example caches
 examples/typescript/node_modules/

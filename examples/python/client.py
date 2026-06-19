@@ -93,7 +93,9 @@ def main(target: str = "localhost:50051", audio_dir: str | Path | None = None) -
     audio_dir = Path(audio_dir).resolve() if audio_dir else Path(__file__).resolve().parent.parent / "audio"
     wavs = sorted(audio_dir.glob("*.wav")) if audio_dir.is_dir() else []
 
-    with grpc.insecure_channel(target) as channel:
+    from _tls import make_sync_channel, transport_label
+    print(f"# transport={transport_label()}")
+    with make_sync_channel(target) as channel:
         stub = pb_grpc.DeepfakeDetectionStub(channel)
         if not wavs:
             _run_session(stub, _silent_session_iter(), "silence (3 s @ 16 kHz)")

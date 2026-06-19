@@ -13,7 +13,9 @@ Drives a single DetectDeepfake bidi RPC from a Scenario:
 from __future__ import annotations
 
 import asyncio
+import os
 import random
+import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -27,6 +29,23 @@ from . import curves
 from .loader import Scenario
 
 _STATUS_CODE_BY_NAME = {code.name: code for code in grpc.StatusCode}
+
+# Opt-in per-emission logging. Always-on logs (start / fault / end) are below
+# in run_session — this flag only gates the (potentially noisy) one-line-per-
+# AnalysisResult output.
+_LOG_ANALYSES = os.environ.get("SIM_LOG_ANALYSES", "").lower() in ("1", "true", "yes")
+
+
+def _log(session_id: str, message: str) -> None:
+    """Prefix every server-side log line with the session id for grep-ability.
+
+    Writes to sys.stderr (not stdout) and bypasses Python's print() so
+    process-manager wrappers (uv, hatch entry-point shims, just) can't
+    silently buffer the destination. The startup line in server.py works
+    the same way for the same reason.
+    """
+    sys.stderr.write(f"[{session_id}] {message}\n")
+    sys.stderr.flush()
 
 # Sentinel marking the end of the scheduled timeline. Consumed by the
 # main generator loop to know it can stop pulling from the queue.
@@ -202,6 +221,11 @@ async def run_session(scenario: Scenario, request_iterator, context):
     yield pb.DetectDeepfakeResponse(
         create_session_response=pb.CreateSessionResponse(session_id=state.session_id),
     )
+    _log(
+        state.session_id,
+        f"start | scenario={scenario.id} | duration_target={scenario.stream.duration_ms}ms"
+        + (f" | seed={scenario.random_seed}" if scenario.random_seed is not None else ""),
+    )  # verb width 5 chars — kept in sync with 'end  ' and 'fault' below
 
     # 2. Background tasks: drain audio, emit timeline, optional fault.
     out_queue: asyncio.Queue = asyncio.Queue()
@@ -229,8 +253,15 @@ async def run_session(scenario: Scenario, request_iterator, context):
 
             if fault_task and fault_task in done:
                 queue_get.cancel()
-                code = _STATUS_CODE_BY_NAME.get(scenario.grpc.status_code or "INTERNAL", grpc.StatusCode.INTERNAL)
-                await context.abort(code, scenario.grpc.status_message or "simulated fault")
+                code_name = scenario.grpc.status_code or "INTERNAL"
+                code = _STATUS_CODE_BY_NAME.get(code_name, grpc.StatusCode.INTERNAL)
+                message = scenario.grpc.status_message or "simulated fault"
+                _log(
+                    state.session_id,
+                    f"fault | at={state.now_ms(loop)}ms | code={code_name} | message={message!r} "
+                    f"| analyses_so_far={state.analysis_count}",
+                )  # verb width 5 chars — kept in sync with 'start' and 'end  '
+                await context.abort(code, message)
                 return
 
             if audio_task in done and not client_finished:
@@ -244,6 +275,13 @@ async def run_session(scenario: Scenario, request_iterator, context):
             if item is _TIMELINE_DONE:
                 timeline_finished = True
                 continue
+            if _LOG_ANALYSES and item.HasField("analysis_result"):
+                r = item.analysis_result
+                _log(
+                    state.session_id,
+                    f"analysis @ {r.audio_offset_ms / 1000:6.2f}s | score={r.score:.3f} "
+                    f"| label={r.label} | confidence={r.confidence:.2f}",
+                )
             yield item
 
         # 4. If the timeline finished first, still wait for the client to close.
@@ -253,11 +291,18 @@ async def run_session(scenario: Scenario, request_iterator, context):
         if scenario.grpc.trailing_metadata:
             context.set_trailing_metadata(list(scenario.grpc.trailing_metadata.items()))
 
+        total_audio_ms = max(state.accumulated_audio_ms, scenario.stream.duration_ms)
+        overall_label = state.last_label if state.analysis_count > 0 else "unknown"
+        _log(
+            state.session_id,
+            f"end   | total={total_audio_ms}ms | analyses={state.analysis_count} "
+            f"| score={state.last_score:.3f} | label={overall_label}",
+        )  # 'end  ' padded to verb width 5 — matches 'start' and 'fault'
         yield pb.DetectDeepfakeResponse(
             final_result=pb.FinalResult(
-                total_audio_ms=max(state.accumulated_audio_ms, scenario.stream.duration_ms),
+                total_audio_ms=total_audio_ms,
                 overall_score=state.last_score,
-                overall_label=state.last_label if state.analysis_count > 0 else "unknown",
+                overall_label=overall_label,
                 analysis_count=state.analysis_count,
             ),
         )
