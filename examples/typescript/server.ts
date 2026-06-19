@@ -20,7 +20,6 @@ import { fileURLToPath } from "node:url";
 
 import {
   Server,
-  ServerCredentials,
   type ServerDuplexStream,
 } from "@grpc/grpc-js";
 import {
@@ -31,6 +30,7 @@ import {
 } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
 
 import { loadScenarios, runSession, type Scenario } from "./sim/index.js";
+import { serverCredentials, transportLabel } from "./tls.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SCENARIOS_DIR = path.resolve(__dirname, "..", "scenarios");
@@ -39,12 +39,12 @@ function pickScenario(
   metadata: Map<string, string>,
   scenarios: Map<string, Scenario>,
   defaultId: string,
-): Scenario {
+): { scenario: Scenario; requested: string | undefined } {
   const requested = metadata.get("x-scenario-id");
   if (requested && scenarios.has(requested)) {
-    return scenarios.get(requested)!;
+    return { scenario: scenarios.get(requested)!, requested };
   }
-  return scenarios.get(defaultId)!;
+  return { scenario: scenarios.get(defaultId)!, requested };
 }
 
 function metadataToMap(
@@ -66,7 +66,17 @@ function buildImpl(
   return {
     detectDeepfake(call: ServerDuplexStream<DetectDeepfakeRequest, DetectDeepfakeResponse>) {
       const metadata = metadataToMap(call);
-      const scenario = pickScenario(metadata, scenarios, defaultId);
+      const { scenario, requested } = pickScenario(metadata, scenarios, defaultId);
+      // Log the inbound call before the runner starts so the operator sees
+      // *which* scenario the client asked for (and whether we honored it).
+      // The runner's `start` line lands ~1 RTT later with the generated
+      // session id once CreateSessionResponse is written.
+      const peer = call.getPeer ? call.getPeer() : "?";
+      let note: string;
+      if (requested === undefined) note = `requested=none → default=${scenario.id}`;
+      else if (requested === scenario.id) note = `scenario=${scenario.id}`;
+      else note = `requested='${requested}' unknown → fallback=${scenario.id}`;
+      console.error(`[incoming] peer=${peer} | ${note}`);
       runSession(scenario, call).catch((err) => {
         // runSession only throws on programming errors — gRPC-level faults
         // are emitted as `error` events on the call. Log and end cleanly.
@@ -100,17 +110,42 @@ function serve(): void {
 
   server.bindAsync(
     `0.0.0.0:${port}`,
-    ServerCredentials.createInsecure(),
+    serverCredentials(),
     (err, boundPort) => {
       if (err) {
         console.error(err);
         process.exit(1);
       }
-      console.log(
-        `DeepfakeDetection simulator listening on :${boundPort} | ${scenarios.size} scenarios loaded from ${scenariosDir} | default='${defaultId}'`,
+      console.error(
+        `DeepfakeDetection simulator listening on :${boundPort} | ${scenarios.size} scenarios loaded from ${scenariosDir} | default='${defaultId}' | transport=${transportLabel("server")}`,
       );
     },
   );
+
+  // Graceful shutdown on Ctrl-C / SIGTERM. tryShutdown() lets in-flight RPCs
+  // finish; a 2 s deadline triggers forceShutdown() so the process can't hang
+  // on a stuck handler. Without this, the default behavior tears the loop
+  // down mid-handler and leaves sockets / writes in a bad state.
+  let shuttingDown = false;
+  const shutdown = (signame: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    process.stderr.write(`\nReceived ${signame}, shutting down...\n`);
+    const forceTimer = setTimeout(() => {
+      process.stderr.write("Grace period expired, force shutdown.\n");
+      server.forceShutdown();
+      process.exit(0);
+    }, 2000);
+    forceTimer.unref();
+    server.tryShutdown((err) => {
+      clearTimeout(forceTimer);
+      if (err) process.stderr.write(`tryShutdown error: ${err.message}\n`);
+      process.stderr.write("DeepfakeDetection simulator stopped.\n");
+      process.exit(0);
+    });
+  };
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 serve();

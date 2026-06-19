@@ -1,41 +1,29 @@
 """
 Simulate one or more mobile phone calls by streaming audio to DetectDeepfake.
 
-Default mode reads a WAV file (looped to fill --duration, paced in real
-time). With --fifo, reads from a named pipe instead — designed for a
-FreeSWITCH `record_session <fifo>` source feeding G.711 μ-law at 8 kHz.
-
-In both modes analysis events print as they arrive, thanks to grpc.aio's
-concurrent send/recv tasks.
+Reads a WAV file (looped to fill --duration, paced in real time) and prints
+analysis events as they arrive (grpc.aio runs sender + receiver concurrently).
 
 With --concurrency N, opens N concurrent bidi streams over a single
 gRPC channel. Each stream gets a client-side label (`call-01`, `call-02`,
 ...) that prefixes every log line so interleaved output stays readable.
 The server-issued session_id is logged per stream alongside the label.
-FIFO mode is single-stream by nature and is rejected with `--concurrency > 1`.
 
 CLI:
-    # File mode (default)
     python phone_call.py [--audio path/to.wav] [--duration 30] \\
-        [--chunk-ms 100] [--target localhost:50051] [--concurrency 1]
-
-    # FIFO mode (overrides file mode when supplied)
-    python phone_call.py --fifo /var/lib/freeswitch/recordings/live.r16 \\
-        [--codec mulaw|pcm16] [--chunk-ms 100] [--target localhost:50051]
+        [--chunk-ms 100] [--target localhost:50051] [--concurrency 1] \\
+        [--scenario-id ID]
 
 Defaults:
-  - File mode: if --audio is omitted, picks the first .wav in
-    `examples/audio/` (gitignored — drop a fixture in).
-  - FIFO mode: --codec defaults to `mulaw` (G.711 narrowband, the
-    FreeSWITCH default). `pcm16` forwards bytes as 16-bit linear PCM
-    without decoding.
+  - if --audio is omitted, picks the first .wav in `examples/audio/`
+    (gitignored — drop a fixture in).
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import audioop  # stdlib; deprecated in 3.13, still present in 3.11/3.12
+import signal
 import sys
 import wave
 from pathlib import Path
@@ -49,10 +37,6 @@ from twilio.tme.extensions.common.v1 import audio_buffer_pb2 as ab_pb
 DEFAULT_CHUNK_MS = 100
 DEFAULT_DURATION_S = 30.0
 DEFAULT_CONCURRENCY = 1
-
-# FreeSWITCH narrowband defaults for FIFO mode; both codec paths assume mono.
-FIFO_SAMPLE_RATE = 8000
-FIFO_CHANNELS = 1
 
 
 def _log(label: str, message: str, *, file=None) -> None:
@@ -141,61 +125,6 @@ async def _send_call(
     await call.done_writing()
 
 
-async def _send_fifo(call, label: str, fifo_path: Path, codec: str, chunk_ms: int) -> None:
-    """Stream a FreeSWITCH-style named pipe until the writer closes.
-
-    The writer (FreeSWITCH `record_session`, or anything pumping audio at
-    real-time rate) provides natural pacing — we just read, decode if
-    needed, and forward as AudioBuffers.
-    """
-    samples_per_chunk = int(FIFO_SAMPLE_RATE * chunk_ms / 1000)
-    if codec == "mulaw":
-        bytes_per_input_chunk = samples_per_chunk * FIFO_CHANNELS  # 1 byte/sample
-    elif codec == "pcm16":
-        bytes_per_input_chunk = samples_per_chunk * FIFO_CHANNELS * 2  # 2 bytes/sample
-    else:
-        raise ValueError(f"Unknown codec: {codec}")
-
-    await call.write(pb.DetectDeepfakeRequest(create_session_request=pb.CreateSessionRequest()))
-
-    loop = asyncio.get_running_loop()
-    _log(label, f"⏳ Waiting for writer on {fifo_path} (open() blocks)...")
-    fifo = await loop.run_in_executor(None, lambda: open(str(fifo_path), "rb"))
-    _log(label, ">>> Writer connected, streaming audio")
-    try:
-        pts_ns = 0
-        while True:
-            data = await loop.run_in_executor(None, fifo.read, bytes_per_input_chunk)
-            if not data:
-                _log(label, "<<< FIFO closed by writer")
-                break
-
-            # Decode μ-law -> linear S16LE; pcm16 passes through unchanged.
-            pcm = audioop.ulaw2lin(data, 2) if codec == "mulaw" else data
-            actual_frames = len(pcm) // (2 * FIFO_CHANNELS)
-            duration_ns = int(actual_frames / FIFO_SAMPLE_RATE * 1e9)
-
-            await call.write(
-                pb.DetectDeepfakeRequest(
-                    audio=ab_pb.AudioBuffer(
-                        type="audio/x-raw",
-                        format="S16LE",
-                        channels=FIFO_CHANNELS,
-                        rate=FIFO_SAMPLE_RATE,
-                        duration_ns=duration_ns,
-                        pts_ns=pts_ns,
-                        size=len(pcm),
-                        buffer=pcm,
-                    ),
-                )
-            )
-            pts_ns += duration_ns
-    finally:
-        fifo.close()
-
-    await call.done_writing()
-
-
 async def _recv_call(call, label: str) -> None:
     """Print every server response as it arrives, prefixed with the stream label."""
     async for response in call:
@@ -223,8 +152,15 @@ async def _run_one_call(
     label: str,
     sender_factory,
     metadata: tuple[tuple[str, str], ...] = (),
+    delay_s: float = 0.0,
 ) -> tuple[str, BaseException | None]:
-    """Open one bidi stream, run sender + receiver concurrently. Return (label, exception_or_none)."""
+    """Open one bidi stream, run sender + receiver concurrently. Return (label, exception_or_none).
+
+    With delay_s > 0, sleeps that long before opening the stream — used by
+    --stagger-ms to fan out the start times across concurrent calls.
+    """
+    if delay_s > 0:
+        await asyncio.sleep(delay_s)
     call = stub.DetectDeepfake(metadata=metadata) if metadata else stub.DetectDeepfake()
     try:
         await asyncio.gather(sender_factory(call, label), _recv_call(call, label))
@@ -241,14 +177,16 @@ def _make_labels(n: int) -> list[str]:
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     parser.add_argument("--audio", type=Path, default=None, help="WAV file to stream (defaults to first in audio/)")
-    parser.add_argument("--duration", type=float, default=DEFAULT_DURATION_S, help="Call length in seconds (file mode only)")
+    parser.add_argument("--duration", type=float, default=DEFAULT_DURATION_S, help="Call length in seconds")
     parser.add_argument("--chunk-ms", type=int, default=DEFAULT_CHUNK_MS, help="Audio frame size in milliseconds")
     parser.add_argument("--target", default="localhost:50051", help="gRPC server host:port")
-    parser.add_argument("--fifo", type=Path, default=None, help="Read live audio from a named pipe instead of a WAV file")
-    parser.add_argument("--codec", choices=["mulaw", "pcm16"], default="mulaw", help="FIFO codec (file mode auto-detects)")
     parser.add_argument(
         "-c", "--concurrency", type=int, default=DEFAULT_CONCURRENCY,
-        help="Number of concurrent streams to open over a single channel (file mode only).",
+        help="Number of concurrent streams to open over a single channel.",
+    )
+    parser.add_argument(
+        "--stagger-ms", type=int, default=0,
+        help="Delay between successive concurrent kickoffs in ms. 0 = all calls start at the same instant.",
     )
     parser.add_argument(
         "--scenario-id", default=None,
@@ -258,52 +196,78 @@ async def main() -> None:
 
     if args.concurrency < 1:
         parser.error("--concurrency must be >= 1")
-    if args.fifo is not None and args.concurrency > 1:
-        parser.error("--fifo is single-stream by nature; --concurrency > 1 is incompatible.")
+    if args.stagger_ms < 0:
+        parser.error("--stagger-ms must be >= 0")
 
     labels = _make_labels(args.concurrency)
     metadata: tuple[tuple[str, str], ...] = (
         (("x-scenario-id", args.scenario_id),) if args.scenario_id else ()
     )
     scenario_suffix = f" | scenario={args.scenario_id}" if args.scenario_id else ""
+    stagger_suffix = f" | stagger={args.stagger_ms}ms" if args.stagger_ms else ""
 
-    async with grpc.aio.insecure_channel(args.target) as channel:
+    from _tls import make_aio_channel, transport_label
+    transport_suffix = f" | transport={transport_label()}"
+
+    async with make_aio_channel(args.target) as channel:
         stub = pb_grpc.DeepfakeDetectionStub(channel)
 
-        if args.fifo is not None:
+        audio_path = _resolve_audio(args.audio)
+        pcm, rate, channels = _load_pcm(audio_path)
+        print(
+            f"📞 Calling {args.target} | source={audio_path.name} "
+            f"({len(pcm) / (rate * 2 * channels):.2f}s @ {rate}Hz/{channels}ch) "
+            f"| duration={args.duration:.1f}s | frame={args.chunk_ms}ms | "
+            f"concurrency={args.concurrency}{stagger_suffix}{scenario_suffix}{transport_suffix}"
+        )
+        print("─" * 70)
+
+        def file_sender(call, label):
+            return _send_call(call, label, pcm, rate, channels, args.chunk_ms, args.duration)
+
+        stagger_s = args.stagger_ms / 1000
+        tasks = [
+            asyncio.create_task(
+                _run_one_call(stub, label, file_sender, metadata, delay_s=i * stagger_s),
+            )
+            for i, label in enumerate(labels)
+        ]
+
+        # Graceful Ctrl-C: cancel each per-call task. _run_one_call's
+        # `except BaseException` converts CancelledError into a clean
+        # (label, exc) tuple, so asyncio.gather still completes with all
+        # results and we can print the usual summary instead of dumping a
+        # traceback.
+        loop = asyncio.get_running_loop()
+        shutdown_seen = False
+
+        def _request_shutdown(signame: str) -> None:
+            nonlocal shutdown_seen
+            if shutdown_seen:
+                return
+            shutdown_seen = True
             print(
-                f"📞 Calling {args.target} | source={args.fifo} (FIFO, {args.codec}, "
-                f"{FIFO_SAMPLE_RATE}Hz/{FIFO_CHANNELS}ch) | frame={args.chunk_ms}ms{scenario_suffix}"
+                f"\nReceived {signame}, cancelling streams...",
+                file=sys.stderr, flush=True,
             )
-            print("─" * 70)
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
 
-            def fifo_sender(call, label):
-                return _send_fifo(call, label, args.fifo, args.codec, args.chunk_ms)
+        for sig, name in ((signal.SIGINT, "SIGINT"), (signal.SIGTERM, "SIGTERM")):
+            loop.add_signal_handler(sig, _request_shutdown, name)
 
-            results = await asyncio.gather(
-                *(_run_one_call(stub, label, fifo_sender, metadata) for label in labels),
-                return_exceptions=False,
-            )
-        else:
-            audio_path = _resolve_audio(args.audio)
-            pcm, rate, channels = _load_pcm(audio_path)
-            print(
-                f"📞 Calling {args.target} | source={audio_path.name} "
-                f"({len(pcm) / (rate * 2 * channels):.2f}s @ {rate}Hz/{channels}ch) "
-                f"| duration={args.duration:.1f}s | frame={args.chunk_ms}ms | "
-                f"concurrency={args.concurrency}{scenario_suffix}"
-            )
-            print("─" * 70)
-
-            def file_sender(call, label):
-                return _send_call(call, label, pcm, rate, channels, args.chunk_ms, args.duration)
-
-            results = await asyncio.gather(
-                *(_run_one_call(stub, label, file_sender, metadata) for label in labels),
-                return_exceptions=False,
-            )
+        results = await asyncio.gather(*tasks)
 
     failures = [(label, exc) for label, exc in results if exc is not None]
+    if shutdown_seen:
+        # All failures are cancellations from our signal handler. The summary
+        # below still prints so the user can see what each stream did before
+        # tear-down, but the process exits 0 — Ctrl-C is intentional, not an
+        # error.
+        print("─" * 70, file=sys.stderr)
+        print(f"Shutdown complete ({args.concurrency - len(failures)}/{args.concurrency} streams finished cleanly).", file=sys.stderr)
+        return
     if args.concurrency > 1:
         print("─" * 70)
         ok = args.concurrency - len(failures)
@@ -326,7 +290,16 @@ async def main() -> None:
 
 def cli() -> None:
     """Sync entrypoint for `uv run phone-call`."""
-    asyncio.run(main())
+    # See the long note in server.py: asyncio.run() installs a Python-level
+    # SIGINT handler that fights our loop.add_signal_handler. Driving the
+    # loop manually keeps add_signal_handler as the only SIGINT path so
+    # Ctrl-C cancels the per-call tasks cleanly instead of unwinding through
+    # the runner with a CancelledError traceback.
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(main())
+    finally:
+        loop.close()
 
 
 if __name__ == "__main__":

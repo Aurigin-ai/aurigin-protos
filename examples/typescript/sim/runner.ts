@@ -28,6 +28,20 @@ import type { Scenario, ScenarioEvent } from "./loader.js";
 type Call = ServerDuplexStream<DetectDeepfakeRequest, DetectDeepfakeResponse>;
 type Rng = curves.Rng;
 
+// Opt-in per-emission logging. Always-on logs (start / fault / end) are
+// emitted below in runSession — this flag only gates the (potentially noisy)
+// one-line-per-AnalysisResult output.
+const LOG_ANALYSES = ["1", "true", "yes"].includes(
+  (process.env.SIM_LOG_ANALYSES ?? "").toLowerCase(),
+);
+
+function log(sessionId: string, message: string): void {
+  // Prefix every server-side log line with the session id for grep-ability.
+  // Use console.error (stderr) for parity with the Python side — process
+  // supervisors are less likely to buffer stderr than stdout.
+  console.error(`[${sessionId}] ${message}`);
+}
+
 const STATUS_CODE_BY_NAME: Record<string, number> = {
   OK: GrpcStatus.OK,
   CANCELLED: GrpcStatus.CANCELLED,
@@ -265,6 +279,13 @@ export async function runSession(scenario: Scenario, call: Call): Promise<void> 
   }
 
   call.write({ createSessionResponse: { sessionId: state.sessionId } } as DetectDeepfakeResponse);
+  // Verb width 5 chars — kept in sync with 'end  ' and 'fault' below so '|'
+  // aligns when grepping per-session log output.
+  log(
+    state.sessionId,
+    `start | scenario=${scenario.id} | duration_target=${scenario.stream.durationMs}ms` +
+      (scenario.randomSeed != null ? ` | seed=${scenario.randomSeed}` : ""),
+  );
 
   // 2. Schedule timeline emissions and fault. Each emission applies network
   //    delay before writing.
@@ -278,7 +299,18 @@ export async function runSession(scenario: Scenario, call: Call): Promise<void> 
       await applyNetwork(scenario.network, rng);
       if (clientEnded || faultFired) return;
       const response = materialise(item, scenario, state, rng, item.atMs);
-      if (response) call.write(response);
+      if (response) {
+        if (LOG_ANALYSES && response.analysisResult) {
+          const r = response.analysisResult;
+          const offsetS = (Number(r.audioOffsetMs) / 1000).toFixed(2).padStart(6);
+          log(
+            state.sessionId,
+            `analysis @ ${offsetS}s | score=${r.score.toFixed(3)} | ` +
+              `label=${r.label} | confidence=${r.confidence.toFixed(2)}`,
+          );
+        }
+        call.write(response);
+      }
     }, item.atMs);
     timers.push(t);
   }
@@ -287,11 +319,16 @@ export async function runSession(scenario: Scenario, call: Call): Promise<void> 
     const t = setTimeout(() => {
       if (clientEnded) return;
       faultFired = true;
-      const code = STATUS_CODE_BY_NAME[scenario.grpc.statusCode ?? "INTERNAL"] ?? GrpcStatus.INTERNAL;
-      call.emit("error", {
-        code,
-        message: scenario.grpc.statusMessage ?? "simulated fault",
-      });
+      const codeName = scenario.grpc.statusCode ?? "INTERNAL";
+      const code = STATUS_CODE_BY_NAME[codeName] ?? GrpcStatus.INTERNAL;
+      const message = scenario.grpc.statusMessage ?? "simulated fault";
+      log(
+        state.sessionId,
+        // 'fault' is verb width 5 — kept in sync with 'start' / 'end  '.
+        `fault | at=${scenario.grpc.terminateAtMs}ms | code=${codeName} | message=${JSON.stringify(message)} ` +
+          `| analyses_so_far=${state.analysisCount}`,
+      );
+      call.emit("error", { code, message });
     }, scenario.grpc.terminateAtMs);
     timers.push(t);
   }
@@ -322,11 +359,19 @@ export async function runSession(scenario: Scenario, call: Call): Promise<void> 
     (call as any).trailingMetadata = md;
   }
 
+  const totalAudioMs = Math.max(state.accumulatedAudioMs, scenario.stream.durationMs);
+  const overallLabel = state.analysisCount > 0 ? state.lastLabel : "unknown";
+  log(
+    state.sessionId,
+    // 'end  ' padded to verb width 5 — matches 'start' / 'fault'.
+    `end   | total=${totalAudioMs}ms | analyses=${state.analysisCount} ` +
+      `| score=${state.lastScore.toFixed(3)} | label=${overallLabel}`,
+  );
   call.write({
     finalResult: {
-      totalAudioMs: BigInt(Math.max(state.accumulatedAudioMs, scenario.stream.durationMs)),
+      totalAudioMs: BigInt(totalAudioMs),
       overallScore: state.lastScore,
-      overallLabel: state.analysisCount > 0 ? state.lastLabel : "unknown",
+      overallLabel,
       analysisCount: state.analysisCount,
     },
   } as DetectDeepfakeResponse);

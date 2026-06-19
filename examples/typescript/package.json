@@ -8,6 +8,13 @@
     "server": "tsx server.ts",
     "client": "tsx client.ts",
     "phone-call": "tsx phone_call.ts",
+    "scenarios": "tsx scenarios.ts",
+    "call": "tsx phone_call.ts --duration 10 --scenario-id",
+    "burst": "tsx phone_call.ts --duration 10",
+    "mtls-server": "MTLS=1 tsx server.ts",
+    "mtls-call": "MTLS=1 tsx phone_call.ts --duration 10 --scenario-id",
+    "mtls-burst": "MTLS=1 tsx phone_call.ts --duration 10",
+    "tls": "mkdir -p ../certs && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout ../certs/server.key -out ../certs/server.crt -days 36500 -subj '/CN=aurigin-protos-example/O=Example only — DO NOT USE IN PRODUCTION' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1' && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout ../certs/client.key -out ../certs/client.crt -days 36500 -subj '/CN=aurigin-protos-example-client/O=Example only — DO NOT USE IN PRODUCTION' && echo '→ server.{crt,key} + client.{crt,key} regenerated. TLS auto; mTLS when MTLS=1.'",
     "test": "node --import tsx --test --test-force-exit tests/smoke.test.ts"
   },
   "dependencies": {
