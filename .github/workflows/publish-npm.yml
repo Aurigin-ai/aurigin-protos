@@ -6,13 +6,15 @@ name: Publish to npm
 # Pauses on the `public-release` GitHub Environment for human approval
 # before npm sees a request.
 #
-# Trust configuration (one-time, no secrets in this repo):
-#   - npm Trusted Publisher   → see infra/public/03-npm-oidc-publisher.md
-#                               binding: (owner, repo, workflow file=publish-npm.yml, env=public-release)
+# Auth configuration:
+#   - npm publish uses NPM_TOKEN (granular access token, publish scope on
+#     @aurigin/*) stored as a GitHub Environment secret on `public-release`.
+#   - --provenance still attaches sigstore attestation using the workflow's
+#     OIDC token (id-token: write below) — provenance and NPM_TOKEN coexist.
 #   - GitHub Environment gate → see infra/public/04-public-release-checklist.md
 #
-# No NPM_TOKEN. The trust chain is a short-lived OIDC token minted at job
-# start, validated by npm against the Trusted Publisher binding.
+# Future: migrate to npm Trusted Publisher (no NPM_TOKEN) once the @aurigin
+# org has the OIDC binding configured — see infra/public/03-npm-oidc-publisher.md.
 on:
   workflow_dispatch:
     inputs:
@@ -89,13 +91,18 @@ jobs:
           npm install --no-audit --no-fund
           npm run build
 
-      - name: Publish to npm (Trusted Publisher + sigstore provenance)
+      - name: Publish to npm (NPM_TOKEN + sigstore provenance)
         working-directory: gen/ts
-        # --provenance attaches sigstore attestation of commit + workflow.
+        # --provenance attaches sigstore attestation of commit + workflow
+        #   (still uses the workflow's OIDC token via id-token: write above).
         # --access public required on first publish of a scoped package;
         #   no-op on subsequent publishes.
-        # No NODE_AUTH_TOKEN / NPM_TOKEN — npm validates the OIDC token
-        # against the Trusted Publisher binding.
+        # NPM_TOKEN: granular access token with read+write on @aurigin/*,
+        #   stored as a repo / environment secret. Once the package exists
+        #   on npmjs.com, swap to Trusted Publisher (no token) — see infra
+        #   docs.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --provenance --access public
 
       - name: Step summary
