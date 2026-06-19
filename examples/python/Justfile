@@ -1,11 +1,10 @@
 # aurigin-protos Python example runner.
 #
 # Wraps the `uv run server|client|phone-call` invocations documented in
-# examples/README.md so devs don't need to memorise the CodeArtifact
-# token dance or the phone-call CLI flags.
+# examples/README.md so devs don't need to memorise the phone-call CLI flags.
+# Deps resolve from public PyPI — no CodeArtifact auth required.
 #
 # Usage:
-#   eval "$(just token)"         # refresh CodeArtifact creds into shell
 #   just sync                    # uv sync (installs aurigin-protos + grpcio)
 #   just server                  # run the stub DeepfakeDetection server
 #   just client                  # client against default localhost:50051
@@ -17,43 +16,21 @@
 set shell := ["bash", "-cu"]
 set dotenv-load := true
 
-CA_DOMAIN       := "aurigin-ai-domain"
-CA_DOMAIN_OWNER := "717279723333"
-CA_REGION       := "eu-west-1"
-
 [private]
 default:
     @just --list --unsorted
 
 # ─── setup ───────────────────────────────────────────────────────────────────
 
-# Print the export lines uv needs — run with `eval "$(just token)"`.
-# Emits both CODEARTIFACT_AUTH_TOKEN (for scripts/downstream) and
-# UV_INDEX_AURIGIN_USERNAME / UV_INDEX_AURIGIN_PASSWORD (modern uv
-# reads these to authenticate the `aurigin` index in pyproject.toml).
-[group('setup')]
-token:
-    @set -e; \
-    TOKEN=$(aws codeartifact get-authorization-token \
-        --domain {{CA_DOMAIN}} --domain-owner {{CA_DOMAIN_OWNER}} \
-        --region {{CA_REGION}} --query authorizationToken --output text); \
-    if [ -z "$TOKEN" ] || [ "$TOKEN" = "None" ]; then \
-        echo "ERROR: empty token. Run: export AWS_PROFILE=aurigin-shared && aws sso login" >&2; \
-        exit 1; \
-    fi; \
-    echo "export CODEARTIFACT_AUTH_TOKEN=$TOKEN"; \
-    echo "export UV_INDEX_AURIGIN_USERNAME=aws"; \
-    echo "export UV_INDEX_AURIGIN_PASSWORD=$TOKEN"
-
-# uv sync — install aurigin-protos + grpcio (needs CODEARTIFACT_AUTH_TOKEN).
+# uv sync — install aurigin-protos + grpcio from public PyPI.
 [group('setup')]
 sync:
     uv sync
 
-# One-shot: refresh token + sync deps + run smoke tests.
+# One-shot: sync deps + run smoke tests.
 [group('setup')]
 bootstrap:
-    @eval "$(just token)" && just sync && just smoke
+    @just sync && just smoke
 
 # Wipe .venv/ and pytest/python caches in this dir.
 [group('setup')]

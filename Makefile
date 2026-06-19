@@ -38,8 +38,9 @@ help:
 	@echo "    publish-py-codeartifact Publish aurigin-protos via twine"
 	@echo "    publish-codeartifact    Both of the above"
 	@echo ""
-	@echo "  Public PyPI + npm publishing happens via the publish-public.yml"
-	@echo "  workflow (manual dispatch only) — no make target."
+	@echo "  Public PyPI publishing happens via the publish-pypi.yml workflow"
+	@echo "  and npm publishing via publish-npm.yml (both manual dispatch only)"
+	@echo "  — no make targets."
 	@echo ""
 	@echo "  clean                     Remove generated and built artifacts"
 
@@ -75,6 +76,10 @@ generate: install
 	buf generate
 	# Ensure every Python sub-package is importable
 	@find gen/py/aurigin gen/py/twilio -type d -exec touch {}/__init__.py \;
+	# Drop the repo LICENSE into each language package so it ships in the
+	# published tarball and PyPI / npm display the right SPDX identifier.
+	@cp LICENSE gen/py/LICENSE
+	@cp LICENSE gen/ts/LICENSE
 
 build-ts: generate
 	cd gen/ts && npm run build

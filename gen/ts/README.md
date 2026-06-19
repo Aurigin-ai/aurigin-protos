@@ -8,7 +8,7 @@ Generated gRPC TypeScript stubs for Aurigin services. Built from [`aurigin-proto
 npm install @aurigin/protos @grpc/grpc-js
 ```
 
-Ships with sigstore-backed provenance — installers and registries can verify the published tarball was built from the tagged commit on the repository's `publish-public.yml` workflow.
+Ships with sigstore-backed provenance — installers and registries can verify the published tarball was built from the tagged commit on the repository's `publish-npm.yml` workflow.
 
 Aurigin services that need a pre-promotion (release-candidate) version can install from the internal AWS CodeArtifact mirror under the same scope; see the [`infra/aws/`](https://github.com/Aurigin-ai/aurigin-protos/tree/main/infra/aws) runbook in the repo for the connection details.
 
@@ -48,4 +48,4 @@ Currently published modules:
 
 ## Source
 
-This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/Aurigin-ai/aurigin-protos), tag a release (`git tag v<x.y.z> && git push --tags`); `publish-codeartifact.yml` ships to the internal CodeArtifact channel automatically, and `publish-public.yml` promotes the same version to public npmjs.com on manual dispatch. For local dry-runs, `make publish-ts-codeartifact`.
+This package is generated. To add or change a service, edit the `.proto` files in [aurigin-protos](https://github.com/Aurigin-ai/aurigin-protos), then cut a release via `gh workflow run release.yml -f version=<x.y.z>`. The orchestrator tags `main`, creates a GitHub Release, and dispatches `publish-codeartifact.yml` (internal) + `publish-npm.yml` (public npmjs.com, runs in the `public-release` env for the OIDC claim — no reviewer gate). For local dry-runs, `make publish-ts-codeartifact`.

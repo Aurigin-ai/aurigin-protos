@@ -2,14 +2,17 @@ name: Publish to PyPI
 
 # Manual promote-to-public publish of aurigin-protos to https://pypi.org/.
 #
-# Triggered ONLY via the Actions "Run workflow" button — never automatic.
-# Pauses on the `public-release` GitHub Environment for human approval
-# before PyPI sees a request.
+# Triggered ONLY via the Actions "Run workflow" button (typically by the
+# release.yml orchestrator) — never automatic.
 #
 # Trust configuration (one-time, no secrets in this repo):
-#   - PyPI Trusted Publisher  → see infra/public/02-pypi-trusted-publisher.md
-#                               binding: (owner, repo, workflow file=publish-pypi.yml, env=public-release)
-#   - GitHub Environment gate → see infra/public/04-public-release-checklist.md
+#   - PyPI Trusted Publisher → see infra/public/02-pypi-trusted-publisher.md
+#                              binding: (owner, repo, workflow file=publish-pypi.yml,
+#                              environment=public-release).
+#
+# The `public-release` GitHub Environment exists on this repo purely so the
+# OIDC token carries an `environment` claim that PyPI's Trusted Publisher
+# binding can match. It does not gate the workflow (no required reviewers).
 #
 # No PYPI_API_TOKEN. The trust chain is a short-lived OIDC token minted at job
 # start, validated by PyPI against the Trusted Publisher binding.

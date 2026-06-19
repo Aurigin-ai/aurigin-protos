@@ -56,7 +56,7 @@ What to do here:
    created under that account).
 
 Skip to "B. npm side". The actual name claim happens via OIDC in
-step 02; the first time `publish-public.yml` runs, PyPI creates
+step 02; the first time `publish-pypi.yml` runs, PyPI creates
 `aurigin-protos` and binds it to this account.
 
 ### A2. Fallback: seed-publish a 0.0.0 placeholder

@@ -2,7 +2,8 @@
 
 [![CI](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/ci.yml/badge.svg)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/ci.yml)
 [![Publish (CodeArtifact)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/publish-codeartifact.yml/badge.svg)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/publish-codeartifact.yml)
-[![Publish (PyPI + npm)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/publish-public.yml/badge.svg)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/publish-public.yml)
+[![Publish (PyPI)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/publish-pypi.yml/badge.svg)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/publish-pypi.yml)
+[![Publish (npm)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/publish-npm.yml/badge.svg)](https://github.com/Aurigin-ai/aurigin-protos/actions/workflows/publish-npm.yml)
 [![PyPI version](https://img.shields.io/pypi/v/aurigin-protos?label=pypi%20%E2%80%A2%20aurigin-protos&logo=pypi&logoColor=white)](https://pypi.org/project/aurigin-protos/)
 [![npm version](https://img.shields.io/npm/v/@aurigin/protos?label=npm%20%E2%80%A2%20%40aurigin%2Fprotos&logo=npm&logoColor=white)](https://www.npmjs.com/package/@aurigin/protos)
 [![Built with buf](https://img.shields.io/badge/built%20with-buf-1A2B49?logo=buf&logoColor=white)](https://buf.build)
@@ -23,7 +24,7 @@ The **PyPI** and **npm** badges above are the canonical source of truth for the 
 - [`pypi.org/project/aurigin-protos`](https://pypi.org/project/aurigin-protos/) — Python wheel
 - [`npmjs.com/package/@aurigin/protos`](https://www.npmjs.com/package/@aurigin/protos) — TypeScript / gRPC-JS package
 
-Both packages are stamped with the same `vX.Y.Z` from one `publish-public.yml` run, so the two badges always advance together. Because that workflow is a manual promotion, the public version may briefly lag the most recent `v*` tag while a release candidate is being smoke-tested internally — for Aurigin services that need the bleeding-edge tagged version, the AWS CodeArtifact channel always has it (see [Consuming the packages](#consuming-the-packages) below).
+Both packages are stamped with the same `vX.Y.Z` — PyPI via `publish-pypi.yml`, npm via `publish-npm.yml`. Dispatch them together for a coordinated release; the two badges then advance in lockstep. Because both workflows are manual promotions, the public versions may briefly lag the most recent `v*` tag while a release candidate is being smoke-tested internally — for Aurigin services that need the bleeding-edge tagged version, the AWS CodeArtifact channel always has it (see [Consuming the packages](#consuming-the-packages) below).
 
 Quick install — no auth, no extra index, just:
 
@@ -86,8 +87,8 @@ For maintainers (publishing):
 - `buf` — `brew install bufbuild/buf/buf`
 - Node 22+ — used to run `ts-proto` and build the TS package
 - Python 3.10+ with `build` (only — the publish workflows run `twine` themselves)
-- AWS CLI v2 with credentials for the shared account, for local dry-runs of the CodeArtifact path. Not required at all for the public-release flow — `publish-public.yml` runs purely on OIDC tokens from GitHub.
-- `gh` CLI authenticated against the `Aurigin-ai` org — required to trigger the public-release promotion (`gh workflow run publish-public.yml -f version=X.Y.Z`).
+- AWS CLI v2 with credentials for the shared account, for local dry-runs of the CodeArtifact path. Not required for public publishing — `publish-pypi.yml` and `publish-npm.yml` run purely on OIDC tokens from GitHub.
+- `gh` CLI authenticated against the `Aurigin-ai` org — required to cut a release (`gh workflow run release.yml -f version=X.Y.Z`, which dispatches all three publish workflows for you). Direct dispatch of `publish-codeartifact.yml` / `publish-pypi.yml` / `publish-npm.yml` is available for re-runs and recoveries.
 
 The AWS + public-registry setup that backs the publish workflows is documented step-by-step in [`infra/`](infra/). Re-run those runbooks only if the underlying AWS / pypi.org / npmjs.com state is ever lost.
 
@@ -119,21 +120,22 @@ make generate
 
 This installs `ts-proto` if needed, runs `buf generate` to produce both Python and TypeScript stubs, and creates `__init__.py` files for the Python package.
 
-### 4. Release (tag → CodeArtifact; manual dispatch → public)
+### 4. Release (single dispatch → tag + GitHub Release + all three publishers)
 
-Versions live **only in tags**. `gen/ts/package.json` and `gen/py/pyproject.toml` stay at `0.0.0` on `main`; the publish workflows stamp the version from the `v*` tag at publish time.
+Versions live **only in tags**. `gen/ts/package.json` and `gen/py/pyproject.toml` stay at `0.0.0` on `main`; the publish workflows stamp the version from their `version` input at publish time.
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+gh workflow run release.yml -f version=0.1.0
 ```
+
+This tags `main` as `v0.1.0`, creates a GitHub Release with auto-generated notes, and dispatches all three publish workflows below. The public-* workflows run in the `public-release` GitHub Environment so their OIDC tokens match the PyPI / npm Trusted Publisher bindings; there are no required reviewers, so all three run straight through.
 
 | Output | Workflow | Triggered by |
 |---|---|---|
-| `@aurigin/protos@0.1.0` (npm) on AWS CodeArtifact | `.github/workflows/publish-codeartifact.yml` | `v*` tag push |
-| `aurigin-protos==0.1.0` (PyPI) on AWS CodeArtifact | `.github/workflows/publish-codeartifact.yml` | `v*` tag push |
-| `@aurigin/protos@0.1.0` on **public npmjs.com** | `.github/workflows/publish-public.yml` | **Manual dispatch only** (with `version` input) |
-| `aurigin-protos==0.1.0` on **public pypi.org** | `.github/workflows/publish-public.yml` | **Manual dispatch only** (with `version` input) |
+| `@aurigin/protos@0.1.0` (npm) on AWS CodeArtifact | `.github/workflows/publish-codeartifact.yml` | **Manual dispatch only** (with `version` input — usually via `release.yml`) |
+| `aurigin-protos==0.1.0` (PyPI) on AWS CodeArtifact | `.github/workflows/publish-codeartifact.yml` | **Manual dispatch only** (with `version` input — usually via `release.yml`) |
+| `@aurigin/protos@0.1.0` on **public npmjs.com** | `.github/workflows/publish-npm.yml` | **Manual dispatch only** (with `version` input) |
+| `aurigin-protos==0.1.0` on **public pypi.org** | `.github/workflows/publish-pypi.yml` | **Manual dispatch only** (with `version` input) |
 
 CodeArtifact is the release-candidate lane: every tag lands there first and internal consumers pick it up. The public promotion is a separate, deliberate click — see `infra/public/` for the trust-publisher setup that backs it.
 
@@ -141,7 +143,7 @@ CodeArtifact is the release-candidate lane: every tag lands there first and inte
 
 The CodeArtifact channel uses GitHub OIDC (not a static AWS key). The IAM role, CodeArtifact domain/repository, and the matching GitHub Actions secrets/variables are documented in [`infra/aws/`](infra/aws/) — that runbook is the source of truth for the internal-channel coordinates and is intended for Aurigin engineers.
 
-The public channel (`publish-public.yml`) requires no GitHub-side secrets at all. Trust is configured on pypi.org and npmjs.com themselves, and the GitHub Environment `public-release` gates the run with required reviewers. See [`infra/public/`](infra/public/) for the step-by-step.
+The public channel (`publish-pypi.yml` + `publish-npm.yml`) requires no GitHub-side secrets at all. Trust is configured on pypi.org and npmjs.com themselves — short-lived OIDC tokens validated against per-package Trusted Publisher bindings, scoped via the `public-release` GitHub Environment so the `environment` claim matches. No reviewers on the env — it exists purely for the OIDC claim. See [`infra/public/`](infra/public/) for the step-by-step.
 
 ## Consuming the packages
 
@@ -193,7 +195,7 @@ A few conventions enforced at the repo level — worth knowing before opening a 
 - **Branches auto-delete on merge.** Don't worry about cleanup; GitHub removes the source branch the moment the PR merges.
 - **CI must be green.** `buf lint + breaking + format`, `TypeScript build`, `Python build + import smoke test`, and `shellcheck publish scripts` are required status checks. `buf breaking` runs against `main`, so a wire-incompatible proto change will fail CI unless it's intentional and reviewed.
 - **PR template.** `.github/pull_request_template.md` pre-fills sections for summary, changes, wire/API impact (additive vs breaking — please be honest), and verification. Reviewers rely on the wire-impact tickbox to gate downstream upgrades.
-- **Versioning happens in publish workflows, not on `main`.** `gen/ts/package.json` and `gen/py/pyproject.toml` stay at `0.0.0` in the source tree; `publish-codeartifact.yml` (auto on `v*` tag) and `publish-public.yml` (manual dispatch) both stamp the version at publish time.
+- **Versioning happens in publish workflows, not on `main`.** `gen/ts/package.json` and `gen/py/pyproject.toml` stay at `0.0.0` in the source tree; `publish-codeartifact.yml`, `publish-pypi.yml`, and `publish-npm.yml` (all manual dispatch with a `version` input, typically driven by `release.yml`) stamp the version at publish time.
 
 ## Adding a new service
 
@@ -209,7 +211,7 @@ A few conventions enforced at the repo level — worth knowing before opening a 
      (cd examples/typescript && npm test)
    ```
 7. Open a PR. CI runs `buf lint + breaking + format`, both language builds, and both end-to-end smoke tests.
-8. After merge, tag the release: `git tag v<x.y.z> && git push --tags`. `publish-codeartifact.yml` fires automatically and ships both packages to the internal CodeArtifact channel. If the version is ready for external consumers, dispatch `publish-public.yml` manually with the same version — it promotes the same tag to public PyPI + npm under a `public-release` Environment gate. Source files stay at `0.0.0`; the workflows stamp the version from the tag.
+8. After merge, cut a release: `gh workflow run release.yml -f version=<x.y.z>`. The orchestrator tags `main` as `v<x.y.z>`, creates a GitHub Release with auto-generated notes, and dispatches `publish-codeartifact.yml`, `publish-pypi.yml`, and `publish-npm.yml` with that version. The public-* workflows run in the `public-release` GitHub Environment (no reviewers — used only for the OIDC `environment` claim that matches the Trusted Publisher bindings). Source files stay at `0.0.0`; the workflows stamp the version from the input.
 
 ## License
 

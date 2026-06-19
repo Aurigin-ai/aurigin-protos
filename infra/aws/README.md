@@ -28,13 +28,16 @@ sources, both via the internal CodeArtifact channel:
 ## Two-channel model (A3 hybrid)
 
 ```
-git tag v1.2.3 on main
+gh workflow run release.yml -f version=1.2.3
    │
-   ├─► publish-codeartifact.yml (auto, this directory's runbooks)
+   │  tags main as v1.2.3, creates a GitHub Release,
+   │  then dispatches all three publishers below.
+   │
+   ├─► publish-codeartifact.yml (manual dispatch, this directory's runbooks)
    │      → CodeArtifact (internal)
    │      → consumed by internal repos: aurigin-router, backend-app, ...
    │
-   └─► publish-public.yml (manual dispatch, ../public/ runbooks)
+   └─► publish-pypi.yml + publish-npm.yml (manual dispatch, ../public/ runbooks)
           → pypi.org + npmjs.com (external)
           → consumed by anyone with pip/npm
 ```
@@ -66,9 +69,9 @@ Releases are cut from `main` via semver-tagged commits (`vX.Y.Z`).
 | Branch / trigger | Effect |
 |---|---|
 | Push to `main` | No publish; CI lint/test only. |
-| Tag `v*` on `main` | Publishes `aurigin-protos==X.Y.Z` and `@aurigin/protos@X.Y.Z` to CodeArtifact. |
-| Manual workflow dispatch (`publish-codeartifact.yml`) | Re-publishes the same version (idempotent). |
-| Manual workflow dispatch (`publish-public.yml`, see `../public/`) | Promotes a CA-resident version to pypi.org + npmjs.com. |
+| Manual workflow dispatch (`release.yml`) | Tags `main` as `vX.Y.Z`, creates a GitHub Release with auto-generated notes, and dispatches `publish-codeartifact.yml` + `publish-pypi.yml` + `publish-npm.yml` for the same version. |
+| Manual workflow dispatch (`publish-codeartifact.yml`) | Publishes (or re-publishes) `aurigin-protos==X.Y.Z` and `@aurigin/protos@X.Y.Z` to CodeArtifact. Idempotent. |
+| Manual workflow dispatch (`publish-pypi.yml` / `publish-npm.yml`, see `../public/`) | Promotes a CA-resident version to pypi.org / npmjs.com. |
 
 ## Order of operations
 

@@ -11,10 +11,13 @@
     "test": "node --import tsx --test --test-force-exit tests/smoke.test.ts"
   },
   "dependencies": {
-    "@aurigin/protos": "*",
-    "@grpc/grpc-js": "^1.10.0"
+    "@aurigin/protos": "0.2.0",
+    "@grpc/grpc-js": "^1.10.0",
+    "ajv": "^8.17.0",
+    "js-yaml": "^4.1.0"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "tsx": "^4.7.0",
     "typescript": "^5.4.0"
   }

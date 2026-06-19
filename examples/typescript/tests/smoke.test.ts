@@ -108,9 +108,16 @@ test("client streams silence and roundtrips analyses", async () => {
       ["--target", `localhost:${port}`],
     );
     assert.equal(code, 0, `client failed: stderr=${stderr}`);
-    assert.match(stdout, /Session: demo-session-0001/);
-    assert.match(stdout, /Analysis \| offset=/);
+    assert.match(stdout, /Session: /, `missing session line in:\n${stdout}`);
     assert.match(stdout, /FINAL/);
+    // Simulator issues per-session ids like 'sim-<8 hex>'. Pin the prefix only.
+    assert.match(stdout, /sim-/, `missing simulator session id prefix in:\n${stdout}`);
+    // NOTE: we deliberately don't assert AnalysisResult lines here. The
+    // scenario-driven server emits curve samples at wallclock 1 s / 2 s / 3 s,
+    // but the client streams its silence fallback as fast as gRPC can
+    // serialize it, so the client typically closes its write side before any
+    // sample fires. Analysis emission is covered by the phone-call test below,
+    // which paces audio in real time.
   });
 });
 
