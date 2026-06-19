@@ -1,24 +1,18 @@
-name: Publish to public registries (PyPI + npm)
+name: Publish to npm
 
-# Manual promote-to-public publish for a version that has already been
-# released to the internal CodeArtifact channel via publish-codeartifact.yml.
+# Manual promote-to-public publish of @aurigin/protos to https://www.npmjs.com/.
 #
 # Triggered ONLY via the Actions "Run workflow" button — never automatic.
 # Pauses on the `public-release` GitHub Environment for human approval
-# before either registry sees a request.
-#
-# Publishes:
-#   - aurigin-protos  to https://pypi.org/project/aurigin-protos/   (PEP 740 attestations)
-#   - @aurigin/protos to https://www.npmjs.com/package/@aurigin/protos (sigstore provenance)
+# before npm sees a request.
 #
 # Trust configuration (one-time, no secrets in this repo):
-#   - PyPI Trusted Publisher    → see infra/public/02-pypi-trusted-publisher.md
-#   - npm Trusted Publisher     → see infra/public/03-npm-oidc-publisher.md
-#   - GitHub Environment gate   → see infra/public/04-public-release-checklist.md
+#   - npm Trusted Publisher   → see infra/public/03-npm-oidc-publisher.md
+#                               binding: (owner, repo, workflow file=publish-npm.yml, env=public-release)
+#   - GitHub Environment gate → see infra/public/04-public-release-checklist.md
 #
-# No AWS, no PYPI_API_TOKEN, no NPM_TOKEN. The full trust chain is short-lived
-# OIDC tokens minted at job start, validated by each registry against the
-# Trusted Publisher binding (owner/repo/workflow filename/environment).
+# No NPM_TOKEN. The trust chain is a short-lived OIDC token minted at job
+# start, validated by npm against the Trusted Publisher binding.
 on:
   workflow_dispatch:
     inputs:
@@ -28,13 +22,13 @@ on:
         type: string
 
 permissions:
-  id-token: write   # OIDC token for PyPI Trusted Publisher + npm --provenance
+  id-token: write   # OIDC token for npm Trusted Publisher + --provenance
   contents: read
 
-# One in-flight publish per version. A second dispatch of the same version
-# queues behind the first instead of racing it.
+# One in-flight npm publish per version. A second dispatch of the same
+# version queues behind the first instead of racing it.
 concurrency:
-  group: publish-public-${{ inputs.version }}
+  group: publish-npm-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
@@ -42,14 +36,14 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: public-release
-      url: https://pypi.org/project/aurigin-protos/${{ inputs.version }}/
+      url: https://www.npmjs.com/package/@aurigin/protos/v/${{ inputs.version }}
     steps:
       - name: Validate version is strict semver
         run: |
           VERSION="${{ inputs.version }}"
           # Strict semver: numbers + optional pre-release / build metadata.
-          # Catches typos like 0.1 or 0.1.0-rc? before either registry bails
-          # out with a confusing error.
+          # Catches typos like 0.1 or 0.1.0-rc? before npm bails out with a
+          # confusing error.
           if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Version '$VERSION' is not valid semver (X.Y.Z[-prerelease][+build])."
             exit 1
@@ -82,39 +76,9 @@ jobs:
           # Also required for --provenance (works only against npmjs.org).
           registry-url: 'https://registry.npmjs.org'
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-
-      - name: Install Python build backend
-        run: python -m pip install --upgrade build
-
       - name: Generate language stubs
         run: make generate
 
-      # ─── Python ────────────────────────────────────────────────────────
-      - name: Stamp Python package version
-        working-directory: gen/py
-        run: |
-          python -c "
-          import pathlib, re
-          p = pathlib.Path('pyproject.toml')
-          p.write_text(re.sub(r'(?m)^version = .*', 'version = \"${{ inputs.version }}\"', p.read_text()))
-          "
-
-      - name: Build sdist + wheel
-        working-directory: gen/py
-        run: python -m build
-
-      - name: Publish to PyPI (Trusted Publisher + PEP 740 attestations)
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: gen/py/dist
-          attestations: true
-          # No `password` / `api-token` — the action mints an OIDC token
-          # and PyPI validates it against the Trusted Publisher binding.
-
-      # ─── TypeScript / npm ──────────────────────────────────────────────
       - name: Stamp TS package version
         working-directory: gen/ts
         run: npm pkg set version="${{ inputs.version }}"
@@ -138,14 +102,13 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Published to public registries"
+            echo "## Published to npm"
             echo ""
             echo "| Package | Version | Where |"
             echo "|---|---|---|"
-            echo "| \`aurigin-protos\` (PyPI)    | \`${{ inputs.version }}\` | https://pypi.org/project/aurigin-protos/${{ inputs.version }}/ |"
-            echo "| \`@aurigin/protos\` (npm) | \`${{ inputs.version }}\` | https://www.npmjs.com/package/@aurigin/protos/v/${{ inputs.version }} |"
+            echo "| \`@aurigin/protos\` | \`${{ inputs.version }}\` | https://www.npmjs.com/package/@aurigin/protos/v/${{ inputs.version }} |"
             echo ""
-            echo "Both artifacts include build provenance / sigstore attestations."
+            echo "Artifact includes sigstore build provenance."
             echo ""
             echo "**Tag:** \`v${{ inputs.version }}\` · **Commit:** \`${{ github.sha }}\` · **Workflow:** \`${{ github.workflow }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
