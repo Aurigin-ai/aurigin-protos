@@ -91,19 +91,21 @@ jobs:
           npm install --no-audit --no-fund
           npm run build
 
-      - name: Publish to npm (NPM_TOKEN + sigstore provenance)
+      - name: Publish to npm (NPM_TOKEN)
         working-directory: gen/ts
-        # --provenance attaches sigstore attestation of commit + workflow
-        #   (still uses the workflow's OIDC token via id-token: write above).
         # --access public required on first publish of a scoped package;
         #   no-op on subsequent publishes.
         # NPM_TOKEN: granular access token with read+write on @aurigin/*,
-        #   stored as a repo / environment secret. Once the package exists
-        #   on npmjs.com, swap to Trusted Publisher (no token) — see infra
-        #   docs.
+        #   stored as a repo / environment secret.
+        # Provenance (--provenance) is intentionally OFF until the GitHub
+        # source repo is made public — npm rejects provenance bundles whose
+        # source repo isn't publicly verifiable. Re-add `--provenance` and
+        # keep `id-token: write` in permissions above once the repo is public.
+        # The longer-term goal is to swap NPM_TOKEN for Trusted Publisher
+        # OIDC after the package exists — see infra docs.
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --provenance --access public
+        run: npm publish --access public
 
       - name: Step summary
         if: always()
