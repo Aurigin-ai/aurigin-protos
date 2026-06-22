@@ -1,0 +1,19 @@
+# Simple linear climb from 0.05 to 0.94 over the full 30 s. No explicit
+# fake-detected event — relies purely on the curve so the client must
+# infer detection from the threshold crossing.
+version: 1
+
+scenario:
+  id: confidence_linear_ramp
+  description: Linear confidence ramp; tests purely curve-driven detection.
+
+stream:
+  duration_ms: 30000
+  chunk_interval_ms: 100
+
+confidence_curve:
+  type: linear
+  emit_every_ms: 1000
+  label_threshold: 0.5
+  from: { at_ms: 0,     fake_probability: 0.05 }
+  to:   { at_ms: 30000, fake_probability: 0.94 }

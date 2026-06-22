@@ -1,0 +1,21 @@
+# Default scenario - used when client sends no x-scenario-id metadata header.
+# Mirrors the legacy stub: flat low score, bonafide throughout, one sample
+# per second for the requested duration, FinalResult on stream close.
+version: 1
+
+scenario:
+  id: default
+  description: Flat bonafide stream — safe fallback when no scenario is selected.
+
+stream:
+  duration_ms: 30000
+  chunk_interval_ms: 100
+
+confidence_curve:
+  type: linear
+  emit_every_ms: 1000
+  label_threshold: 0.5
+  label_below: bonafide
+  label_above: spoofed
+  from: { at_ms: 0,     fake_probability: 0.05 }
+  to:   { at_ms: 30000, fake_probability: 0.05 }

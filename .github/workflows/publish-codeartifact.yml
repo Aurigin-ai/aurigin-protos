@@ -1,0 +1,137 @@
+name: Publish to AWS CodeArtifact
+
+# Manual promote-to-CodeArtifact publish for a version that has already been
+# tagged on main. Triggered ONLY via the Actions "Run workflow" button or by
+# the release.yml orchestrator (`gh workflow run`). No tag-push auto-trigger
+# — release.yml owns the end-to-end sequencing.
+#
+# Publishes:
+#   - aurigin-protos  to the CodeArtifact PyPI repo
+#   - @aurigin/protos to the CodeArtifact npm  repo
+#
+# Required configuration (repo Settings → Secrets and variables → Actions):
+#   secrets.AWS_ROLE_TO_ASSUME          IAM role ARN trusting GitHub OIDC
+#   vars.AWS_REGION                     e.g. eu-west-1
+#   vars.AURIGIN_CA_DOMAIN              CodeArtifact domain name
+#   vars.AURIGIN_CA_DOMAIN_OWNER        AWS account ID owning the domain
+#   vars.AURIGIN_CA_REPO                CodeArtifact repository name
+#
+# OIDC setup (one-time, in AWS):
+#   1. Create an OIDC provider for token.actions.githubusercontent.com
+#   2. Create an IAM role trusting that provider, scoped to this repo
+#   3. Attach a policy with codeartifact:GetAuthorizationToken,
+#      codeartifact:PublishPackageVersion, codeartifact:ReadFromRepository,
+#      sts:GetServiceBearerToken
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (must match a v<version> tag on main, e.g. 0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  id-token: write   # required for OIDC role assumption
+  contents: read
+
+# One in-flight CodeArtifact publish per version. A second dispatch of the
+# same version queues behind the first instead of racing it.
+concurrency:
+  group: publish-codeartifact-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AURIGIN_CA_DOMAIN: ${{ vars.AURIGIN_CA_DOMAIN }}
+      AURIGIN_CA_DOMAIN_OWNER: ${{ vars.AURIGIN_CA_DOMAIN_OWNER }}
+      AURIGIN_CA_REPO: ${{ vars.AURIGIN_CA_REPO }}
+    steps:
+      - name: Validate version is strict semver
+        run: |
+          VERSION="${{ inputs.version }}"
+          # Strict semver: numbers + optional pre-release / build metadata.
+          # Catches typos like 0.1 or 0.1.0-rc? before twine/npm bail out
+          # with confusing errors.
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version '$VERSION' is not valid semver (X.Y.Z[-prerelease][+build])."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+        with:
+          ref: v${{ inputs.version }}
+          # Full history so we can verify the tag is reachable from main.
+          fetch-depth: 0
+
+      - name: Verify tag is on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/heads/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" main; then
+            echo "::error::Tag v${{ inputs.version }} ($GITHUB_SHA) is not reachable from main." >&2
+            echo "::error::Only commits that have landed on main can be published." >&2
+            exit 1
+          fi
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python build deps
+        run: pip install --upgrade build twine
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Generate stubs
+        run: make generate
+
+      - name: Stamp TS package version
+        working-directory: gen/ts
+        run: |
+          npm pkg set version="${{ inputs.version }}"
+          npm run build
+
+      - name: Publish TS to CodeArtifact
+        run: bash scripts/publish-ts-codeartifact.sh
+
+      - name: Stamp Python package version
+        working-directory: gen/py
+        run: |
+          python -c "
+          import pathlib, re
+          p = pathlib.Path('pyproject.toml')
+          p.write_text(re.sub(r'(?m)^version = .*', 'version = \"${{ inputs.version }}\"', p.read_text()))
+          "
+
+      - name: Publish Python to CodeArtifact
+        run: bash scripts/publish-py-codeartifact.sh
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Published to AWS CodeArtifact"
+            echo ""
+            echo "| Package | Version |"
+            echo "|---|---|"
+            echo "| \`@aurigin/protos\` (npm) | \`${{ inputs.version }}\` |"
+            echo "| \`aurigin-protos\` (PyPI) | \`${{ inputs.version }}\` |"
+            echo ""
+            echo "**Domain:** \`${AURIGIN_CA_DOMAIN}\` · **Repository:** \`${AURIGIN_CA_REPO}\` · **Region:** \`${AWS_REGION}\`"
+            echo ""
+            echo "**Tag:** \`v${{ inputs.version }}\` · **Commit:** \`${{ github.sha }}\` · **Workflow:** \`${{ github.workflow }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

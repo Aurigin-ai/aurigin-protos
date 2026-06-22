@@ -1,0 +1,22 @@
+# Real (bonafide) audio detected as real. Score stays in [0.02, 0.10] range
+# with small jitter, label remains 'bonafide', overall_label converges to
+# 'bonafide'. Use to verify the happy path doesn't false-positive.
+version: 1
+
+scenario:
+  id: real_audio_detected_real
+  description: Bonafide audio, score stays low throughout, no false detection.
+
+stream:
+  duration_ms: 30000
+  chunk_interval_ms: 100
+
+random:
+  seed: 1
+
+confidence_curve:
+  type: noise
+  emit_every_ms: 1000
+  label_threshold: 0.5
+  base: 0.06
+  amplitude: 0.04

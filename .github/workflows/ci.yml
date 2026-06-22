@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  buf:
+    name: buf lint + breaking + format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # buf breaking needs history to compare against main
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: buf lint
+        run: buf lint
+
+      - name: buf format (check)
+        run: buf format --diff --exit-code
+
+      - name: Fetch main as a local ref for buf breaking
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags origin +refs/heads/main:refs/heads/main
+
+      - name: buf breaking (against main)
+        # Skip on push to main itself — there's no parent to diff against.
+        if: github.event_name == 'pull_request'
+        run: buf breaking --against ".git#branch=main,subdir=."
+
+  typescript:
+    name: TypeScript build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Generate stubs
+        run: make generate
+
+      - name: Build TS package
+        working-directory: gen/ts
+        run: npm run build
+
+      - name: Pack TS package as tarball
+        working-directory: gen/ts
+        run: npm pack
+
+      - name: tsc strict check on examples
+        working-directory: examples/typescript
+        run: |
+          npm install --no-save ../../gen/ts/aurigin-protos-*.tgz tsx typescript @grpc/grpc-js
+          npx tsc --noEmit
+
+      - name: Example end-to-end smoke test (server + client roundtrip)
+        working-directory: examples/typescript
+        run: npm test
+
+  python:
+    name: Python build + import smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python build deps
+        # pyyaml + jsonschema are needed by examples/python/sim/loader.py at
+        # server startup (scenario YAML + schema validation).
+        run: pip install --upgrade build grpcio protobuf pytest pyyaml jsonschema
+
+      - name: Generate stubs
+        run: make generate
+
+      - name: Build wheel + sdist
+        working-directory: gen/py
+        run: python -m build
+
+      - name: Import smoke test
+        working-directory: gen/py
+        run: |
+          python -c "
+          from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
+          from aurigin.deepfake_detection.v1 import deepfake_detection_pb2_grpc as pb_grpc
+          from twilio.tme.extensions.common.v1 import audio_buffer_pb2 as ab
+          msgs = [n for n in dir(pb) if n[0].isupper() and not n.startswith('_')]
+          assert 'AnalysisResult' in msgs and 'DetectDeepfakeRequest' in msgs, msgs
+          assert pb_grpc.DeepfakeDetectionStub.__name__ == 'DeepfakeDetectionStub'
+          assert [f.name for f in ab.AudioBuffer.DESCRIPTOR.fields] == [
+              'type', 'format', 'channels', 'rate',
+              'duration_ns', 'pts_ns', 'size', 'buffer',
+          ]
+          print('OK')
+          "
+
+      - name: Example end-to-end smoke test (server + client roundtrip)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/gen/py:${{ github.workspace }}/examples/python
+        run: pytest examples/python/tests/ -v
+
+  shellcheck:
+    name: shellcheck publish scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: shellcheck scripts/*.sh

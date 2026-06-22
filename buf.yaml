@@ -1,0 +1,14 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # Service is `DeepfakeDetection`, not `DeepfakeDetectionService`,
+    # to match the wire format already consumed by backend-app.
+    # Revisit when we're free to break the wire format.
+    - SERVICE_SUFFIX
+breaking:
+  use:
+    - FILE

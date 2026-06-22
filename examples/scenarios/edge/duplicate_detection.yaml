@@ -1,0 +1,27 @@
+# Same FAKE_DETECTED event emitted twice (8 s and 8.05 s). Verifies the
+# client deduplicates by content rather than blindly trusting the wire.
+version: 1
+
+scenario:
+  id: duplicate_detection
+  description: FAKE_DETECTED emitted twice in quick succession.
+
+stream:
+  duration_ms: 30000
+  chunk_interval_ms: 100
+
+confidence_curve:
+  type: linear
+  emit_every_ms: 1000
+  from: { at_ms: 0,     fake_probability: 0.10 }
+  to:   { at_ms: 30000, fake_probability: 0.30 }
+
+events:
+  - name: fake_detected_primary
+    at_ms: 8000
+    type: FAKE_DETECTED
+    payload: { fake_probability: 0.91, label: spoofed, reason: vocoder_artifacts }
+  - name: fake_detected_duplicate
+    at_ms: 8050
+    type: FAKE_DETECTED
+    payload: { fake_probability: 0.91, label: spoofed, reason: vocoder_artifacts }

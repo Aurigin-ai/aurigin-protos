@@ -1,0 +1,33 @@
+[project]
+name = "aurigin-protos-examples"
+version = "0.0.0"
+description = "Reference server/client examples for aurigin-protos."
+requires-python = ">=3.10"
+dependencies = [
+    "aurigin-protos==0.2.0",
+    "grpcio>=1.62",
+    "pyyaml>=6.0",
+    "jsonschema>=4.20",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+# Mirrors the TypeScript example's `npm run server` / `npm run client`.
+# After `uv sync`, run with `uv run server` / `uv run client` / `uv run phone-call`.
+[project.scripts]
+server = "server:serve"
+client = "client:main"
+phone-call = "phone_call:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["server.py", "client.py", "phone_call.py", "sim"]
+
+# aurigin-protos resolves from public PyPI by default — no extra index, no
+# auth. Aurigin engineers who need a pre-promotion (release-candidate) version
+# from the internal AWS CodeArtifact mirror should configure their uv index
+# separately; see infra/aws/ in the repo for the connection details.

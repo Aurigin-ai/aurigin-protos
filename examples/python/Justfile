@@ -1,0 +1,154 @@
+# aurigin-protos Python example runner.
+#
+# Wraps the `uv run server|client|phone-call` invocations documented in
+# examples/README.md so devs don't need to memorise the phone-call CLI flags.
+# Deps resolve from public PyPI — no CodeArtifact auth required.
+#
+# Usage:
+#   just sync                    # uv sync (installs aurigin-protos + grpcio)
+#   just server                  # run the scenario-driven DeepfakeDetection server
+#   just client                  # client against default localhost:50051
+#   just client 127.0.0.1:50051  # client against any DeepfakeDetection
+#                                # implementation (e.g. aurigin-router's
+#                                # backend-simulator on :50051)
+#   just scenarios               # list available scenarios (id + description)
+#   just call ID                 # phone-call against `ID` scenario (10s)
+#   just call ID 30              # phone-call, custom duration
+#   just burst 5 ID              # 5 simultaneous calls of `ID`
+#   just burst 5 ID 500          # 5 calls of `ID`, 500ms between starts
+#   just mtls-server             # server but in mTLS mode
+#   just mtls-call ID            # phone-call in mTLS mode
+#   just mtls-burst 5 ID         # 5 simultaneous mTLS calls
+#   just tls                     # regenerate the committed self-signed certs
+#   just smoke                   # end-to-end pytest
+#
+# TLS is on by default. mTLS recipes are MTLS=1 shortcuts on top of the
+# corresponding plain-TLS recipe. See examples/certs/README.md for the full
+# trust model.
+
+set shell := ["bash", "-cu"]
+set dotenv-load := true
+
+[private]
+default:
+    @just --list --unsorted
+
+# ─── setup ───────────────────────────────────────────────────────────────────
+
+# uv sync — install aurigin-protos + grpcio from public PyPI.
+[group('setup')]
+sync:
+    uv sync
+
+# One-shot: sync deps + run smoke tests.
+[group('setup')]
+bootstrap:
+    @just sync && just smoke
+
+# Wipe .venv/ and pytest/python caches in this dir.
+[group('setup')]
+clean:
+    rm -rf .venv .pytest_cache __pycache__ */__pycache__
+
+# ─── run ─────────────────────────────────────────────────────────────────────
+
+# Stub DeepfakeDetection server on :50051 (fixed bonafide score, no ML).
+[group('run')]
+server:
+    uv run server
+
+# Client → TARGET (e.g. 127.0.0.1:50051 to hit the backend-simulator).
+[group('run')]
+client TARGET="localhost:50051":
+    uv run client --target {{TARGET}}
+
+# For custom args (--target, --audio, --duration, --scenario-id) call
+# `uv run phone-call --help` directly — this recipe is the no-arg shortcut.
+#
+# Phone-call sim — picks first audio/*.wav, 30s @ localhost:50051.
+[group('run')]
+phone-call:
+    uv run phone-call
+
+# ─── scenarios ──────────────────────────────────────────────────────────────
+
+# Uses the same loader the server uses, so the list always matches what the
+# server would accept via the x-scenario-id metadata header.
+#
+# List loadable scenarios as `<id>  <description>`.
+[group('scenarios')]
+scenarios:
+    @uv run python -c "from sim import load_scenarios; ss = load_scenarios('../scenarios'); [print(f'{s.id:38s}  {s.description}') for s in sorted(ss.values(), key=lambda s: s.id)]"
+
+# Defaults to a 10-second call so most curves fire ≥1 analysis even on short
+# scenarios. Override DURATION for longer runs:
+#   just call fake_detected_rising_curve 30
+#
+# Phone-call against the local server, requesting a specific scenario.
+[group('scenarios')]
+call SCENARIO_ID DURATION="10":
+    uv run phone-call --duration {{DURATION}} --scenario-id {{SCENARIO_ID}}
+
+# Open N concurrent calls of the same scenario. STAGGER_MS=0 (default) fires
+# every call at the same instant — the canonical thundering-herd test. A
+# positive STAGGER_MS spreads start times: e.g. STAGGER_MS=500 means call-02
+# starts 500ms after call-01, call-03 1s after call-01, and so on.
+#   just burst 5 fake_detected_rising_curve              # 5 simultaneous
+#   just burst 5 fake_detected_rising_curve 500          # 5, 500ms apart
+#   just burst 5 fake_detected_rising_curve 500 30       # same, 30s each
+#
+# N concurrent phone-calls against one scenario, optional stagger between starts.
+[group('scenarios')]
+burst N SCENARIO_ID STAGGER_MS="0" DURATION="10":
+    uv run phone-call --duration {{DURATION}} --concurrency {{N}} \
+        --stagger-ms {{STAGGER_MS}} --scenario-id {{SCENARIO_ID}}
+
+# ─── mtls ───────────────────────────────────────────────────────────────────
+
+# These are just `MTLS=1` shortcuts on top of the recipes above. Functionally
+# identical to prefixing `MTLS=1` yourself; recipes exist so the path is
+# discoverable in `just --list` and aliases stay in sync if the underlying
+# recipe signature changes.
+
+# Same as `just server`, but the server demands a client cert (mTLS).
+[group('mtls')]
+mtls-server:
+    MTLS=1 just server
+
+# Same as `just call`, but presents the example client cert.
+[group('mtls')]
+mtls-call SCENARIO_ID DURATION="10":
+    MTLS=1 just call {{SCENARIO_ID}} {{DURATION}}
+
+# Same as `just burst`, but every concurrent stream is mTLS.
+[group('mtls')]
+mtls-burst N SCENARIO_ID STAGGER_MS="0" DURATION="10":
+    MTLS=1 just burst {{N}} {{SCENARIO_ID}} {{STAGGER_MS}} {{DURATION}}
+
+# ─── tls ────────────────────────────────────────────────────────────────────
+
+# DO NOT USE THESE KEYS IN PRODUCTION — they're checked into the public repo.
+# Server cert SANs cover localhost, 127.0.0.1, ::1; both certs valid for 100
+# years. The server + clients auto-detect ../certs/server.{crt,key} for TLS;
+# MTLS=1 additionally activates ../certs/client.{crt,key} on both sides.
+#
+# Regenerate the committed self-signed example certs (server + client).
+[group('tls')]
+tls:
+    @mkdir -p ../certs
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+        -keyout ../certs/server.key -out ../certs/server.crt -days 36500 \
+        -subj "/CN=aurigin-protos-example/O=Example only — DO NOT USE IN PRODUCTION" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1"
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+        -keyout ../certs/client.key -out ../certs/client.crt -days 36500 \
+        -subj "/CN=aurigin-protos-example-client/O=Example only — DO NOT USE IN PRODUCTION"
+    @echo "→ ../certs/server.{crt,key} + ../certs/client.{crt,key} regenerated."
+    @echo "  TLS picks up automatically; mTLS picks up when you set MTLS=1."
+
+# ─── test ────────────────────────────────────────────────────────────────────
+
+# End-to-end smoke tests (spawns server + client, asserts output).
+[group('test')]
+smoke:
+    uv run --extra test pytest tests/ -v

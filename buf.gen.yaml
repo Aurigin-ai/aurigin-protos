@@ -1,0 +1,22 @@
+version: v2
+
+plugins:
+  # ---- Python: messages + gRPC service stubs (remote plugins from buf.build) ----
+  - remote: buf.build/protocolbuffers/python
+    out: gen/py
+  - remote: buf.build/grpc/python
+    out: gen/py
+
+  # ---- TypeScript: ts-proto, gRPC-JS compatible (local plugin from gen/ts node_modules) ----
+  - local: gen/ts/node_modules/.bin/protoc-gen-ts_proto
+    out: gen/ts/src
+    opt:
+      - outputServices=grpc-js
+      - esModuleInterop=true
+      - env=node
+      - useOptionals=messages
+      - exportCommonSymbols=false
+      # Required for NodeNext module resolution: relative imports must end in .js
+      - importSuffix=.js
+      # int64/uint64 -> bigint (default `number` truncates values above 2^53)
+      - forceLong=bigint

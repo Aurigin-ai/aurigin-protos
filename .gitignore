@@ -1,0 +1,44 @@
+# Generated TypeScript code & build artifacts
+gen/ts/src/
+gen/ts/dist/
+gen/ts/node_modules/
+gen/ts/package-lock.json
+gen/ts/*.tgz
+gen/ts/LICENSE
+
+# Generated Python code & build artifacts
+gen/py/aurigin/
+gen/py/twilio/
+gen/py/dist/
+gen/py/build/
+gen/py/*.egg-info/
+gen/py/LICENSE
+
+# Example caches
+examples/typescript/node_modules/
+examples/typescript/package-lock.json
+examples/python/.venv/
+
+# Local audio fixtures (shared between python + typescript examples;
+# consumers drop their own .wavs here, not committed)
+examples/audio/*.wav
+
+# Local virtualenvs created during ad-hoc testing
+.venv*/
+
+# CodeArtifact / npm credentials (created by `aws codeartifact login`)
+.npmrc
+.pypirc
+
+# Secret-scanner output (do NOT commit — also self-recursing: gitleaks
+# matches its own redacted hex strings against the sourcegraph-token rule
+# on the next scan if the report file is left in the tree).
+gitleaks.sarif
+gitleaks.json
+
+# Misc
+__pycache__/
+*.pyc
+.DS_Store
+.idea/
+.vscode/

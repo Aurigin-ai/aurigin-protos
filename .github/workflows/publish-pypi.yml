@@ -1,0 +1,118 @@
+name: Publish to PyPI
+
+# Manual promote-to-public publish of aurigin-protos to https://pypi.org/.
+#
+# Triggered ONLY via the Actions "Run workflow" button (typically by the
+# release.yml orchestrator) — never automatic.
+#
+# Trust configuration (one-time, no secrets in this repo):
+#   - PyPI Trusted Publisher → see infra/public/02-pypi-trusted-publisher.md
+#                              binding: (owner, repo, workflow file=publish-pypi.yml,
+#                              environment=public-release).
+#
+# The `public-release` GitHub Environment exists on this repo purely so the
+# OIDC token carries an `environment` claim that PyPI's Trusted Publisher
+# binding can match. It does not gate the workflow (no required reviewers).
+#
+# No PYPI_API_TOKEN. The trust chain is a short-lived OIDC token minted at job
+# start, validated by PyPI against the Trusted Publisher binding.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (must match a v<version> tag on main, e.g. 0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  id-token: write   # OIDC token for PyPI Trusted Publisher
+  contents: read
+
+# One in-flight PyPI publish per version. A second dispatch of the same
+# version queues behind the first instead of racing it.
+concurrency:
+  group: publish-pypi-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: public-release
+      url: https://pypi.org/project/aurigin-protos/${{ inputs.version }}/
+    steps:
+      - name: Validate version is strict semver
+        run: |
+          VERSION="${{ inputs.version }}"
+          # Strict semver: numbers + optional pre-release / build metadata.
+          # Catches typos like 0.1 or 0.1.0-rc? before PyPI bails out with a
+          # confusing error.
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version '$VERSION' is not valid semver (X.Y.Z[-prerelease][+build])."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+        with:
+          ref: v${{ inputs.version }}
+          # Full history so we can verify the tag is reachable from main.
+          fetch-depth: 0
+
+      - name: Verify tag is on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/heads/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" main; then
+            echo "::error::Tag v${{ inputs.version }} ($GITHUB_SHA) is not reachable from main." >&2
+            echo "::error::Only commits that have landed on main can be promoted to public registries." >&2
+            exit 1
+          fi
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python build backend
+        run: python -m pip install --upgrade build
+
+      - name: Generate language stubs
+        run: make generate
+
+      - name: Stamp Python package version
+        working-directory: gen/py
+        run: |
+          python -c "
+          import pathlib, re
+          p = pathlib.Path('pyproject.toml')
+          p.write_text(re.sub(r'(?m)^version = .*', 'version = \"${{ inputs.version }}\"', p.read_text()))
+          "
+
+      - name: Build sdist + wheel
+        working-directory: gen/py
+        run: python -m build
+
+      - name: Publish to PyPI (Trusted Publisher + PEP 740 attestations)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: gen/py/dist
+          attestations: true
+          # No `password` / `api-token` — the action mints an OIDC token
+          # and PyPI validates it against the Trusted Publisher binding.
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Published to PyPI"
+            echo ""
+            echo "| Package | Version | Where |"
+            echo "|---|---|---|"
+            echo "| \`aurigin-protos\` | \`${{ inputs.version }}\` | https://pypi.org/project/aurigin-protos/${{ inputs.version }}/ |"
+            echo ""
+            echo "Artifact includes PEP 740 attestations."
+            echo ""
+            echo "**Tag:** \`v${{ inputs.version }}\` · **Commit:** \`${{ github.sha }}\` · **Workflow:** \`${{ github.workflow }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

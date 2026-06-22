@@ -1,0 +1,30 @@
+# Mid-stream model timeout reported as an event-level ERROR (the gRPC
+# stream stays open). After the error, the model recovers and the curve
+# continues — clients should keep the stream open and resume processing.
+version: 1
+
+scenario:
+  id: model_timeout_event_error
+  description: Event-level ERROR mid-stream, then recovery.
+
+stream:
+  duration_ms: 30000
+  chunk_interval_ms: 100
+
+confidence_curve:
+  type: linear
+  emit_every_ms: 1000
+  from: { at_ms: 0,     fake_probability: 0.20 }
+  to:   { at_ms: 30000, fake_probability: 0.70 }
+
+events:
+  - name: model_timeout
+    at_ms: 7000
+    type: ERROR
+    payload:
+      code: MODEL_TIMEOUT
+      message: simulated model inference timeout
+  - name: recovery_marker
+    at_ms: 9000
+    type: CONFIDENCE_UPDATE
+    payload: { fake_probability: 0.41, label: inconclusive }

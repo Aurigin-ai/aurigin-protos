@@ -1,0 +1,16 @@
+# gitleaks config — extends the default ruleset, adds a narrow allowlist for
+# the committed example self-signed keys under examples/certs/.
+#
+# These keys are intentionally public — they exist so the gRPC example is
+# TLS-by-default with zero setup. See examples/certs/README.md.
+# DO NOT widen this allowlist to anything outside examples/certs/.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Example self-signed TLS material — committed on purpose"
+paths = [
+  '''examples/certs/server\.key$''',
+  '''examples/certs/client\.key$''',
+]
