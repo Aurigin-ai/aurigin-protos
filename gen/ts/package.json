@@ -3,6 +3,14 @@
   "version": "0.0.0",
   "description": "Generated gRPC TypeScript stubs for Aurigin services",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aurigin-ai/aurigin-protos.git"
+  },
+  "homepage": "https://github.com/Aurigin-ai/aurigin-protos",
+  "bugs": {
+    "url": "https://github.com/Aurigin-ai/aurigin-protos/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

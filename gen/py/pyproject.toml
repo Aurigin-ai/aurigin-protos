@@ -15,5 +15,10 @@ dependencies = [
     "protobuf>=4.25",
 ]
 
+[project.urls]
+Homepage      = "https://github.com/Aurigin-ai/aurigin-protos"
+Source        = "https://github.com/Aurigin-ai/aurigin-protos"
+"Bug Tracker" = "https://github.com/Aurigin-ai/aurigin-protos/issues"
+
 [tool.hatch.build.targets.wheel]
 packages = ["aurigin", "twilio"]
