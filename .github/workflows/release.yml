@@ -57,8 +57,14 @@ jobs:
 
       - name: Verify ref is on main
         run: |
-          git fetch --no-tags origin +refs/heads/main:refs/heads/main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" main; then
+          # Fetch main into a non-checked-out ref to avoid git's safety
+          # check ("refusing to fetch into branch ... checked out at ..."):
+          # when this workflow is dispatched from main the working tree is
+          # already on main, so `+refs/heads/main:refs/heads/main` would
+          # overwrite the live ref. Land it under refs/remotes/origin/main
+          # and compare against that.
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
             echo "::error::Ref '${{ inputs.ref }}' ($GITHUB_SHA) is not on main." >&2
             echo "::error::Releases must be cut from a commit that has landed on main." >&2
             exit 1

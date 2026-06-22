@@ -14,8 +14,6 @@ import argparse
 import wave
 from pathlib import Path
 
-import grpc
-
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2_grpc as pb_grpc
 from twilio.tme.extensions.common.v1 import audio_buffer_pb2 as ab_pb
@@ -53,7 +51,6 @@ def _wav_session_iter(path: Path):
         channels = w.getnchannels()
         rate = w.getframerate()
         frames_per_chunk = int(rate * CHUNK_MS / 1000)
-        bytes_per_chunk = frames_per_chunk * channels * 2
 
         yield pb.DetectDeepfakeRequest(create_session_request=pb.CreateSessionRequest())
 
