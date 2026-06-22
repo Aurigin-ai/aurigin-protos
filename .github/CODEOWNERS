@@ -1,0 +1,5 @@
+# Default reviewers for every change to this repo.
+# GitHub auto-requests review from these owners when a PR is opened.
+# The "Protect main" ruleset requires ≥1 approving review before merge —
+# CODEOWNERS just routes that requirement to the right humans.
+*       @Aurigin-ai/developers
