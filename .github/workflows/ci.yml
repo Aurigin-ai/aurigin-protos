@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual re-run from the Actions tab — useful when you want to verify the
+  # full check suite against current main without opening a PR (e.g. after
+  # an infra-only change to scenarios / certs that didn't touch source).
+  workflow_dispatch:
 
 permissions:
   contents: read
