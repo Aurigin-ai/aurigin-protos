@@ -29,12 +29,6 @@ permissions:
   id-token: write   # OIDC token for npm Trusted Publisher + --provenance
   contents: read
 
-# NOTE: --provenance requires the GitHub source repo to be publicly visible
-# so the sigstore bundle can be verified against the source tree. If the
-# repo is still private when this workflow runs, npm will reject the publish
-# with E422. Make the repo public (gh repo edit --visibility public) before
-# the first OIDC publish, or drop --provenance below temporarily.
-
 # One in-flight npm publish per version. A second dispatch of the same
 # version queues behind the first instead of racing it.
 concurrency:
@@ -98,23 +92,6 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           npm run build
-
-      - name: Debug OIDC claims (for Trusted Publisher diagnostics)
-        # Prints the GitHub OIDC token's JWT payload so we can compare its
-        # `workflow_ref`, `environment`, and `repository` claims against the
-        # npm Trusted Publisher binding at https://www.npmjs.com/package/...
-        # Drop this step once 0.2.x publishes are reliable — it's purely
-        # diagnostic and slightly noisy.
-        run: |
-          TOKEN=$(curl -sH "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" \
-            | python3 -c "import sys,json;print(json.load(sys.stdin)['value'])")
-          echo "=== OIDC token claims ==="
-          # JWT payload is base64url; pad and translate before decoding.
-          PAYLOAD=$(echo "$TOKEN" | cut -d. -f2)
-          PADDED="${PAYLOAD}$(printf '%*s' $(( (4 - ${#PAYLOAD} % 4) % 4 )) | tr ' ' '=')"
-          echo "$PADDED" | tr -- -_ +/ | base64 -d 2>/dev/null | python3 -m json.tool
-          echo "=== /OIDC token claims ==="
 
       - name: Publish to npm (Trusted Publisher + sigstore provenance)
         working-directory: gen/ts
