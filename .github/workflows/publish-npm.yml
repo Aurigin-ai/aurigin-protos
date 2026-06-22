@@ -72,9 +72,15 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          # Node 24 + setup-node@v6 bundles npm 11.5.1+, the minimum version
+          # that supports Trusted Publishing OIDC publishes. Earlier versions
+          # (notably the npm shipped with Node 22) silently 404 on the
+          # registry PUT even when the OIDC claims match the binding exactly.
+          # If you ever need to pin to Node 22, replace `npm publish` below
+          # with `npx npm@latest publish` to pull a current npm at run-time.
+          node-version: '24'
           # Forces the public npm registry. Without this, a leftover .npmrc
           # from the CodeArtifact path could redirect publish to AWS.
           # Also required for --provenance (works only against npmjs.org).
@@ -100,6 +106,8 @@ jobs:
         #   no-op on subsequent publishes.
         # No NODE_AUTH_TOKEN / NPM_TOKEN — npm validates the OIDC token
         # against the Trusted Publisher binding.
+        # Requires npm ≥ 11.5.1 (bundled with Node 24 + setup-node@v6 above).
+        # Earlier npm versions silently 404 even with correct OIDC claims.
         run: npm publish --provenance --access public
 
       - name: Step summary
