@@ -25,10 +25,17 @@ const CHANNELS = 1;
 const CHUNK_MS = 500;
 const SILENCE_CHUNKS = 6;
 
+// WAVE format tags. PCM 16-bit goes out as S16LE; IEEE float 32-bit as
+// F32LE — matching the formats deepfake-service's audio decoder accepts.
+const WAVE_FORMAT_PCM = 0x0001;
+const WAVE_FORMAT_IEEE_FLOAT = 0x0003;
+
 interface WavData {
   sampleRate: number;
   channels: number;
-  pcm: Buffer; // S16LE PCM samples (post-header)
+  samples: Buffer; // raw PCM bytes (post-header)
+  wireFormat: "S16LE" | "F32LE";
+  bytesPerSample: number; // per *frame* component, before channel multiplication
 }
 
 function readWav(filePath: string): WavData {
@@ -38,6 +45,7 @@ function readWav(filePath: string): WavData {
   }
   // Walk RIFF chunks to find fmt + data (handles non-canonical orderings).
   let offset = 12;
+  let audioFormat = 0;
   let sampleRate = 0;
   let channels = 0;
   let bitsPerSample = 0;
@@ -47,6 +55,7 @@ function readWav(filePath: string): WavData {
     const id = buf.toString("ascii", offset, offset + 4);
     const size = buf.readUInt32LE(offset + 4);
     if (id === "fmt ") {
+      audioFormat = buf.readUInt16LE(offset + 8);
       channels = buf.readUInt16LE(offset + 10);
       sampleRate = buf.readUInt32LE(offset + 12);
       bitsPerSample = buf.readUInt16LE(offset + 22);
@@ -58,8 +67,25 @@ function readWav(filePath: string): WavData {
     offset += 8 + size + (size & 1); // pad to even
   }
   if (dataStart < 0) throw new Error(`${filePath}: no data chunk`);
-  if (bitsPerSample !== 16) throw new Error(`${filePath}: expected 16-bit PCM, got ${bitsPerSample}-bit`);
-  return { sampleRate, channels, pcm: buf.subarray(dataStart, dataStart + dataLen) };
+
+  let wireFormat: "S16LE" | "F32LE";
+  if (audioFormat === WAVE_FORMAT_PCM && bitsPerSample === 16) {
+    wireFormat = "S16LE";
+  } else if (audioFormat === WAVE_FORMAT_IEEE_FLOAT && bitsPerSample === 32) {
+    wireFormat = "F32LE";
+  } else {
+    throw new Error(
+      `${filePath}: unsupported WAV (format tag ${audioFormat}, ${bitsPerSample}-bit) — ` +
+        `expected 16-bit PCM or 32-bit IEEE float`,
+    );
+  }
+  return {
+    sampleRate,
+    channels,
+    samples: buf.subarray(dataStart, dataStart + dataLen),
+    wireFormat,
+    bytesPerSample: bitsPerSample / 8,
+  };
 }
 
 function* silentChunks(): Generator<DetectDeepfakeRequest> {
@@ -81,18 +107,19 @@ function* silentChunks(): Generator<DetectDeepfakeRequest> {
 }
 
 function* wavChunks(file: string): Generator<DetectDeepfakeRequest> {
-  const { sampleRate, channels, pcm } = readWav(file);
+  const { sampleRate, channels, samples, wireFormat, bytesPerSample } = readWav(file);
   const framesPerChunk = Math.floor((sampleRate * CHUNK_MS) / 1000);
-  const bytesPerChunk = framesPerChunk * channels * 2;
+  const bytesPerFrame = bytesPerSample * channels;
+  const bytesPerChunk = framesPerChunk * bytesPerFrame;
   yield { createSessionRequest: {} };
   let ptsNs = 0n;
-  for (let i = 0; i < pcm.length; i += bytesPerChunk) {
-    const chunk = pcm.subarray(i, Math.min(i + bytesPerChunk, pcm.length));
-    const actualFrames = chunk.length / (channels * 2);
+  for (let i = 0; i < samples.length; i += bytesPerChunk) {
+    const chunk = samples.subarray(i, Math.min(i + bytesPerChunk, samples.length));
+    const actualFrames = chunk.length / bytesPerFrame;
     const durationNs = BigInt(Math.round((actualFrames / sampleRate) * 1e9));
     yield {
       audio: {
-        type: "audio/x-raw", format: "S16LE",
+        type: "audio/x-raw", format: wireFormat,
         channels, rate: sampleRate,
         durationNs, ptsNs, size: BigInt(chunk.length), buffer: chunk,
       },

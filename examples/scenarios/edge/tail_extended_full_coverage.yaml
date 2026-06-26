@@ -1,0 +1,39 @@
+# Mirrors deepfake-service with tail_strategy="extend" (new option), running on
+# the same 10.001 s clip (examples/audio/fixtures/test_call_10s_tail.wav) with
+# analysis_interval_s=5.0 and min_chunk_duration_s=1.0.
+#
+# Same backend_simulation knobs as tail_dropped_below_min but tail_strategy=extend:
+#   - 1st main window fires at t=5000ms (duration=5000)
+#   - 2nd main window's residual (1ms) is below min_chunk_duration_ms (1000),
+#     so it folds into the prior window: the 2nd emission shifts to t=10001ms
+#     with duration_ms=5001 (5000 + 1ms residual) — total coverage = 10001ms
+#     with no audio dropped.
+#
+# Expected on-wire shape:
+#   CreateSessionResponse
+#   AnalysisResult(offset=5000ms,  duration=5000ms, label=bonafide)
+#   AnalysisResult(offset=10001ms, duration=5001ms, label=bonafide)
+#   FinalResult(total_audio_ms≥10001, analysis_count=2, label=bonafide)
+version: 1
+
+scenario:
+  id: tail_extended_full_coverage
+  description: 10.001s clip, 5s analysis interval — 1ms tail folded into the last window so coverage is total.
+
+stream:
+  duration_ms: 10001
+  chunk_interval_ms: 100
+
+random:
+  seed: 42
+
+backend_simulation:
+  analysis_interval_ms: 5000
+  min_chunk_duration_ms: 1000
+  tail_strategy: extend
+
+confidence_curve:
+  type: noise
+  label_threshold: 0.5
+  base: 0.06
+  amplitude: 0.04

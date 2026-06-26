@@ -39,11 +39,16 @@ function log(label: string, message: string): void {
   console.log(`[${label}] ${message}`);
 }
 
-// ─── WAV reader (16-bit PCM only) ─────────────────────────────────────
+// ─── WAV reader (S16LE PCM and F32LE IEEE float) ──────────────────────
+const WAVE_FORMAT_PCM = 0x0001;
+const WAVE_FORMAT_IEEE_FLOAT = 0x0003;
+
 interface WavData {
   sampleRate: number;
   channels: number;
-  pcm: Buffer;
+  samples: Buffer;
+  wireFormat: "S16LE" | "F32LE";
+  bytesPerSample: number;
 }
 
 function readWav(filePath: string): WavData {
@@ -52,6 +57,7 @@ function readWav(filePath: string): WavData {
     throw new Error(`${filePath}: not a RIFF/WAVE file`);
   }
   let offset = 12;
+  let audioFormat = 0;
   let sampleRate = 0;
   let channels = 0;
   let bitsPerSample = 0;
@@ -61,6 +67,7 @@ function readWav(filePath: string): WavData {
     const id = buf.toString("ascii", offset, offset + 4);
     const size = buf.readUInt32LE(offset + 4);
     if (id === "fmt ") {
+      audioFormat = buf.readUInt16LE(offset + 8);
       channels = buf.readUInt16LE(offset + 10);
       sampleRate = buf.readUInt32LE(offset + 12);
       bitsPerSample = buf.readUInt16LE(offset + 22);
@@ -72,8 +79,24 @@ function readWav(filePath: string): WavData {
     offset += 8 + size + (size & 1);
   }
   if (dataStart < 0) throw new Error(`${filePath}: no data chunk`);
-  if (bitsPerSample !== 16) throw new Error(`${filePath}: expected 16-bit PCM, got ${bitsPerSample}-bit`);
-  return { sampleRate, channels, pcm: buf.subarray(dataStart, dataStart + dataLen) };
+  let wireFormat: "S16LE" | "F32LE";
+  if (audioFormat === WAVE_FORMAT_PCM && bitsPerSample === 16) {
+    wireFormat = "S16LE";
+  } else if (audioFormat === WAVE_FORMAT_IEEE_FLOAT && bitsPerSample === 32) {
+    wireFormat = "F32LE";
+  } else {
+    throw new Error(
+      `${filePath}: unsupported WAV (format tag ${audioFormat}, ${bitsPerSample}-bit) — ` +
+        `expected 16-bit PCM or 32-bit IEEE float`,
+    );
+  }
+  return {
+    sampleRate,
+    channels,
+    samples: buf.subarray(dataStart, dataStart + dataLen),
+    wireFormat,
+    bytesPerSample: bitsPerSample / 8,
+  };
 }
 
 function resolveAudio(arg: string | null): string {
@@ -89,7 +112,7 @@ function resolveAudio(arg: string | null): string {
   if (wavs.length === 0) {
     throw new Error(
       "No --audio supplied and no .wav files found in examples/audio/. " +
-        "Drop a 16-bit PCM WAV in examples/audio/ or pass one with --audio.",
+        "Drop a 16-bit PCM or 32-bit IEEE-float WAV in examples/audio/ or pass one with --audio.",
     );
   }
   return path.join(audioDir, wavs[0]);
@@ -108,9 +131,9 @@ async function sendFile(
   durationS: number,
   chunkMs: number,
 ): Promise<void> {
-  const { sampleRate, channels, pcm } = wav;
-  const bytesPerSample = 2 * channels;
-  const bytesPerChunk = Math.max(1, Math.floor((sampleRate * chunkMs) / 1000) * bytesPerSample);
+  const { sampleRate, channels, samples, wireFormat, bytesPerSample } = wav;
+  const bytesPerFrame = bytesPerSample * channels;
+  const bytesPerChunk = Math.max(1, Math.floor((sampleRate * chunkMs) / 1000) * bytesPerFrame);
   const chunkS = chunkMs / 1000;
 
   call.write({ createSessionRequest: {} });
@@ -121,17 +144,17 @@ async function sendFile(
   let elapsedS = 0;
 
   while (elapsedS < durationS) {
-    const end = Math.min(cursor + bytesPerChunk, pcm.length);
-    const chunk = pcm.subarray(cursor, end);
+    const end = Math.min(cursor + bytesPerChunk, samples.length);
+    const chunk = samples.subarray(cursor, end);
     cursor = end;
-    if (cursor >= pcm.length) cursor = 0; // loop the file
-    const actualFrames = chunk.length / bytesPerSample;
+    if (cursor >= samples.length) cursor = 0; // loop the file
+    const actualFrames = chunk.length / bytesPerFrame;
     const durationNs = BigInt(Math.round((actualFrames / sampleRate) * 1e9));
 
     call.write({
       audio: {
         type: "audio/x-raw",
-        format: "S16LE",
+        format: wireFormat,
         channels,
         rate: sampleRate,
         durationNs,
@@ -308,10 +331,10 @@ async function main() {
   try {
     const audioPath = resolveAudio(args.audio);
     const wav = readWav(audioPath);
-    const fileDur = wav.pcm.length / (wav.sampleRate * 2 * wav.channels);
+    const fileDur = wav.samples.length / (wav.sampleRate * wav.bytesPerSample * wav.channels);
     console.log(
       `📞 Calling ${args.target} | source=${path.basename(audioPath)} ` +
-        `(${fileDur.toFixed(2)}s @ ${wav.sampleRate}Hz/${wav.channels}ch) ` +
+        `(${fileDur.toFixed(2)}s @ ${wav.sampleRate}Hz/${wav.channels}ch ${wav.wireFormat}) ` +
         `| duration=${args.duration.toFixed(1)}s | frame=${args.chunkMs}ms | ` +
         `concurrency=${args.concurrency}${staggerSuffix}${scenarioSuffix}${transportSuffix}`,
     );

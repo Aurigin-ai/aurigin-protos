@@ -11,7 +11,6 @@ CLI:
 from __future__ import annotations
 
 import argparse
-import wave
 from pathlib import Path
 
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
@@ -22,6 +21,12 @@ DEFAULT_RATE = 16000
 CHANNELS = 1
 CHUNK_MS = 500
 SILENCE_CHUNKS = 6  # 3 seconds
+
+# WAVE format tags we recognise. The stdlib `wave` module only handles PCM
+# (tag 1) and raises on IEEE Float (tag 3), so we parse the RIFF header
+# ourselves and dispatch to S16LE / F32LE.
+_WAVE_FORMAT_PCM = 0x0001
+_WAVE_FORMAT_IEEE_FLOAT = 0x0003
 
 
 def _silent_session_iter():
@@ -43,33 +48,73 @@ def _silent_session_iter():
         pts_ns += duration_ns
 
 
+def _read_wav(path: Path) -> tuple[bytes, int, int, str]:
+    """Parse a RIFF/WAVE file. Returns (samples, rate, channels, wire_format).
+
+    `wire_format` is the AudioBuffer.format string: "S16LE" for 16-bit PCM,
+    "F32LE" for 32-bit IEEE float — matching the formats the deepfake-service
+    decoder accepts.
+    """
+    buf = path.read_bytes()
+    if buf[:4] != b"RIFF" or buf[8:12] != b"WAVE":
+        raise ValueError(f"{path.name}: not a RIFF/WAVE file")
+    offset = 12
+    audio_format = channels = bits_per_sample = 0
+    rate = 0
+    data_start = -1
+    data_len = 0
+    while offset + 8 <= len(buf):
+        chunk_id = buf[offset : offset + 4]
+        size = int.from_bytes(buf[offset + 4 : offset + 8], "little")
+        if chunk_id == b"fmt ":
+            audio_format = int.from_bytes(buf[offset + 8 : offset + 10], "little")
+            channels = int.from_bytes(buf[offset + 10 : offset + 12], "little")
+            rate = int.from_bytes(buf[offset + 12 : offset + 16], "little")
+            bits_per_sample = int.from_bytes(buf[offset + 22 : offset + 24], "little")
+        elif chunk_id == b"data":
+            data_start = offset + 8
+            data_len = size
+            break
+        offset += 8 + size + (size & 1)  # chunks are word-aligned
+    if data_start < 0:
+        raise ValueError(f"{path.name}: no data chunk")
+
+    if audio_format == _WAVE_FORMAT_PCM and bits_per_sample == 16:
+        wire_format = "S16LE"
+    elif audio_format == _WAVE_FORMAT_IEEE_FLOAT and bits_per_sample == 32:
+        wire_format = "F32LE"
+    else:
+        raise ValueError(
+            f"{path.name}: unsupported WAV (format tag {audio_format}, "
+            f"{bits_per_sample}-bit) — expected 16-bit PCM or 32-bit IEEE float",
+        )
+    return buf[data_start : data_start + data_len], rate, channels, wire_format
+
+
 def _wav_session_iter(path: Path):
-    """Stream a WAV file (S16LE) as CreateSession + AudioBuffer chunks."""
-    with wave.open(str(path), "rb") as w:
-        if w.getsampwidth() != 2:
-            raise ValueError(f"{path.name}: expected 16-bit PCM, got {w.getsampwidth() * 8}-bit")
-        channels = w.getnchannels()
-        rate = w.getframerate()
-        frames_per_chunk = int(rate * CHUNK_MS / 1000)
+    """Stream a WAV file (S16LE or F32LE) as CreateSession + AudioBuffer chunks."""
+    samples, rate, channels, wire_format = _read_wav(path)
+    bytes_per_sample = (4 if wire_format == "F32LE" else 2) * channels
+    bytes_per_chunk = int(rate * CHUNK_MS / 1000) * bytes_per_sample
 
-        yield pb.DetectDeepfakeRequest(create_session_request=pb.CreateSessionRequest())
+    yield pb.DetectDeepfakeRequest(create_session_request=pb.CreateSessionRequest())
 
-        pts_ns = 0
-        while True:
-            chunk = w.readframes(frames_per_chunk)
-            if not chunk:
-                break
-            actual_frames = len(chunk) // (channels * 2)
-            duration_ns = int(actual_frames / rate * 1e9)
-            yield pb.DetectDeepfakeRequest(
-                audio=ab_pb.AudioBuffer(
-                    type="audio/x-raw", format="S16LE",
-                    channels=channels, rate=rate,
-                    duration_ns=duration_ns, pts_ns=pts_ns,
-                    size=len(chunk), buffer=chunk,
-                ),
-            )
-            pts_ns += duration_ns
+    pts_ns = 0
+    for start in range(0, len(samples), bytes_per_chunk):
+        chunk = samples[start : start + bytes_per_chunk]
+        if not chunk:
+            break
+        actual_frames = len(chunk) // bytes_per_sample
+        duration_ns = int(actual_frames / rate * 1e9)
+        yield pb.DetectDeepfakeRequest(
+            audio=ab_pb.AudioBuffer(
+                type="audio/x-raw", format=wire_format,
+                channels=channels, rate=rate,
+                duration_ns=duration_ns, pts_ns=pts_ns,
+                size=len(chunk), buffer=chunk,
+            ),
+        )
+        pts_ns += duration_ns
 
 
 def _run_session(stub, request_iter, label: str) -> None:

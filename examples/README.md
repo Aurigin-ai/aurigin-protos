@@ -74,7 +74,7 @@ FINAL    | total=3000ms   | score=0.050 | label=bonafide
 
 The session id is generated per session (`sim-<8 hex>`) and the cadence comes from the loaded scenario (1 s by default). Pass `--scenario-id <id>` to `phone-call` to load a different scenario from `examples/scenarios/`.
 
-To run against real audio (real ML server required, e.g. backend-app's gRPC service), drop one or more `.wav` files (S16LE PCM, any sample rate, any channel count) into `examples/python/audio/` and re-run the client. It opens one session per file. The `audio/` dir is gitignored.
+To run against real audio (real ML server required, e.g. backend-app's gRPC service), drop one or more `.wav` files into `examples/audio/` and re-run the client. Both 16-bit PCM (`S16LE`) and 32-bit IEEE-float (`F32LE`) WAVs are accepted, at any sample rate and channel count — the client reads the format tag from the RIFF header and tags the outgoing `AudioBuffer.format` accordingly. It opens one session per file. The `audio/` dir is gitignored.
 
 Files:
 - `python/server.py` — scenario-driven simulator: loads YAML scenarios from `examples/scenarios/` at startup, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Listens on `[::]:50051`. Env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`.
@@ -117,7 +117,7 @@ uv run phone-call --duration 30 --scenario-id fake_detected_rising_curve
 Sample output:
 
 ```
-📞 Calling localhost:50051 | source=your_call.wav (4.16s @ 24000Hz/1ch) | duration=12.0s | frame=100ms
+📞 Calling localhost:50051 | source=your_call.wav (4.16s @ 24000Hz/1ch S16LE) | duration=12.0s | frame=100ms
 ──────────────────────────────────────────────────────────────────────
 📞 Session: 538a241b-ebdf-4e9a-83a2-259352bd0b01
    Analysis @   0.00s | score=0.945 | label=spoofed            | confidence=1.00

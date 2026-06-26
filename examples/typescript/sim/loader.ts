@@ -48,6 +48,18 @@ export interface ScenarioEvent {
   payload: Record<string, any>;
 }
 
+// Declarative deepfake-service mirror — when present on a Scenario, the
+// simulator computes the emission timeline from these knobs instead of using
+// confidence_curve.emit_every_ms. Mirrors dfs config: analysis_interval_s ×
+// 1000, min_chunk_duration_s × 1000.
+export interface BackendSimulation {
+  analysisIntervalMs: number;
+  minChunkDurationMs: number;
+  tailStrategy: "drop" | "extend";
+  silentWindows: ReadonlyArray<number>;
+  silenceConfidence: number;
+}
+
 export interface Scenario {
   id: string;
   description: string;
@@ -57,6 +69,7 @@ export interface Scenario {
   randomSeed: number | null;
   confidenceCurve: Record<string, any> | null;
   events: ReadonlyArray<ScenarioEvent>;
+  backendSimulation: BackendSimulation | null;
 }
 
 function loadSchema(): object {
@@ -88,6 +101,16 @@ function scenarioFromDoc(doc: any, _source: string): Scenario {
     name: e.name ?? null,
     payload: { ...(e.payload ?? {}) },
   }));
+  const bs = doc.backend_simulation;
+  const backendSimulation: BackendSimulation | null = bs
+    ? {
+        analysisIntervalMs: Number(bs.analysis_interval_ms),
+        minChunkDurationMs: Number(bs.min_chunk_duration_ms ?? 1000),
+        tailStrategy: (bs.tail_strategy ?? "drop") as "drop" | "extend",
+        silentWindows: Object.freeze(((bs.silent_windows ?? []) as number[]).map((n) => Number(n))),
+        silenceConfidence: Number(bs.silence_confidence ?? 0.95),
+      }
+    : null;
   return {
     id: sc.id,
     description: sc.description ?? "",
@@ -115,6 +138,7 @@ function scenarioFromDoc(doc: any, _source: string): Scenario {
     randomSeed: rnd.seed ?? null,
     confidenceCurve: doc.confidence_curve ?? null,
     events,
+    backendSimulation,
   };
 }
 

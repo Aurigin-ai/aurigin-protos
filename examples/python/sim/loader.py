@@ -49,6 +49,20 @@ class ScenarioEvent:
 
 
 @dataclass(frozen=True)
+class BackendSimulation:
+    """Declarative deepfake-service mirror — mirrors the dfs config that
+    drives analysis emission timing, instead of hand-coding emissions in the
+    scenario. When this block is set on a Scenario, the simulator computes
+    the timeline from (stream.duration_ms, analysis_interval_ms,
+    min_chunk_duration_ms, tail_strategy)."""
+    analysis_interval_ms: int
+    min_chunk_duration_ms: int = 1000
+    tail_strategy: str = "drop"  # "drop" | "extend"
+    silent_windows: tuple[int, ...] = ()
+    silence_confidence: float = 0.95
+
+
+@dataclass(frozen=True)
 class Scenario:
     id: str
     description: str
@@ -58,6 +72,7 @@ class Scenario:
     random_seed: int | None
     confidence_curve: dict[str, Any] | None
     events: tuple[ScenarioEvent, ...]
+    backend_simulation: BackendSimulation | None = None
 
 
 def _load_schema() -> dict[str, Any]:
@@ -94,6 +109,16 @@ def _scenario_from_doc(doc: dict[str, Any], source: Path) -> Scenario:
         )
         for e in doc.get("events", []) or []
     )
+    backend_sim_doc = doc.get("backend_simulation")
+    backend_simulation = None
+    if backend_sim_doc:
+        backend_simulation = BackendSimulation(
+            analysis_interval_ms=int(backend_sim_doc["analysis_interval_ms"]),
+            min_chunk_duration_ms=int(backend_sim_doc.get("min_chunk_duration_ms", 1000)),
+            tail_strategy=str(backend_sim_doc.get("tail_strategy", "drop")),
+            silent_windows=tuple(int(w) for w in backend_sim_doc.get("silent_windows", []) or []),
+            silence_confidence=float(backend_sim_doc.get("silence_confidence", 0.95)),
+        )
     return Scenario(
         id=sc["id"],
         description=sc.get("description", ""),
@@ -121,6 +146,7 @@ def _scenario_from_doc(doc: dict[str, Any], source: Path) -> Scenario:
         random_seed=rnd.get("seed"),
         confidence_curve=doc.get("confidence_curve"),
         events=events,
+        backend_simulation=backend_simulation,
     )
 
 

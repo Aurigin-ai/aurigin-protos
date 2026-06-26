@@ -72,10 +72,19 @@ interface SessionState {
 }
 
 interface TimelineItem {
-  kind: "curve_sample" | "event";
+  kind: "curve_sample" | "event" | "computed_emission";
   atMs: number;
   event?: ScenarioEvent;
+  // Set for kind=computed_emission (backend_simulation-driven).
+  durationMs?: number;
+  isSilent?: boolean;
+  silenceConfidence?: number;
 }
+
+// Bytes per sample for the AudioBuffer wire formats the deepfake-service
+// decoder accepts. Used by the audio drainer's fallback duration-from-bytes
+// calc when the client doesn't populate duration_ns.
+const BYTES_PER_SAMPLE: Record<string, number> = { S16LE: 2, F32LE: 4 };
 
 function makeSessionId(): string {
   return `sim-${randomBytes(4).toString("hex")}`;
@@ -111,11 +120,15 @@ async function applyNetwork(net: Scenario["network"], rng: Rng): Promise<void> {
 function buildTimeline(scenario: Scenario): TimelineItem[] {
   const items: TimelineItem[] = [];
 
-  const curve = scenario.confidenceCurve;
-  if (curve != null) {
-    const every = (curve.emit_every_ms ?? 1000) as number;
-    for (let t = every; t <= scenario.stream.durationMs; t += every) {
-      items.push({ kind: "curve_sample", atMs: t });
+  if (scenario.backendSimulation != null) {
+    items.push(...emissionsFromBackendSimulation(scenario));
+  } else {
+    const curve = scenario.confidenceCurve;
+    if (curve != null) {
+      const every = (curve.emit_every_ms ?? 1000) as number;
+      for (let t = every; t <= scenario.stream.durationMs; t += every) {
+        items.push({ kind: "curve_sample", atMs: t });
+      }
     }
   }
 
@@ -124,6 +137,57 @@ function buildTimeline(scenario: Scenario): TimelineItem[] {
   }
 
   items.sort((a, b) => a.atMs - b.atMs);
+  return items;
+}
+
+// Mirror dfs's window-emission rules over a finite stream. Walks
+// [0, duration_ms] in `analysis_interval_ms` steps and emits one
+// computed_emission per main window. Residual after the last main window
+// follows `tail_strategy`:
+//   - drop: residual < min_chunk_duration_ms → silently skipped
+//           residual ≥ min_chunk_duration_ms → short tail window
+//   - extend: residual < min_chunk_duration_ms → folded into prior window
+//             (last emission shifts to t=duration_ms with longer duration)
+//             residual ≥ min_chunk_duration_ms → same as drop's else branch
+function emissionsFromBackendSimulation(scenario: Scenario): TimelineItem[] {
+  const bs = scenario.backendSimulation!;
+  const durationMs = scenario.stream.durationMs;
+  const interval = bs.analysisIntervalMs;
+  const minChunk = bs.minChunkDurationMs;
+  const silentSet = new Set(bs.silentWindows);
+  const nMain = Math.floor(durationMs / interval);
+  const residual = durationMs - nMain * interval;
+  const foldResidual =
+    residual > 0 && residual < minChunk && bs.tailStrategy === "extend" && nMain > 0;
+
+  const items: TimelineItem[] = [];
+  for (let i = 1; i <= nMain; i++) {
+    let atMs = i * interval;
+    let windowDur = interval;
+    if (i === nMain && foldResidual) {
+      atMs = durationMs;
+      windowDur = interval + residual;
+    }
+    items.push({
+      kind: "computed_emission",
+      atMs,
+      durationMs: windowDur,
+      isSilent: silentSet.has(i),
+      silenceConfidence: bs.silenceConfidence,
+    });
+  }
+
+  if (residual > 0 && !foldResidual && residual >= minChunk) {
+    const tailIdx = nMain + 1;
+    items.push({
+      kind: "computed_emission",
+      atMs: durationMs,
+      durationMs: residual,
+      isSilent: silentSet.has(tailIdx),
+      silenceConfidence: bs.silenceConfidence,
+    });
+  }
+
   return items;
 }
 
@@ -156,6 +220,26 @@ function materialise(
   rng: Rng,
   atMs: number,
 ): DetectDeepfakeResponse | null {
+  if (item.kind === "computed_emission") {
+    // backend_simulation-driven emission. Silent windows skip the curve and
+    // emit a sentinel; otherwise the curve (if any) computes the score the
+    // same way curve_sample does.
+    if (item.isSilent) {
+      return makeAnalysisResult(
+        state, atMs, 0, "silence", item.silenceConfidence ?? 0.95, item.durationMs ?? scenario.stream.chunkIntervalMs,
+      );
+    }
+    const curve = scenario.confidenceCurve;
+    let score = 0;
+    let label = "bonafide";
+    if (curve) {
+      score = curves.evaluate(curve, rng, atMs);
+      label = curves.labelFor(curve, score);
+    }
+    const confidence = Math.round((0.85 + rng() * 0.14) * 1000) / 1000;
+    return makeAnalysisResult(state, atMs, score, label, confidence, item.durationMs ?? scenario.stream.chunkIntervalMs);
+  }
+
   if (item.kind === "curve_sample") {
     const curve = scenario.confidenceCurve!;
     const score = curves.evaluate(curve, rng, atMs);
@@ -188,6 +272,7 @@ function audioChunkMs(audio: {
   rate?: number;
   channels?: number;
   buffer?: Uint8Array;
+  format?: string;
 }): number {
   const durationNs = audio.durationNs ?? 0n;
   if (durationNs > 0n) {
@@ -197,7 +282,8 @@ function audioChunkMs(audio: {
   const channels = audio.channels ?? 0;
   const buf = audio.buffer;
   if (rate && channels && buf) {
-    return Math.round((buf.length / 2 / channels / rate) * 1000);
+    const bps = BYTES_PER_SAMPLE[audio.format ?? ""] ?? 2;
+    return Math.round((buf.length / bps / channels / rate) * 1000);
   }
   return 0;
 }
@@ -237,6 +323,7 @@ export async function runSession(scenario: Scenario, call: Call): Promise<void> 
     clientEndResolve = res;
   });
 
+  let loggedFormat = false;
   call.on("data", (msg: DetectDeepfakeRequest) => {
     if (!firstResolved) {
       firstResolved = true;
@@ -244,6 +331,14 @@ export async function runSession(scenario: Scenario, call: Call): Promise<void> 
       return;
     }
     if (msg.audio) {
+      if (!loggedFormat) {
+        const a = msg.audio as any;
+        log(
+          state.sessionId,
+          `audio | format=${a.format || "?"} | rate=${a.rate ?? 0} | channels=${a.channels ?? 0}`,
+        );
+        loggedFormat = true;
+      }
       state.accumulatedAudioMs += audioChunkMs(msg.audio as any);
     }
   });

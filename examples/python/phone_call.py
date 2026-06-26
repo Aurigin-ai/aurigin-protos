@@ -25,7 +25,6 @@ import argparse
 import asyncio
 import signal
 import sys
-import wave
 from pathlib import Path
 
 import grpc
@@ -38,18 +37,56 @@ DEFAULT_CHUNK_MS = 100
 DEFAULT_DURATION_S = 30.0
 DEFAULT_CONCURRENCY = 1
 
+_WAVE_FORMAT_PCM = 0x0001
+_WAVE_FORMAT_IEEE_FLOAT = 0x0003
+
 
 def _log(label: str, message: str, *, file=None) -> None:
     """Print one line prefixed by the per-stream label."""
     print(f"[{label}] {message}", file=file)
 
 
-def _load_pcm(path: Path) -> tuple[bytes, int, int]:
-    """Read a WAV file as (pcm_bytes, sample_rate, channels). 16-bit only."""
-    with wave.open(str(path), "rb") as w:
-        if w.getsampwidth() != 2:
-            raise ValueError(f"{path.name}: expected 16-bit PCM, got {w.getsampwidth() * 8}-bit")
-        return w.readframes(w.getnframes()), w.getframerate(), w.getnchannels()
+def _load_pcm(path: Path) -> tuple[bytes, int, int, str]:
+    """Read a WAV file as (samples, sample_rate, channels, wire_format).
+
+    `wire_format` is "S16LE" for 16-bit PCM or "F32LE" for 32-bit IEEE
+    float — matching the formats the deepfake-service decoder accepts.
+    Parses RIFF directly because the stdlib `wave` module rejects float WAVs.
+    """
+    buf = path.read_bytes()
+    if buf[:4] != b"RIFF" or buf[8:12] != b"WAVE":
+        raise ValueError(f"{path.name}: not a RIFF/WAVE file")
+    offset = 12
+    audio_format = channels = bits_per_sample = 0
+    rate = 0
+    data_start = -1
+    data_len = 0
+    while offset + 8 <= len(buf):
+        chunk_id = buf[offset : offset + 4]
+        size = int.from_bytes(buf[offset + 4 : offset + 8], "little")
+        if chunk_id == b"fmt ":
+            audio_format = int.from_bytes(buf[offset + 8 : offset + 10], "little")
+            channels = int.from_bytes(buf[offset + 10 : offset + 12], "little")
+            rate = int.from_bytes(buf[offset + 12 : offset + 16], "little")
+            bits_per_sample = int.from_bytes(buf[offset + 22 : offset + 24], "little")
+        elif chunk_id == b"data":
+            data_start = offset + 8
+            data_len = size
+            break
+        offset += 8 + size + (size & 1)
+    if data_start < 0:
+        raise ValueError(f"{path.name}: no data chunk")
+
+    if audio_format == _WAVE_FORMAT_PCM and bits_per_sample == 16:
+        wire_format = "S16LE"
+    elif audio_format == _WAVE_FORMAT_IEEE_FLOAT and bits_per_sample == 32:
+        wire_format = "F32LE"
+    else:
+        raise ValueError(
+            f"{path.name}: unsupported WAV (format tag {audio_format}, "
+            f"{bits_per_sample}-bit) — expected 16-bit PCM or 32-bit IEEE float",
+        )
+    return buf[data_start : data_start + data_len], rate, channels, wire_format
 
 
 def _resolve_audio(arg: Path | None) -> Path:
@@ -62,7 +99,7 @@ def _resolve_audio(arg: Path | None) -> Path:
     if not wavs:
         raise SystemExit(
             "No --audio supplied and no .wav files found in examples/audio/. "
-            "Drop a 16-bit PCM WAV in examples/audio/ or pass one with --audio."
+            "Drop a 16-bit PCM or 32-bit IEEE-float WAV in examples/audio/ or pass one with --audio."
         )
     return wavs[0]
 
@@ -73,12 +110,13 @@ async def _send_call(
     pcm: bytes,
     sample_rate: int,
     channels: int,
+    wire_format: str,
     chunk_ms: int,
     duration_s: float,
 ) -> None:
     """Send CreateSession + paced AudioBuffers for `duration_s` seconds, then close write side."""
     del label  # silent sender; only the receiver prints per-stream output
-    bytes_per_sample = 2 * channels
+    bytes_per_sample = (4 if wire_format == "F32LE" else 2) * channels
     bytes_per_chunk = max(1, int(sample_rate * chunk_ms / 1000) * bytes_per_sample)
     chunk_seconds = chunk_ms / 1000
 
@@ -102,7 +140,7 @@ async def _send_call(
             pb.DetectDeepfakeRequest(
                 audio=ab_pb.AudioBuffer(
                     type="audio/x-raw",
-                    format="S16LE",
+                    format=wire_format,
                     channels=channels,
                     rate=sample_rate,
                     duration_ns=duration_ns,
@@ -213,17 +251,18 @@ async def main() -> None:
         stub = pb_grpc.DeepfakeDetectionStub(channel)
 
         audio_path = _resolve_audio(args.audio)
-        pcm, rate, channels = _load_pcm(audio_path)
+        pcm, rate, channels, wire_format = _load_pcm(audio_path)
+        bytes_per_sample = (4 if wire_format == "F32LE" else 2) * channels
         print(
             f"📞 Calling {args.target} | source={audio_path.name} "
-            f"({len(pcm) / (rate * 2 * channels):.2f}s @ {rate}Hz/{channels}ch) "
+            f"({len(pcm) / (rate * bytes_per_sample):.2f}s @ {rate}Hz/{channels}ch {wire_format}) "
             f"| duration={args.duration:.1f}s | frame={args.chunk_ms}ms | "
             f"concurrency={args.concurrency}{stagger_suffix}{scenario_suffix}{transport_suffix}"
         )
         print("─" * 70)
 
         def file_sender(call, label):
-            return _send_call(call, label, pcm, rate, channels, args.chunk_ms, args.duration)
+            return _send_call(call, label, pcm, rate, channels, wire_format, args.chunk_ms, args.duration)
 
         stagger_s = args.stagger_ms / 1000
         tasks = [
