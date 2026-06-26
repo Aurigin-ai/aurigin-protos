@@ -79,6 +79,11 @@ interface TimelineItem {
   durationMs?: number;
   isSilent?: boolean;
   silenceConfidence?: number;
+  // offsetMs usually equals atMs (fire-wallclock-time == audio offset under
+  // the existing simulator convention), but tail_strategy='recompute'
+  // slides it back so the offset reports where the slid window starts
+  // rather than where it ended. Falls back to atMs when absent.
+  offsetMs?: number;
 }
 
 // Bytes per sample for the AudioBuffer wire formats the deepfake-service
@@ -147,8 +152,14 @@ function buildTimeline(scenario: Scenario): TimelineItem[] {
 //   - drop: residual < min_chunk_duration_ms → silently skipped
 //           residual ≥ min_chunk_duration_ms → short tail window
 //   - extend: residual < min_chunk_duration_ms → folded into prior window
-//             (last emission shifts to t=duration_ms with longer duration)
-//             residual ≥ min_chunk_duration_ms → same as drop's else branch
+//             (last emission shifts to t=duration_ms, longer duration)
+//   - recompute: residual < min_chunk_duration_ms → last main emission
+//                slides back to end at end-of-stream (offset shifts to
+//                duration_ms - analysis_interval_ms, duration stays
+//                analysis_interval_ms). Mirrors backend-app HTTP
+//                /predict chunk_audio byte-for-byte.
+//   - extend|recompute with residual ≥ min_chunk_duration_ms → same as
+//     drop's else branch (standalone short tail).
 function emissionsFromBackendSimulation(scenario: Scenario): TimelineItem[] {
   const bs = scenario.backendSimulation!;
   const durationMs = scenario.stream.durationMs;
@@ -157,16 +168,29 @@ function emissionsFromBackendSimulation(scenario: Scenario): TimelineItem[] {
   const silentSet = new Set(bs.silentWindows);
   const nMain = Math.floor(durationMs / interval);
   const residual = durationMs - nMain * interval;
-  const foldResidual =
-    residual > 0 && residual < minChunk && bs.tailStrategy === "extend" && nMain > 0;
+  const canAbsorbTail =
+    residual > 0 &&
+    residual < minChunk &&
+    nMain > 0 &&
+    (bs.tailStrategy === "extend" || bs.tailStrategy === "recompute");
 
   const items: TimelineItem[] = [];
   for (let i = 1; i <= nMain; i++) {
     let atMs = i * interval;
     let windowDur = interval;
-    if (i === nMain && foldResidual) {
-      atMs = durationMs;
-      windowDur = interval + residual;
+    let offsetMs = atMs;
+    if (i === nMain && canAbsorbTail) {
+      if (bs.tailStrategy === "extend") {
+        atMs = durationMs;
+        windowDur = interval + residual;
+        offsetMs = atMs;
+      } else {
+        // recompute — fire at end-of-stream, but report the audio offset
+        // as where the slid-back window starts (durationMs - interval).
+        atMs = durationMs;
+        windowDur = interval;
+        offsetMs = durationMs - interval;
+      }
     }
     items.push({
       kind: "computed_emission",
@@ -174,10 +198,11 @@ function emissionsFromBackendSimulation(scenario: Scenario): TimelineItem[] {
       durationMs: windowDur,
       isSilent: silentSet.has(i),
       silenceConfidence: bs.silenceConfidence,
+      offsetMs,
     });
   }
 
-  if (residual > 0 && !foldResidual && residual >= minChunk) {
+  if (residual > 0 && !canAbsorbTail && residual >= minChunk) {
     const tailIdx = nMain + 1;
     items.push({
       kind: "computed_emission",
@@ -185,6 +210,7 @@ function emissionsFromBackendSimulation(scenario: Scenario): TimelineItem[] {
       durationMs: residual,
       isSilent: silentSet.has(tailIdx),
       silenceConfidence: bs.silenceConfidence,
+      offsetMs: durationMs,
     });
   }
 
@@ -224,9 +250,15 @@ function materialise(
     // backend_simulation-driven emission. Silent windows skip the curve and
     // emit a sentinel; otherwise the curve (if any) computes the score the
     // same way curve_sample does.
+    //
+    // offsetMs is the wire audio_offset_ms. Usually equals atMs (fire-time ==
+    // audio-offset under the existing simulator convention), but recompute
+    // slides it back so the offset reports where the slid window starts.
+    const emitOffset = item.offsetMs ?? atMs;
+    const dur = item.durationMs ?? scenario.stream.chunkIntervalMs;
     if (item.isSilent) {
       return makeAnalysisResult(
-        state, atMs, 0, "silence", item.silenceConfidence ?? 0.95, item.durationMs ?? scenario.stream.chunkIntervalMs,
+        state, emitOffset, 0, "silence", item.silenceConfidence ?? 0.95, dur,
       );
     }
     const curve = scenario.confidenceCurve;
@@ -237,7 +269,7 @@ function materialise(
       label = curves.labelFor(curve, score);
     }
     const confidence = Math.round((0.85 + rng() * 0.14) * 1000) / 1000;
-    return makeAnalysisResult(state, atMs, score, label, confidence, item.durationMs ?? scenario.stream.chunkIntervalMs);
+    return makeAnalysisResult(state, emitOffset, score, label, confidence, dur);
   }
 
   if (item.kind === "curve_sample") {

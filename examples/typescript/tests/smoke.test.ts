@@ -162,6 +162,9 @@ const backendSimScenarios: {
   { scenarioId: "tail_dropped_below_min", durationS: 11, expectedAnalyses: 2, extraSubstrings: [] },
   // tail_strategy=extend → 2 emissions, second covers the 1ms tail.
   { scenarioId: "tail_extended_full_coverage", durationS: 11, expectedAnalyses: 2, extraSubstrings: [] },
+  // tail_strategy=recompute → 2 emissions, second slides back (offset
+  // shifts to audio time 5001ms, duration stays 5000ms).
+  { scenarioId: "tail_recomputed_full_coverage", durationS: 11, expectedAnalyses: 2, extraSubstrings: [] },
   // silent_windows=[2] → one of the 5 emissions is the silence sentinel.
   // Loop the 10s fixture to fill the 15s scenario timeline.
   { scenarioId: "silence_gated_window", durationS: 16, expectedAnalyses: 5, extraSubstrings: ["label=silence"] },

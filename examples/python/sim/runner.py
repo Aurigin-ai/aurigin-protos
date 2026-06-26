@@ -193,6 +193,12 @@ def _emissions_from_backend_simulation(
                 window (last main emission shifts to t=duration_ms with
                 duration_ms = analysis_interval_ms + residual)
                 residual ≥ min_chunk_duration_ms → same as drop's else branch
+      - recompute: residual < min_chunk_duration_ms → last main emission
+                slides back so it ends at end-of-stream (offset shifts to
+                duration_ms - analysis_interval_ms, duration stays
+                analysis_interval_ms). Mirrors backend-app HTTP
+                /predict chunk_audio byte-for-byte. residual ≥
+                min_chunk_duration_ms → same as drop's else branch.
     """
     bs = scenario.backend_simulation
     assert bs is not None
@@ -202,32 +208,49 @@ def _emissions_from_backend_simulation(
     silent_set = set(bs.silent_windows)
     n_main = duration_ms // interval
     residual = duration_ms - n_main * interval
-    fold_residual = (
+    can_absorb_tail = (
         residual > 0
         and residual < min_chunk
-        and bs.tail_strategy == "extend"
         and n_main > 0
+        and bs.tail_strategy in ("extend", "recompute")
     )
 
     items: list[tuple[int, dict[str, Any]]] = []
     for i in range(1, n_main + 1):
         at_ms = i * interval
         window_dur = interval
-        # Last main window absorbs the residual when extending.
-        if i == n_main and fold_residual:
-            at_ms = duration_ms
-            window_dur = interval + residual
+        if i == n_main and can_absorb_tail:
+            if bs.tail_strategy == "extend":
+                # Fold residual into the last window: end-of-stream offset,
+                # duration grows to cover both pieces.
+                at_ms = duration_ms
+                window_dur = interval + residual
+            else:  # recompute — slide back so the window ends at EOS at
+                   # exactly analysis_interval_ms long.
+                at_ms = duration_ms
+                window_dur = interval
+                # at_ms here is the emission's wallclock fire time (== audio
+                # offset under the existing simulator convention). For
+                # recompute parity with dfs the audio_offset_ms should be
+                # (total - interval) — encoded via a separate offset_ms key.
         items.append((at_ms, {
             "kind": "computed_emission",
             "at_ms": at_ms,
             "duration_ms": window_dur,
             "is_silent": i in silent_set,
             "silence_confidence": bs.silence_confidence,
+            # recompute slides the offset forward by residual; for every
+            # other case offset_ms == at_ms (preserves existing convention).
+            "offset_ms": (
+                duration_ms - interval
+                if i == n_main and can_absorb_tail and bs.tail_strategy == "recompute"
+                else at_ms
+            ),
         }))
 
     # Standalone tail emission (only when not folded into the prior window
     # and large enough to clear the min_chunk floor).
-    if residual > 0 and not fold_residual and residual >= min_chunk:
+    if residual > 0 and not can_absorb_tail and residual >= min_chunk:
         tail_idx = n_main + 1
         items.append((duration_ms, {
             "kind": "computed_emission",
@@ -235,6 +258,7 @@ def _emissions_from_backend_simulation(
             "duration_ms": residual,
             "is_silent": tail_idx in silent_set,
             "silence_confidence": bs.silence_confidence,
+            "offset_ms": duration_ms,
         }))
 
     return items
@@ -258,10 +282,17 @@ def _materialise(
         # backend_simulation-driven emission. Silent windows skip the curve
         # entirely and emit a sentinel; otherwise curve (if any) computes
         # the score the same way curve_sample does.
+        #
+        # offset_ms is the AnalysisResult.audio_offset_ms wire value. It
+        # usually equals at_ms (fire-wallclock-time == audio-offset under
+        # the existing simulator convention), but tail_strategy='recompute'
+        # slides it back so the offset reports where the slid window starts
+        # rather than where it ended.
+        emit_offset = int(item.get("offset_ms", at_ms))
         if item["is_silent"]:
             return _make_analysis_result(
                 state,
-                t_ms=at_ms,
+                t_ms=emit_offset,
                 score=0.0,
                 label="silence",
                 confidence=float(item["silence_confidence"]),
@@ -276,7 +307,7 @@ def _materialise(
         confidence = round(rng.uniform(0.85, 0.99), 3)
         return _make_analysis_result(
             state,
-            t_ms=at_ms,
+            t_ms=emit_offset,
             score=score,
             label=label,
             confidence=confidence,

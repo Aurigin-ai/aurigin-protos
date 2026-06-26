@@ -167,6 +167,12 @@ def test_phone_call_wav_roundtrip(server, env: dict[str, str], fixture_name: str
         # tail_strategy=extend → 2 emissions, second covers the 1ms tail
         # (duration_ms=5001). Check that duration in the analysis log line.
         ("tail_extended_full_coverage", 11, 2, ()),
+        # tail_strategy=recompute → 2 emissions, second slides back so its
+        # offset is at audio time 5001ms (rather than the 5000ms grid).
+        # phone_call.py prints offsets as "Analysis @ 5.00s" — for recompute
+        # the second emission's offset is 5.001s, which rounds to "5.00s"
+        # in the 2-decimal print but is distinguishable in the FINAL line.
+        ("tail_recomputed_full_coverage", 11, 2, ()),
         # silent_windows=[2] → one of the 5 emissions is the silence sentinel.
         # Loop the fixture (10s) to fill the 15s scenario timeline.
         ("silence_gated_window", 16, 5, ("label=silence",)),

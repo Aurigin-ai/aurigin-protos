@@ -77,7 +77,7 @@
       "properties": {
         "analysis_interval_ms": { "type": "integer", "minimum": 1, "description": "Mirrors dfs analysis_interval_s × 1000." },
         "min_chunk_duration_ms": { "type": "integer", "minimum": 1, "default": 1000, "description": "Mirrors dfs min_chunk_duration_s × 1000. Residual audio below this floor is dropped or extended per tail_strategy." },
-        "tail_strategy": { "enum": ["drop", "extend"], "default": "drop", "description": "drop = sub-min residual silently skipped (current dfs default). extend = sub-min residual folded into the prior window so coverage is total." },
+        "tail_strategy": { "enum": ["drop", "extend", "recompute"], "default": "drop", "description": "drop = sub-min residual silently skipped (current dfs default). extend = sub-min residual folded into the prior window so coverage is total (last duration_ms grows). recompute = last window slides back from end-of-stream so its duration stays exactly analysis_interval_ms and its offset shifts forward by the residual (mirrors backend-app HTTP /predict chunk_audio byte-for-byte)." },
         "silent_windows": {
           "type": "array",
           "items": { "type": "integer", "minimum": 1 },

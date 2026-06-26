@@ -55,7 +55,7 @@ export interface ScenarioEvent {
 export interface BackendSimulation {
   analysisIntervalMs: number;
   minChunkDurationMs: number;
-  tailStrategy: "drop" | "extend";
+  tailStrategy: "drop" | "extend" | "recompute";
   silentWindows: ReadonlyArray<number>;
   silenceConfidence: number;
 }
@@ -106,7 +106,7 @@ function scenarioFromDoc(doc: any, _source: string): Scenario {
     ? {
         analysisIntervalMs: Number(bs.analysis_interval_ms),
         minChunkDurationMs: Number(bs.min_chunk_duration_ms ?? 1000),
-        tailStrategy: (bs.tail_strategy ?? "drop") as "drop" | "extend",
+        tailStrategy: (bs.tail_strategy ?? "drop") as "drop" | "extend" | "recompute",
         silentWindows: Object.freeze(((bs.silent_windows ?? []) as number[]).map((n) => Number(n))),
         silenceConfidence: Number(bs.silence_confidence ?? 0.95),
       }
