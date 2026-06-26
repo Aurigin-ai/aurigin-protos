@@ -20,8 +20,11 @@ examples/typescript/package-lock.json
 examples/python/.venv/
 
 # Local audio fixtures (shared between python + typescript examples;
-# consumers drop their own .wavs here, not committed)
+# consumers drop their own audio here, not committed)
 examples/audio/*.wav
+examples/audio/*.flac
+examples/audio/*.mp3
+examples/audio/*.m4a
 
 # Local virtualenvs created during ad-hoc testing
 .venv*/
