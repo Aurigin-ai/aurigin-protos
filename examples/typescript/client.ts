@@ -173,6 +173,18 @@ async function main() {
       await runSession(client, silentChunks(), "silence (3 s @ 16 kHz)");
     } else {
       for (const wav of wavs) {
+        // Pre-validate before opening the stream. If readWav throws
+        // (mislabeled .wav file, unsupported format, broken header), we'd
+        // otherwise surface a cryptic
+        //   Error: 13 INTERNAL: Received RST_STREAM
+        // because the throw fires after the gRPC call has started. Catching
+        // here lets us print a clear skip line and keep going through the dir.
+        try {
+          readWav(wav);
+        } catch (err) {
+          console.log(`\n=== ${path.basename(wav)} ===\nSKIPPED: ${(err as Error).message}`);
+          continue;
+        }
         await runSession(client, wavChunks(wav), path.basename(wav));
       }
     }

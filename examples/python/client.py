@@ -143,6 +143,18 @@ def main(target: str = "localhost:50051", audio_dir: str | Path | None = None) -
             _run_session(stub, _silent_session_iter(), "silence (3 s @ 16 kHz)")
             return
         for wav in wavs:
+            # Pre-validate before opening the stream. If _read_wav raises
+            # (mislabeled .wav file, unsupported format, broken header),
+            # we'd otherwise surface a cryptic
+            #   StatusCode.UNKNOWN: "Exception iterating requests!"
+            # from gRPC because the exception fires inside the request
+            # generator AFTER the call has started. Catching here lets
+            # us print a clear skip line and keep going through the dir.
+            try:
+                _read_wav(wav)
+            except ValueError as exc:
+                print(f"\n=== {wav.name} ===\nSKIPPED: {exc}")
+                continue
             _run_session(stub, _wav_session_iter(wav), wav.name)
 
 
