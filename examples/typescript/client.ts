@@ -17,6 +17,7 @@ import {
   type DetectDeepfakeResponse,
 } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
 import { channelCredentials, transportLabel } from "./tls.js";
+import { type ChunkRow, ResultCSV } from "./result_csv.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -132,22 +133,50 @@ function runSession(
   client: DeepfakeDetectionClient,
   iter: Iterable<DetectDeepfakeRequest>,
   label: string,
+  csv: ResultCSV | null = null,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     console.log(`\n=== ${label} ===`);
+    let sessionId = "";
+    const chunks: ChunkRow[] = [];
+    let audioDurationMs = 0;
+    let globalResult = "unknown";
+    // Wallclock from right before the bidi opens to FinalResult-received.
+    // Captures network + server-side work + client-side iteration cost — the
+    // "user-perceived" latency for processing this file.
+    const tStart = performance.now();
+
     const call = client.detectDeepfake();
     call.on("data", (response: DetectDeepfakeResponse) => {
       if (response.createSessionResponse) {
-        console.log(`Session: ${response.createSessionResponse.sessionId}`);
+        sessionId = response.createSessionResponse.sessionId;
+        console.log(`Session: ${sessionId}`);
       } else if (response.analysisResult) {
         const r = response.analysisResult;
+        chunks.push({
+          offsetMs: Number(r.audioOffsetMs),
+          durationMs: Number(r.durationMs),
+          confidence: r.confidence,
+          label: r.label,
+        });
         console.log(`Analysis | offset=${r.audioOffsetMs}ms | score=${r.score.toFixed(3)} | label=${r.label} | confidence=${r.confidence.toFixed(2)}`);
       } else if (response.finalResult) {
         const f = response.finalResult;
+        audioDurationMs = Number(f.totalAudioMs);
+        globalResult = f.overallLabel;
         console.log(`FINAL    | total=${f.totalAudioMs}ms | score=${f.overallScore.toFixed(3)} | label=${f.overallLabel} | analyses=${f.analysisCount}`);
       }
     });
-    call.on("end", () => resolve());
+    call.on("end", () => {
+      const processingTimeMs = performance.now() - tStart;
+      if (csv) {
+        csv.writeSession(
+          label, sessionId, chunks, audioDurationMs, globalResult,
+          processingTimeMs,
+        );
+      }
+      resolve();
+    });
     call.on("error", reject);
     for (const req of iter) call.write(req);
     call.end();
@@ -159,18 +188,32 @@ function parseTarget(argv: string[]): string {
   return i >= 0 && i + 1 < argv.length ? argv[i + 1] : "localhost:50051";
 }
 
+function parseCsv(argv: string[]): string | null {
+  const i = argv.indexOf("--csv");
+  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
+}
+
 async function main() {
-  const target = parseTarget(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const target = parseTarget(argv);
+  const csvPath = parseCsv(argv);
   const audioDir = path.join(__dirname, "..", "audio");
   const wavs = fs.existsSync(audioDir)
     ? fs.readdirSync(audioDir).filter((f) => f.endsWith(".wav")).sort().map((f) => path.join(audioDir, f))
     : [];
 
   console.error(`# transport=${transportLabel("client")}`);
+
+  let csv: ResultCSV | null = null;
+  if (csvPath) {
+    csv = new ResultCSV(csvPath);
+    console.error(`# csv=${csvPath}`);
+  }
+
   const client = new DeepfakeDetectionClient(target, channelCredentials());
   try {
     if (wavs.length === 0) {
-      await runSession(client, silentChunks(), "silence (3 s @ 16 kHz)");
+      await runSession(client, silentChunks(), "silence (3 s @ 16 kHz)", csv);
     } else {
       for (const wav of wavs) {
         // Pre-validate before opening the stream. If readWav throws
@@ -185,11 +228,12 @@ async function main() {
           console.log(`\n=== ${path.basename(wav)} ===\nSKIPPED: ${(err as Error).message}`);
           continue;
         }
-        await runSession(client, wavChunks(wav), path.basename(wav));
+        await runSession(client, wavChunks(wav), path.basename(wav), csv);
       }
     }
   } finally {
     client.close();
+    if (csv) await csv.close();
   }
 }
 

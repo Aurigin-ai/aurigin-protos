@@ -78,7 +78,7 @@ To run against real audio (real ML server required, e.g. backend-app's gRPC serv
 
 Files:
 - `python/server.py` — scenario-driven simulator: loads YAML scenarios from `examples/scenarios/` at startup, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Listens on `[::]:50051`. Env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`.
-- `python/client.py` — streams every `.wav` in `examples/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` to point at a non-default server (default `localhost:50051`).
+- `python/client.py` — streams every `.wav` in `examples/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` to point at a non-default server (default `localhost:50051`). Pass `--csv PATH` to additionally write per-chunk results to a CSV — see [CSV export](#csv-export) below.
 - `python/phone_call.py` — simulates a live mobile call. Streams a WAV file looped to fill `--duration` (default 30 s) at real-time pace.
 
 ### Audio fixtures
@@ -128,6 +128,38 @@ Sample output:
 ☎️  Call ended | total=12.01s | score=0.532 | label=partially_spoofed | analyses=4
 ```
 
+### CSV export
+
+Both `client.py` and `client.ts` accept `--csv PATH` to write per-chunk analysis results to a CSV file alongside the normal console output. One row per `AnalysisResult`, grouped by session — handy for diffing two runs (e.g. comparing the same fixtures against two model revisions, or against `tail_strategy=drop` vs `extend` vs `recompute`).
+
+```bash
+# Python
+uv run client --csv /tmp/results.csv
+
+# TypeScript
+npm run client -- --csv /tmp/results.csv
+```
+
+The file is **overwritten** on each run and the header is always written. Columns (in order):
+
+| Column | Source | Notes |
+|---|---|---|
+| `file_name` | the streamed `.wav` filename (or `"silence (3 s @ 16 kHz)"` for the silence-fallback session) | |
+| `prediction_id` | `CreateSessionResponse.session_id` | server-issued |
+| `chunk_id` | 0-indexed within session | |
+| `chunk_offset` | `AnalysisResult.audio_offset_ms` | ms |
+| `chunk_confidence` | `AnalysisResult.confidence` | `0.000000`–`1.000000` |
+| `chunk_result` | `AnalysisResult.label` | `bonafide` / `spoofed` / `partially_spoofed` / `silence` / `error` |
+| `chunk_duration` | `AnalysisResult.duration_ms` | ms |
+| `audio_duration` | `FinalResult.total_audio_ms` | ms; repeated on every row |
+| `chunks_count` | `len(chunks)` (matches `FinalResult.analysis_count`) | repeated on every row |
+| `processing_time_ms` | wallclock from session-open to `FinalResult`-received | ms, 1-decimal; user-perceived latency for this file. Distinct from `audio_duration` (which is the audio length itself). |
+| `global_confidence` | mean of per-chunk `confidence` across the session | matches `backend-app /predict`'s `avg_confidence` |
+| `global_result` | `FinalResult.overall_label` | repeated on every row |
+| `created_at` | ISO 8601 UTC timestamp when the row block was written | one timestamp per session |
+
+Both implementations share the column list — the column constant lives in [`examples/python/result_csv.py`](python/result_csv.py) and [`examples/typescript/result_csv.ts`](typescript/result_csv.ts), and parity is asserted in PRs. Data columns are byte-identical for the same inputs; only `created_at` differs (Python uses the `+00:00` UTC suffix, TS uses `Z` — both valid ISO 8601). The `phone_call` examples don't yet support `--csv` since they're focused on real-time pacing rather than batch result capture; that's a follow-up if you need it.
+
 ## TypeScript
 
 The `examples/typescript/` directory has its own `package.json` so you can install and run directly — `@aurigin/protos` resolves from public npmjs.com, no auth:
@@ -154,7 +186,7 @@ npm test                               # end-to-end smoke test
 
 Files:
 - `typescript/server.ts` — TS twin of `python/server.py`: scenario-driven simulator that loads YAML scenarios from `examples/scenarios/`, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Same env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`. Sim logic in `typescript/sim/{curves,loader,runner}.ts` mirrors `python/sim/`.
-- `typescript/client.ts` — streams every `.wav` in `examples/audio/` (one session per file) using `DeepfakeDetectionClient.detectDeepfake()`; falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` (e.g. `npm run client -- --target localhost:50051`) to point at a non-default server.
+- `typescript/client.ts` — streams every `.wav` in `examples/audio/` (one session per file) using `DeepfakeDetectionClient.detectDeepfake()`; falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` (e.g. `npm run client -- --target localhost:50051`) to point at a non-default server. Pass `--csv PATH` to additionally write per-chunk results to a CSV — see [CSV export](#csv-export) below.
 - `typescript/phone_call.ts` — TS twin of `python/phone_call.py`: streams a paced WAV looped to fill `--duration`. Run with `npm run phone-call -- --audio ../audio/your.wav`
 
 ### Notes on ts-proto naming

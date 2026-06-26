@@ -5,17 +5,20 @@ streams its PCM through DetectDeepfake. Otherwise streams 3 s of silence
 as a connectivity smoke-test.
 
 CLI:
-    python client.py [--target HOST:PORT]
+    python client.py [--target HOST:PORT] [--audio-dir DIR] [--csv PATH]
 """
 
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2_grpc as pb_grpc
 from twilio.tme.extensions.common.v1 import audio_buffer_pb2 as ab_pb
+
+from result_csv import ChunkRow, ResultCSV
 
 DEFAULT_RATE = 16000
 CHANNELS = 1
@@ -117,50 +120,90 @@ def _wav_session_iter(path: Path):
         pts_ns += duration_ns
 
 
-def _run_session(stub, request_iter, label: str) -> None:
+def _run_session(stub, request_iter, label: str, csv_out: ResultCSV | None = None) -> None:
     print(f"\n=== {label} ===")
+    session_id: str = ""
+    chunks: list[ChunkRow] = []
+    audio_duration_ms: int = 0
+    global_result: str = "unknown"
+    # Wallclock from right before the bidi opens to FinalResult-received.
+    # Captures network + server-side work + client-side iteration cost — the
+    # "user-perceived" latency for processing this file.
+    t_start = time.perf_counter()
+
     for response in stub.DetectDeepfake(request_iter):
         kind = response.WhichOneof("response")
         if kind == "create_session_response":
-            print(f"Session: {response.create_session_response.session_id}")
+            session_id = response.create_session_response.session_id
+            print(f"Session: {session_id}")
         elif kind == "analysis_result":
             r = response.analysis_result
+            chunks.append(ChunkRow(
+                offset_ms=r.audio_offset_ms,
+                duration_ms=r.duration_ms,
+                confidence=r.confidence,
+                label=r.label,
+            ))
             print(f"Analysis | offset={r.audio_offset_ms}ms | score={r.score:.3f} | label={r.label} | confidence={r.confidence:.2f}")
         elif kind == "final_result":
             f = response.final_result
+            audio_duration_ms = f.total_audio_ms
+            global_result = f.overall_label
             print(f"FINAL    | total={f.total_audio_ms}ms | score={f.overall_score:.3f} | label={f.overall_label} | analyses={f.analysis_count}")
 
+    processing_time_ms = (time.perf_counter() - t_start) * 1000.0
+    if csv_out is not None:
+        csv_out.write_session(
+            label, session_id, chunks, audio_duration_ms, global_result,
+            processing_time_ms,
+        )
 
-def main(target: str = "localhost:50051", audio_dir: str | Path | None = None) -> None:
+
+def main(
+    target: str = "localhost:50051",
+    audio_dir: str | Path | None = None,
+    csv_path: str | Path | None = None,
+) -> None:
     audio_dir = Path(audio_dir).resolve() if audio_dir else Path(__file__).resolve().parent.parent / "audio"
     wavs = sorted(audio_dir.glob("*.wav")) if audio_dir.is_dir() else []
 
     from _tls import make_sync_channel, transport_label
     print(f"# transport={transport_label()}")
-    with make_sync_channel(target) as channel:
-        stub = pb_grpc.DeepfakeDetectionStub(channel)
-        if not wavs:
-            _run_session(stub, _silent_session_iter(), "silence (3 s @ 16 kHz)")
-            return
-        for wav in wavs:
-            # Pre-validate before opening the stream. If _read_wav raises
-            # (mislabeled .wav file, unsupported format, broken header),
-            # we'd otherwise surface a cryptic
-            #   StatusCode.UNKNOWN: "Exception iterating requests!"
-            # from gRPC because the exception fires inside the request
-            # generator AFTER the call has started. Catching here lets
-            # us print a clear skip line and keep going through the dir.
-            try:
-                _read_wav(wav)
-            except ValueError as exc:
-                print(f"\n=== {wav.name} ===\nSKIPPED: {exc}")
-                continue
-            _run_session(stub, _wav_session_iter(wav), wav.name)
+
+    csv_out: ResultCSV | None = None
+    if csv_path:
+        csv_out = ResultCSV(csv_path)
+        print(f"# csv={csv_path}")
+
+    try:
+        with make_sync_channel(target) as channel:
+            stub = pb_grpc.DeepfakeDetectionStub(channel)
+            if not wavs:
+                _run_session(stub, _silent_session_iter(), "silence (3 s @ 16 kHz)", csv_out)
+                return
+            for wav in wavs:
+                # Pre-validate before opening the stream. If _read_wav raises
+                # (mislabeled .wav file, unsupported format, broken header),
+                # we'd otherwise surface a cryptic
+                #   StatusCode.UNKNOWN: "Exception iterating requests!"
+                # from gRPC because the exception fires inside the request
+                # generator AFTER the call has started. Catching here lets
+                # us print a clear skip line and keep going through the dir.
+                try:
+                    _read_wav(wav)
+                except ValueError as exc:
+                    print(f"\n=== {wav.name} ===\nSKIPPED: {exc}")
+                    continue
+                _run_session(stub, _wav_session_iter(wav), wav.name, csv_out)
+    finally:
+        if csv_out is not None:
+            csv_out.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     parser.add_argument("--target", default="localhost:50051", help="gRPC server host:port (default: localhost:50051)")
     parser.add_argument("--audio-dir", default=None, help="Directory to scan for *.wav (default: examples/audio/)")
+    parser.add_argument("--csv", default=None, help="Write per-chunk results to this path (overwrites)")
     args = parser.parse_args()
-    main(args.target, args.audio_dir)
+    main(args.target, args.audio_dir, args.csv)
