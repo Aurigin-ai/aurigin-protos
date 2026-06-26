@@ -200,10 +200,22 @@ def main(
             csv_out.close()
 
 
-if __name__ == "__main__":
+def cli() -> None:
+    """Entry-point wrapper that parses CLI args, then calls main().
+
+    `uv run client` (per pyproject.toml [project.scripts]) lands here, NOT
+    in `main()` — without this wrapper the entry-point shim would call
+    `main()` with no args and silently ignore every flag on the command
+    line (including `--csv`, `--target`, `--audio-dir`). `python client.py`
+    also lands here via __main__ below.
+    """
     parser = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     parser.add_argument("--target", default="localhost:50051", help="gRPC server host:port (default: localhost:50051)")
     parser.add_argument("--audio-dir", default=None, help="Directory to scan for *.wav (default: examples/audio/)")
     parser.add_argument("--csv", default=None, help="Write per-chunk results to this path (overwrites)")
     args = parser.parse_args()
     main(args.target, args.audio_dir, args.csv)
+
+
+if __name__ == "__main__":
+    cli()

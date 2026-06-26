@@ -17,7 +17,7 @@ test = ["pytest>=8.0"]
 # After `uv sync`, run with `uv run server` / `uv run client` / `uv run phone-call`.
 [project.scripts]
 server = "server:serve"
-client = "client:main"
+client = "client:cli"
 phone-call = "phone_call:cli"
 
 [build-system]
