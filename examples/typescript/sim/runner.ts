@@ -246,6 +246,14 @@ function materialise(
   rng: Rng,
   atMs: number,
 ): DetectDeepfakeResponse | null {
+  // AnalysisResult.duration_ms resolution order, finest grained wins:
+  //   per-event payload.duration_ms > curve.analysis_window_ms > stream.chunk_interval_ms
+  // Lets one scenario emit windows of varying lengths (e.g. tail_extended_
+  // full_coverage where the last window is longer than the rest).
+  // Mirrors examples/python/sim/runner.py._materialise.
+  const curve = scenario.confidenceCurve ?? {};
+  const curveWindowMs = ((curve as any).analysis_window_ms as number | undefined) ?? scenario.stream.chunkIntervalMs;
+
   if (item.kind === "computed_emission") {
     // backend_simulation-driven emission. Silent windows skip the curve and
     // emit a sentinel; otherwise the curve (if any) computes the score the
@@ -255,29 +263,28 @@ function materialise(
     // audio-offset under the existing simulator convention), but recompute
     // slides it back so the offset reports where the slid window starts.
     const emitOffset = item.offsetMs ?? atMs;
-    const dur = item.durationMs ?? scenario.stream.chunkIntervalMs;
+    const dur = item.durationMs ?? curveWindowMs;
     if (item.isSilent) {
       return makeAnalysisResult(
         state, emitOffset, 0, "silence", item.silenceConfidence ?? 0.95, dur,
       );
     }
-    const curve = scenario.confidenceCurve;
     let score = 0;
     let label = "bonafide";
-    if (curve) {
-      score = curves.evaluate(curve, rng, atMs);
-      label = curves.labelFor(curve, score);
+    if (scenario.confidenceCurve) {
+      score = curves.evaluate(scenario.confidenceCurve, rng, atMs);
+      label = curves.labelFor(scenario.confidenceCurve, score);
     }
     const confidence = Math.round((0.85 + rng() * 0.14) * 1000) / 1000;
     return makeAnalysisResult(state, emitOffset, score, label, confidence, dur);
   }
 
   if (item.kind === "curve_sample") {
-    const curve = scenario.confidenceCurve!;
-    const score = curves.evaluate(curve, rng, atMs);
-    const label = curves.labelFor(curve, score);
+    const c = scenario.confidenceCurve!;
+    const score = curves.evaluate(c, rng, atMs);
+    const label = curves.labelFor(c, score);
     const confidence = Math.round((0.85 + rng() * 0.14) * 1000) / 1000;
-    return makeAnalysisResult(state, atMs, score, label, confidence, scenario.stream.chunkIntervalMs);
+    return makeAnalysisResult(state, atMs, score, label, confidence, curveWindowMs);
   }
 
   const ev = item.event!;
@@ -289,14 +296,16 @@ function materialise(
     // Event-level errors are surfaced as a sentinel AnalysisResult with
     // label='error' and score 0; clients should treat label='error' as
     // non-actionable. (Future: dedicated proto message.)
-    return makeAnalysisResult(state, atMs, 0, "error", 0, scenario.stream.chunkIntervalMs);
+    const dur = (ev.payload.duration_ms as number | undefined) ?? curveWindowMs;
+    return makeAnalysisResult(state, atMs, 0, "error", 0, dur);
   }
   // CONFIDENCE_UPDATE or FAKE_DETECTED — both map to AnalysisResult.
   const payload = ev.payload;
   const score = (payload.fake_probability ?? state.lastScore) as number;
   const label = (payload.label ?? curves.labelFor(scenario.confidenceCurve ?? {}, score)) as string;
   const confidence = (payload.confidence ?? Math.round((0.85 + rng() * 0.14) * 1000) / 1000) as number;
-  return makeAnalysisResult(state, atMs, score, label, confidence, scenario.stream.chunkIntervalMs);
+  const dur = (payload.duration_ms as number | undefined) ?? curveWindowMs;
+  return makeAnalysisResult(state, atMs, score, label, confidence, dur);
 }
 
 function audioChunkMs(audio: {

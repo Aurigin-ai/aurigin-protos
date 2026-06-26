@@ -121,12 +121,16 @@ test("client streams silence and roundtrips analyses", async () => {
   });
 });
 
-// One fixture per wire format. S16LE is the historical telephony case;
-// F32LE catches regressions in the RIFF reader's format dispatch so a
-// broken release of the IEEE-float path fails CI instead of prod.
 const phoneCallFixtures: { name: string; file: string; header: RegExp }[] = [
+  // S16LE 8 kHz mono — the historical telephony fixture.
   { name: "S16LE 8 kHz mono", file: "test_call.wav", header: /8000Hz\/1ch S16LE/ },
+  // F32LE 16 kHz mono — exercises the IEEE-float wire path so a regression
+  // that breaks the RIFF reader's format dispatch fails CI.
   { name: "F32LE 16 kHz mono", file: "test_call_f32le.wav", header: /16000Hz\/1ch F32LE/ },
+  // S16LE 16 kHz mono — the 10.001 s boundary-case fixture (also used by
+  // backend_simulation tests below); default-scenario roundtrip coverage
+  // here, separate from the tail-strategy assertions there.
+  { name: "S16LE 16 kHz mono (10s tail)", file: "test_call_10s_tail.wav", header: /16000Hz\/1ch S16LE/ },
 ];
 
 for (const { name, file, header } of phoneCallFixtures) {

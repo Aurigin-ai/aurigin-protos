@@ -127,6 +127,11 @@ def test_client_silence_roundtrip(server, env: dict[str, str], tmp_path):
         # F32LE 16 kHz mono — exercises the IEEE-float wire path so a
         # regression that breaks the RIFF reader's format dispatch fails CI.
         ("test_call_f32le.wav", "16000Hz/1ch F32LE"),
+        # S16LE 16 kHz mono — the 10.001 s boundary-case fixture (also
+        # used by backend_simulation tests below). Hitting it here too
+        # gives us roundtrip coverage on the default scenario, separate
+        # from the backend_simulation tail-strategy assertions.
+        ("test_call_10s_tail.wav", "16000Hz/1ch S16LE"),
     ],
 )
 def test_phone_call_wav_roundtrip(server, env: dict[str, str], fixture_name: str, expected_header: str):

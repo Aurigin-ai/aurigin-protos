@@ -57,7 +57,7 @@ class BackendSimulation:
     min_chunk_duration_ms, tail_strategy)."""
     analysis_interval_ms: int
     min_chunk_duration_ms: int = 1000
-    tail_strategy: str = "drop"  # "drop" | "extend"
+    tail_strategy: str = "drop"  # "drop" | "extend" | "recompute"
     silent_windows: tuple[int, ...] = ()
     silence_confidence: float = 0.95
 
