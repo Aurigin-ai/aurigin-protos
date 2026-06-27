@@ -154,28 +154,28 @@ function buildTimeline(scenario: Scenario): TimelineItem[] {
 // [0, duration_ms] in `analysis_interval_ms` steps and emits one
 // computed_emission per main window. Residual after the last main window
 // follows `tail_strategy`:
-//   - drop: residual < min_chunk_duration_ms → silently skipped
-//           residual ≥ min_chunk_duration_ms → short tail window
-//   - extend: residual < min_chunk_duration_ms → folded into prior window
+//   - drop: residual < min_analysis_duration_ms → silently skipped
+//           residual ≥ min_analysis_duration_ms → short tail window
+//   - extend: residual < min_analysis_duration_ms → folded into prior window
 //             (last emission shifts to t=duration_ms, longer duration)
-//   - recompute: residual < min_chunk_duration_ms → last main emission
+//   - recompute: residual < min_analysis_duration_ms → last main emission
 //                slides back to end at end-of-stream (offset shifts to
 //                duration_ms - analysis_interval_ms, duration stays
 //                analysis_interval_ms). Mirrors backend-app HTTP
 //                /predict chunk_audio byte-for-byte.
-//   - extend|recompute with residual ≥ min_chunk_duration_ms → same as
+//   - extend|recompute with residual ≥ min_analysis_duration_ms → same as
 //     drop's else branch (standalone short tail).
 function emissionsFromBackendSimulation(scenario: Scenario): TimelineItem[] {
   const bs = scenario.backendSimulation!;
   const durationMs = scenario.stream.durationMs;
   const interval = bs.analysisIntervalMs;
-  const minChunk = bs.minChunkDurationMs;
+  const minAnalysis = bs.minAnalysisDurationMs;
   const silentSet = new Set(bs.silentWindows);
   const nMain = Math.floor(durationMs / interval);
   const residual = durationMs - nMain * interval;
   const canAbsorbTail =
     residual > 0 &&
-    residual < minChunk &&
+    residual < minAnalysis &&
     nMain > 0 &&
     (bs.tailStrategy === "extend" || bs.tailStrategy === "recompute");
 
@@ -207,7 +207,7 @@ function emissionsFromBackendSimulation(scenario: Scenario): TimelineItem[] {
     });
   }
 
-  if (residual > 0 && !canAbsorbTail && residual >= minChunk) {
+  if (residual > 0 && !canAbsorbTail && residual >= minAnalysis) {
     const tailIdx = nMain + 1;
     items.push({
       kind: "computed_emission",

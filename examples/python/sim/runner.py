@@ -155,7 +155,7 @@ def _build_timeline(scenario: Scenario) -> list[tuple[int, dict[str, Any]]]:
 
     Two scheduling modes:
       - **backend_simulation** (declarative): emissions are computed from
-        (stream.duration_ms, analysis_interval_ms, min_chunk_duration_ms,
+        (stream.duration_ms, analysis_interval_ms, min_analysis_duration_ms,
         tail_strategy). Mirrors how deepfake-service actually windows a
         finite-length audio stream. Curve still consulted for score values.
       - **curve.emit_every_ms** (scripted): emissions on a fixed wallclock
@@ -191,31 +191,31 @@ def _emissions_from_backend_simulation(
     emits one `computed_emission` per main window. Residual after the last
     main window is handled per `tail_strategy`:
 
-      - drop: residual < min_chunk_duration_ms → silently skipped
-              residual ≥ min_chunk_duration_ms → emitted as a short tail
+      - drop: residual < min_analysis_duration_ms → silently skipped
+              residual ≥ min_analysis_duration_ms → emitted as a short tail
               window with duration_ms = residual
-      - extend: residual < min_chunk_duration_ms → folded into the prior
+      - extend: residual < min_analysis_duration_ms → folded into the prior
                 window (last main emission shifts to t=duration_ms with
                 duration_ms = analysis_interval_ms + residual)
-                residual ≥ min_chunk_duration_ms → same as drop's else branch
-      - recompute: residual < min_chunk_duration_ms → last main emission
+                residual ≥ min_analysis_duration_ms → same as drop's else branch
+      - recompute: residual < min_analysis_duration_ms → last main emission
                 slides back so it ends at end-of-stream (offset shifts to
                 duration_ms - analysis_interval_ms, duration stays
                 analysis_interval_ms). Mirrors backend-app HTTP
                 /predict chunk_audio byte-for-byte. residual ≥
-                min_chunk_duration_ms → same as drop's else branch.
+                min_analysis_duration_ms → same as drop's else branch.
     """
     bs = scenario.backend_simulation
     assert bs is not None
     duration_ms = scenario.stream.duration_ms
     interval = bs.analysis_interval_ms
-    min_chunk = bs.min_chunk_duration_ms
+    min_analysis = bs.min_analysis_duration_ms
     silent_set = set(bs.silent_windows)
     n_main = duration_ms // interval
     residual = duration_ms - n_main * interval
     can_absorb_tail = (
         residual > 0
-        and residual < min_chunk
+        and residual < min_analysis
         and n_main > 0
         and bs.tail_strategy in ("extend", "recompute")
     )
@@ -254,8 +254,8 @@ def _emissions_from_backend_simulation(
         }))
 
     # Standalone tail emission (only when not folded into the prior window
-    # and large enough to clear the min_chunk floor).
-    if residual > 0 and not can_absorb_tail and residual >= min_chunk:
+    # and large enough to clear the min_analysis floor).
+    if residual > 0 and not can_absorb_tail and residual >= min_analysis:
         tail_idx = n_main + 1
         items.append((duration_ms, {
             "kind": "computed_emission",

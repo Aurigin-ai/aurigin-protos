@@ -28,7 +28,7 @@ random:
 
 backend_simulation:
   analysis_interval_ms: 3000
-  min_chunk_duration_ms: 1000
+  min_analysis_duration_ms: 1000
   tail_strategy: drop
   silent_windows: [2]
   silence_confidence: 0.95

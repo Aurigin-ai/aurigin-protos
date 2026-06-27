@@ -1,11 +1,11 @@
 # Mirrors deepfake-service running with `tail_strategy="recompute"` on the
 # 10.001 s clip (examples/audio/fixtures/test_call_10s_tail.wav) at
-# analysis_interval_s=5.0 and min_chunk_duration_s=1.0.
+# analysis_interval_s=5.0 and min_analysis_duration_s=1.0.
 #
 # Slide-back semantics: with duration_ms=10001 and analysis_interval_ms=5000:
 #   - 1st main window fires normally at t=5000ms (offset=0, duration=5000)
 #   - 2nd main window would land at t=10000ms with a 1ms residual that's
-#     below min_chunk_duration_ms (1000) → instead the last window slides
+#     below min_analysis_duration_ms (1000) → instead the last window slides
 #     back so it ends at end-of-stream: offset shifts to 5001ms, duration
 #     stays exactly 5000ms (covers audio [5001ms, 10001ms]).
 #
@@ -34,7 +34,7 @@ random:
 
 backend_simulation:
   analysis_interval_ms: 5000
-  min_chunk_duration_ms: 1000
+  min_analysis_duration_ms: 1000
   tail_strategy: recompute
 
 confidence_curve:

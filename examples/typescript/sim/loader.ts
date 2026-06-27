@@ -51,10 +51,10 @@ export interface ScenarioEvent {
 // Declarative deepfake-service mirror — when present on a Scenario, the
 // simulator computes the emission timeline from these knobs instead of using
 // confidence_curve.emit_every_ms. Mirrors dfs config: analysis_interval_s ×
-// 1000, min_chunk_duration_s × 1000.
+// 1000, min_analysis_duration_s × 1000.
 export interface BackendSimulation {
   analysisIntervalMs: number;
-  minChunkDurationMs: number;
+  minAnalysisDurationMs: number;
   tailStrategy: "drop" | "extend" | "recompute";
   silentWindows: ReadonlyArray<number>;
   silenceConfidence: number;
@@ -105,7 +105,7 @@ function scenarioFromDoc(doc: any, _source: string): Scenario {
   const backendSimulation: BackendSimulation | null = bs
     ? {
         analysisIntervalMs: Number(bs.analysis_interval_ms),
-        minChunkDurationMs: Number(bs.min_chunk_duration_ms ?? 1000),
+        minAnalysisDurationMs: Number(bs.min_analysis_duration_ms ?? 1000),
         tailStrategy: (bs.tail_strategy ?? "drop") as "drop" | "extend" | "recompute",
         silentWindows: Object.freeze(((bs.silent_windows ?? []) as number[]).map((n) => Number(n))),
         silenceConfidence: Number(bs.silence_confidence ?? 0.95),

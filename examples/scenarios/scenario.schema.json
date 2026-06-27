@@ -71,12 +71,12 @@
 
     "backend_simulation": {
       "type": "object",
-      "description": "Declarative deepfake-service mirror. When present, the simulator computes the AnalysisResult emission timeline from (stream.duration_ms, analysis_interval_ms, min_chunk_duration_ms, tail_strategy) instead of using confidence_curve.emit_every_ms. The curve is still consulted for score values at each computed emission. Mirrors dfs config: analysis_interval_s × 1000, min_chunk_duration_s × 1000.",
+      "description": "Declarative deepfake-service mirror. When present, the simulator computes the AnalysisResult emission timeline from (stream.duration_ms, analysis_interval_ms, min_analysis_duration_ms, tail_strategy) instead of using confidence_curve.emit_every_ms. The curve is still consulted for score values at each computed emission. Mirrors dfs config: analysis_interval_s × 1000, min_analysis_duration_s × 1000.",
       "required": ["analysis_interval_ms"],
       "additionalProperties": false,
       "properties": {
         "analysis_interval_ms": { "type": "integer", "minimum": 1, "description": "Mirrors dfs analysis_interval_s × 1000." },
-        "min_chunk_duration_ms": { "type": "integer", "minimum": 1, "default": 1000, "description": "Mirrors dfs min_chunk_duration_s × 1000. Residual audio below this floor is dropped or extended per tail_strategy." },
+        "min_analysis_duration_ms": { "type": "integer", "minimum": 1, "default": 1000, "description": "Mirrors dfs min_analysis_duration_s × 1000. Residual audio below this floor is dropped, extended, or recomputed per tail_strategy." },
         "tail_strategy": { "enum": ["drop", "extend", "recompute"], "default": "drop", "description": "drop = sub-min residual silently skipped (current dfs default). extend = sub-min residual folded into the prior window so coverage is total (last duration_ms grows). recompute = last window slides back from end-of-stream so its duration stays exactly analysis_interval_ms and its offset shifts forward by the residual (mirrors backend-app HTTP /predict chunk_audio byte-for-byte)." },
         "silent_windows": {
           "type": "array",
