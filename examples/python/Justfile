@@ -98,9 +98,12 @@ call SCENARIO_ID DURATION="10":
 #   just burst 5 fake_detected_rising_curve 500 30       # same, 30s each
 #
 # N concurrent phone-calls against one scenario, optional stagger between starts.
+# Implemented by `phone_call_burst.py` — see that module's docstring for the
+# multi-call architecture rationale (one channel, N concurrent bidi streams,
+# graceful shutdown across all).
 [group('scenarios')]
 burst N SCENARIO_ID STAGGER_MS="0" DURATION="10":
-    uv run phone-call --duration {{DURATION}} --concurrency {{N}} \
+    uv run phone-call-burst --duration {{DURATION}} --concurrency {{N}} \
         --stagger-ms {{STAGGER_MS}} --scenario-id {{SCENARIO_ID}}
 
 # ─── mtls ───────────────────────────────────────────────────────────────────

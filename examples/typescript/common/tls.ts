@@ -17,7 +17,9 @@ import {
 } from "@grpc/grpc-js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_TLS_DIR = path.resolve(__dirname, "..", "certs");
+// __dirname → examples/typescript/common/.  Up twice to examples/, then certs/
+// (one more `..` than when this file lived at examples/typescript/tls.ts).
+const DEFAULT_TLS_DIR = path.resolve(__dirname, "..", "..", "certs");
 
 function mtlsRequested(): boolean {
   return ["1", "true", "yes"].includes((process.env.MTLS ?? "").toLowerCase());
