@@ -30,7 +30,12 @@
 #   --chunk-ms — is a CLI flag passed through verbatim. The recipes accept
 #   any trailing flags via `*FLAGS`, so you never have to remember a
 #   positional ordering, and `--audio FILE` can't accidentally land in the
-#   wrong slot. Run `uv run <entry> --help` for each CLI's full surface.
+#   wrong slot.
+#
+# Discoverability:
+#   To see the full flag surface accepted by any `*FLAGS` recipe, run
+#   `just help ENTRY` (e.g. `just help phone-call-burst`). Or call the
+#   entry-point directly with `--help`: `uv run phone-call-burst --help`.
 #
 # Cheat sheet:
 #   just sync                          # uv sync (installs deps)
@@ -63,6 +68,22 @@ set dotenv-load := true
 [private]
 default:
     @just --list --unsorted
+
+# ─── help ────────────────────────────────────────────────────────────────────
+
+# Recipes that take *FLAGS forward every flag verbatim to one of the Python
+# entry-points (`client`, `phone-call`, `phone-call-burst`). The canonical
+# list of accepted flags + their defaults lives in each entry's argparse.
+# This recipe surfaces that list without leaving `just`:
+#   just help client                  # client.py flags
+#   just help phone-call              # phone_call.py flags
+#   just help phone-call-burst        # phone_call_burst.py flags
+#   just help server                  # simulator flags
+#
+# Print the full CLI flag surface for ENTRY (client | phone-call | phone-call-burst | server).
+[group('help')]
+help ENTRY:
+    @uv run {{ENTRY}} --help
 
 # ─── setup ───────────────────────────────────────────────────────────────────
 
