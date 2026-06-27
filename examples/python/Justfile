@@ -24,25 +24,36 @@
 #                           "WRONG_VERSION_NUMBER" error — reach for the
 #                           insecure-* variant instead.
 #
+# Argument convention:
+#   Only structural args (N concurrency, SCENARIO_ID) are positional.
+#   Everything else — --target, --audio, --duration, --stagger-ms, --csv,
+#   --chunk-ms — is a CLI flag passed through verbatim. The recipes accept
+#   any trailing flags via `*FLAGS`, so you never have to remember a
+#   positional ordering, and `--audio FILE` can't accidentally land in the
+#   wrong slot. Run `uv run <entry> --help` for each CLI's full surface.
+#
 # Cheat sheet:
 #   just sync                          # uv sync (installs deps)
 #   just server                        # scenario-driven simulator on :50051
 #   just client                        # client → localhost:50051 (TLS)
-#   just client 127.0.0.1:50051        # client → custom target (TLS)
-#   just insecure-client localhost:50051  # client → plaintext server
-#   just phone-call                    # paced WAV streamer → localhost:50051 (TLS)
-#   just insecure-phone-call           # ↑ but against a plaintext server
-#   just scenarios                     # list available scenarios
-#   just call ID                       # phone-call w/ scenario (10s)
-#   just call ID 30                    # phone-call w/ scenario (custom duration)
-#   just phone-call-burst 5 ID         # 5 concurrent calls of `ID`
-#   just phone-call-burst 5 ID 500     # 5 calls, 500ms between starts
-#   just insecure-phone-call-burst 5   # 5 concurrent → plaintext server
-#   just mtls-server                   # server in mTLS mode
-#   just mtls-call ID                  # phone-call in mTLS mode
-#   just mtls-phone-call-burst 5 ID    # 5 concurrent mTLS calls
-#   just tls                           # regenerate the committed self-signed certs
-#   just smoke                         # end-to-end pytest
+#   just client --target 127.0.0.1:50051       # client → custom target
+#   just client --csv /tmp/out.csv             # client + CSV export
+#   just insecure-client                       # client → plaintext localhost
+#   just phone-call                            # paced WAV streamer → localhost (TLS)
+#   just phone-call --audio FILE --duration 30 # custom audio + duration
+#   just insecure-phone-call                   # ↑ but plaintext
+#   just scenarios                             # list available scenarios
+#   just call ID                               # phone-call w/ scenario (10s default)
+#   just call ID --duration 30                 # phone-call w/ scenario, custom duration
+#   just phone-call-burst 5 ID                                   # 5 concurrent calls of `ID`
+#   just phone-call-burst 5 ID --stagger-ms 500                  # + 500ms stagger
+#   just insecure-phone-call-burst 5                             # 5 plaintext bursts
+#   just insecure-phone-call-burst 10 --duration 30 --audio FILE # 10 × 30s of FILE
+#   just mtls-server                           # server in mTLS mode
+#   just mtls-call ID                          # phone-call in mTLS mode
+#   just mtls-phone-call-burst 5 ID            # 5 concurrent mTLS calls
+#   just tls                                   # regenerate the committed self-signed certs
+#   just smoke                                 # end-to-end pytest
 #
 # See examples/certs/README.md for the full trust model.
 
@@ -77,19 +88,28 @@ clean:
 server:
     uv run server
 
-# Client → TARGET (e.g. 127.0.0.1:50051 to hit the backend-simulator).
-[group('run')]
-client TARGET="localhost:50051":
-    uv run client --target {{TARGET}}
-
-# For custom args (--audio, --duration, --scenario-id, --chunk-ms) call
-# `uv run phone-call --help` directly — this recipe is the no-arg shortcut
-# plus an optional TARGET override.
+# Pass any client.py flag as a trailing argument:
+#   just client                                          # default target
+#   just client --target 127.0.0.1:50051                 # custom target
+#   just client --audio-dir ../audio/fixtures --csv /tmp/out.csv
+# Run `uv run client --help` for the full flag surface.
 #
-# Phone-call sim — picks first audio/*.wav, 30s @ TARGET (default localhost:50051, TLS).
+# Client → localhost:50051 (TLS); pass any client.py flag.
 [group('run')]
-phone-call TARGET="localhost:50051":
-    uv run phone-call --target {{TARGET}}
+client *FLAGS:
+    uv run client {{FLAGS}}
+
+# Picks first audio/*.wav by default, 10s @ localhost:50051 (TLS). Pass any
+# phone_call.py flag as a trailing argument:
+#   just phone-call                                      # defaults
+#   just phone-call --target 127.0.0.1:50051             # custom target
+#   just phone-call --audio ../audio/fixtures/test_call_silence.wav --duration 30
+# Run `uv run phone-call --help` for the full flag surface.
+#
+# Phone-call sim → localhost:50051 (TLS); pass any phone_call.py flag.
+[group('run')]
+phone-call *FLAGS:
+    uv run phone-call {{FLAGS}}
 
 # ─── scenarios ──────────────────────────────────────────────────────────────
 
@@ -102,31 +122,32 @@ scenarios:
     @uv run python -c "from sim import load_scenarios; ss = load_scenarios('../scenarios'); [print(f'{s.id:38s}  {s.description}') for s in sorted(ss.values(), key=lambda s: s.id)]"
 
 # Defaults to a 10-second call so most curves fire ≥1 analysis even on short
-# scenarios. Override DURATION for longer runs:
-#   just call fake_detected_rising_curve 30
+# scenarios. Pass any phone_call.py flag as a trailing argument:
+#   just call fake_detected_rising_curve                 # default 10s
+#   just call fake_detected_rising_curve --duration 30   # custom duration
+#   just call fake_detected_rising_curve --audio ../audio/fixtures/test_call_silence.wav
 #
 # Phone-call against the local server, requesting a specific scenario.
 [group('scenarios')]
-call SCENARIO_ID DURATION="10":
-    uv run phone-call --duration {{DURATION}} --scenario-id {{SCENARIO_ID}}
+call SCENARIO_ID *FLAGS:
+    uv run phone-call --scenario-id {{SCENARIO_ID}} {{FLAGS}}
 
-# Open N concurrent calls of the same scenario. STAGGER_MS=0 (default) fires
-# every call at the same instant — the canonical thundering-herd test. A
-# positive STAGGER_MS spreads start times: e.g. STAGGER_MS=500 means call-02
-# starts 500ms after call-01, call-03 1s after call-01, and so on.
-#   just burst 5 fake_detected_rising_curve              # 5 simultaneous
-#   just burst 5 fake_detected_rising_curve 500          # 5, 500ms apart
-#   just burst 5 fake_detected_rising_curve 500 30       # same, 30s each
+# Open N concurrent calls of the same scenario. With no --stagger-ms (default
+# 0) every call fires at the same instant — the canonical thundering-herd
+# test. `--stagger-ms 500` spreads start times: call-02 starts 500ms after
+# call-01, call-03 1s after, and so on.
+#   just phone-call-burst 5 fake_detected_rising_curve
+#   just phone-call-burst 5 fake_detected_rising_curve --stagger-ms 500
+#   just phone-call-burst 5 fake_detected_rising_curve --stagger-ms 500 --duration 30
 #
 # Backed by `phone_call_burst.py` — see that module's docstring for the
 # multi-call architecture rationale (one channel, N concurrent bidi
 # streams, graceful shutdown across all).
 #
-# N concurrent phone-calls against one scenario, optional stagger between starts.
+# N concurrent phone-calls against one scenario; pass any phone_call_burst.py flag.
 [group('scenarios')]
-phone-call-burst N SCENARIO_ID STAGGER_MS="0" DURATION="10":
-    uv run phone-call-burst --duration {{DURATION}} --concurrency {{N}} \
-        --stagger-ms {{STAGGER_MS}} --scenario-id {{SCENARIO_ID}}
+phone-call-burst N SCENARIO_ID *FLAGS:
+    uv run phone-call-burst --concurrency {{N}} --scenario-id {{SCENARIO_ID}} {{FLAGS}}
 
 # ─── mtls ───────────────────────────────────────────────────────────────────
 
@@ -142,13 +163,13 @@ mtls-server:
 
 # Same as `just call`, but presents the example client cert.
 [group('mtls')]
-mtls-call SCENARIO_ID DURATION="10":
-    MTLS=1 just call {{SCENARIO_ID}} {{DURATION}}
+mtls-call SCENARIO_ID *FLAGS:
+    MTLS=1 just call {{SCENARIO_ID}} {{FLAGS}}
 
 # Same as `just phone-call-burst`, but every concurrent stream is mTLS.
 [group('mtls')]
-mtls-phone-call-burst N SCENARIO_ID STAGGER_MS="0" DURATION="10":
-    MTLS=1 just phone-call-burst {{N}} {{SCENARIO_ID}} {{STAGGER_MS}} {{DURATION}}
+mtls-phone-call-burst N SCENARIO_ID *FLAGS:
+    MTLS=1 just phone-call-burst {{N}} {{SCENARIO_ID}} {{FLAGS}}
 
 # ─── insecure (plaintext) ────────────────────────────────────────────────────
 
@@ -162,37 +183,43 @@ mtls-phone-call-burst N SCENARIO_ID STAGGER_MS="0" DURATION="10":
 # "insecure mode" and skips ssl_channel_credentials, falling back to
 # grpc.insecure_channel.
 
-# Client → plaintext TARGET (e.g. localhost:50051 dfs running without TLS).
+# Defaults to localhost:50051; override with `--target HOST:PORT`. Pass any
+# client.py flag as a trailing argument.
+#
+# Client → plaintext localhost:50051; pass any client.py flag.
 [group('insecure')]
-insecure-client TARGET="localhost:50051":
-    TLS_CA=/dev/null uv run client --target {{TARGET}}
+insecure-client *FLAGS:
+    TLS_CA=/dev/null uv run client {{FLAGS}}
 
-# Phone-call → plaintext TARGET.
+# Defaults to localhost:50051; override with `--target HOST:PORT`. Pass any
+# phone_call.py flag as a trailing argument.
+#
+# Phone-call → plaintext localhost:50051; pass any phone_call.py flag.
 [group('insecure')]
-insecure-phone-call TARGET="localhost:50051":
-    TLS_CA=/dev/null uv run phone-call --target {{TARGET}}
+insecure-phone-call *FLAGS:
+    TLS_CA=/dev/null uv run phone-call {{FLAGS}}
 
 # Only useful if the plaintext server honors x-scenario-id metadata
 # (e.g. aurigin-router's simulator). Real backends ignore it.
 #
 # Phone-call against a plaintext server, requesting a specific scenario.
 [group('insecure')]
-insecure-call SCENARIO_ID DURATION="10" TARGET="localhost:50051":
-    TLS_CA=/dev/null uv run phone-call --target {{TARGET}} --duration {{DURATION}} --scenario-id {{SCENARIO_ID}}
+insecure-call SCENARIO_ID *FLAGS:
+    TLS_CA=/dev/null uv run phone-call --scenario-id {{SCENARIO_ID}} {{FLAGS}}
 
 # The recommended way to load-test a real backend (which is typically
-# plaintext on internal networks). Just-recipe args are positional, so to set
-# DURATION you previously had to also pass STAGGER_MS; ordering is now
-# N → DURATION → STAGGER_MS → TARGET to match the common load-test workflow:
-#   just insecure-phone-call-burst 10           # 10 calls, 10s each
-#   just insecure-phone-call-burst 10 30        # 10 calls, 30s each
-#   just insecure-phone-call-burst 10 30 500    # ↑ + 500ms stagger
+# plaintext on internal networks). Only N is positional; everything else is
+# a trailing CLI flag so the recipe never silently consumes `--audio`/etc.:
+#   just insecure-phone-call-burst 10                                      # 10 × default duration
+#   just insecure-phone-call-burst 10 --duration 30                        # 10 × 30s
+#   just insecure-phone-call-burst 10 --duration 30 --stagger-ms 500       # + stagger
+#   just insecure-phone-call-burst 10 --audio ../audio/fixtures/test_call_silence.wav
+#   just insecure-phone-call-burst 10 --target dfs.internal:50051 --csv /tmp/out.csv
 #
-# N concurrent plaintext calls.
+# N concurrent plaintext calls; pass any phone_call_burst.py flag.
 [group('insecure')]
-insecure-phone-call-burst N DURATION="10" STAGGER_MS="0" TARGET="localhost:50051":
-    TLS_CA=/dev/null uv run phone-call-burst --target {{TARGET}} \
-        --duration {{DURATION}} --concurrency {{N}} --stagger-ms {{STAGGER_MS}}
+insecure-phone-call-burst N *FLAGS:
+    TLS_CA=/dev/null uv run phone-call-burst --concurrency {{N}} {{FLAGS}}
 
 # ─── tls ────────────────────────────────────────────────────────────────────
 
