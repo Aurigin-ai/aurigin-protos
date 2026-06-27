@@ -108,7 +108,7 @@ def test_client_silence_roundtrip(server, env: dict[str, str], tmp_path):
     assert result.returncode == 0, f"client failed: stderr={result.stderr}"
     assert "Session:" in result.stdout, f"missing session line in:\n{result.stdout}"
     assert "FINAL" in result.stdout
-    # Simulator issues per-session ids like 'sim-<8 hex>'. We don't pin the
+    # Simulator issues per-session ids like 'sim-<32 hex>' (matches dfs's
     # specific value — just that the server emitted one.
     assert "sim-" in result.stdout, f"missing simulator session id prefix in:\n{result.stdout}"
     # NOTE: we deliberately don't assert AnalysisResult lines here. The

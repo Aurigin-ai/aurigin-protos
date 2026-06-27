@@ -92,7 +92,12 @@ interface TimelineItem {
 const BYTES_PER_SAMPLE: Record<string, number> = { S16LE: 2, F32LE: 4 };
 
 function makeSessionId(): string {
-  return `sim-${randomBytes(4).toString("hex")}`;
+  // "sim-" prefix identifies this session as simulator-generated, matching
+  // deepfake-service's "pre-" prefix (= prediction). Cross-cutting log
+  // searches can tell at a glance whether a session id came from the real
+  // backend or the scenario-driven simulator. 16 random bytes → 32 hex
+  // chars (mirrors uuid4 hex; we don't need RFC 4122 compliance here).
+  return `sim-${randomBytes(16).toString("hex")}`;
 }
 
 function mulberry32(seed: number): Rng {

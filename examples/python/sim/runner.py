@@ -70,7 +70,12 @@ class _SessionState:
 
 
 def _make_session_id() -> str:
-    return f"sim-{uuid.uuid4().hex[:8]}"
+    # "sim-" prefix identifies this session as simulator-generated, matching
+    # deepfake-service's "pre-" prefix (= prediction). Cross-cutting log
+    # searches can tell at a glance whether a session id came from the real
+    # backend or the scenario-driven simulator. Full UUID hex (no truncation)
+    # so the format mirrors dfs.
+    return f"sim-{uuid.uuid4().hex}"
 
 
 def _make_analysis_result(
