@@ -258,7 +258,12 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only run main() when this file is the process entry point. Without this
+// guard, importing send_call / recv_call from phone_call_burst.ts would also
+// trigger main() (the TS equivalent of Python's `if __name__ == "__main__":`).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

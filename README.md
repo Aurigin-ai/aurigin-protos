@@ -55,16 +55,21 @@ aurigin-protos/
 │       ├── aurigin/          # generated (gitignored)
 │       └── twilio/           # generated (gitignored) — vendored Twilio types
 ├── examples/                 # consumer-side reference snippets
-│   ├── audio/                # shared .wav fixtures (gitignored)
+│   ├── audio/                # shared .wav fixtures (gitignored; committed test
+│   │   │                     #   fixtures live under audio/fixtures/)
+│   │   └── fixtures/         # committed test_call*.wav (S16LE / F32LE / 10s-tail)
 │   ├── scenarios/            # YAML scenarios driving the Python example simulator
 │   │   ├── scenario.schema.json  # JSON Schema validating every YAML at load time
 │   │   ├── default.yaml          # fallback when client sends no x-scenario-id
 │   │   ├── happy/                # canonical bonafide/spoofed/curve flows
-│   │   ├── edge/                 # oscillating confidence, duplicate detection, etc.
+│   │   ├── edge/                 # oscillating, tail-strategy, silence-gate, etc.
 │   │   └── failure/              # event-level ERROR, gRPC UNAVAILABLE, DEADLINE_EXCEEDED
-│   ├── python/               # uv-managed: `uv run server|client|phone-call`
+│   ├── python/               # uv-managed: `uv run server|client|phone-call|phone-call-burst`
+│   │   ├── common/           # shared helpers: wav_reader / result_csv / tls / shutdown
 │   │   └── sim/              # scenario-driven simulator (loader + curves + runner)
-│   └── typescript/           # npm-managed: `npm run server|client`
+│   └── typescript/           # npm-managed: `npm run server|client|phone-call|phone-call-burst`
+│       ├── common/           # mirror of python/common/
+│       └── sim/              # mirror of python/sim/
 ├── infra/                    # AWS + public-registry runbooks (no IaC, just docs)
 │   ├── aws/                  # OIDC + publisher role + CodeArtifact setup
 │   └── public/               # PyPI / npm Trusted Publishers + visibility checklist
