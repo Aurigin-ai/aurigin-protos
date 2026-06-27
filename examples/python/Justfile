@@ -181,11 +181,16 @@ insecure-call SCENARIO_ID DURATION="10" TARGET="localhost:50051":
     TLS_CA=/dev/null uv run phone-call --target {{TARGET}} --duration {{DURATION}} --scenario-id {{SCENARIO_ID}}
 
 # The recommended way to load-test a real backend (which is typically
-# plaintext on internal networks).
+# plaintext on internal networks). Just-recipe args are positional, so to set
+# DURATION you previously had to also pass STAGGER_MS; ordering is now
+# N → DURATION → STAGGER_MS → TARGET to match the common load-test workflow:
+#   just insecure-phone-call-burst 10           # 10 calls, 10s each
+#   just insecure-phone-call-burst 10 30        # 10 calls, 30s each
+#   just insecure-phone-call-burst 10 30 500    # ↑ + 500ms stagger
 #
 # N concurrent plaintext calls.
 [group('insecure')]
-insecure-phone-call-burst N STAGGER_MS="0" DURATION="10" TARGET="localhost:50051":
+insecure-phone-call-burst N DURATION="10" STAGGER_MS="0" TARGET="localhost:50051":
     TLS_CA=/dev/null uv run phone-call-burst --target {{TARGET}} \
         --duration {{DURATION}} --concurrency {{N}} --stagger-ms {{STAGGER_MS}}
 
