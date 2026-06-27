@@ -1,6 +1,8 @@
 # Default scenario - used when client sends no x-scenario-id metadata header.
-# Mirrors the legacy stub: flat low score, bonafide throughout, one sample
-# per second for the requested duration, FinalResult on stream close.
+# Flat low score, bonafide throughout, one sample every 5 s for the requested
+# duration, FinalResult on stream close. The 5 s cadence mirrors the
+# deepfake-service default analysis_interval_s=5.0 so client traces against
+# the simulator look the same as traces against the real backend.
 version: 1
 
 scenario:
@@ -13,7 +15,8 @@ stream:
 
 confidence_curve:
   type: linear
-  emit_every_ms: 1000
+  emit_every_ms: 5000
+  analysis_window_ms: 5000
   label_threshold: 0.5
   label_below: bonafide
   label_above: spoofed

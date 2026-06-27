@@ -23,7 +23,8 @@ from result_csv import ChunkRow, ResultCSV
 DEFAULT_RATE = 16000
 CHANNELS = 1
 CHUNK_MS = 500
-SILENCE_CHUNKS = 6  # 3 seconds
+SILENCE_CHUNKS = 10  # 5 seconds — matches the dfs default analysis_interval_s=5.0
+                     # so the fallback fires at least one analysis window in CI.
 
 # WAVE format tags we recognise. The stdlib `wave` module only handles PCM
 # (tag 1) and raises on IEEE Float (tag 3), so we parse the RIFF header

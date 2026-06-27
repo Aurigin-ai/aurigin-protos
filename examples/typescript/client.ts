@@ -24,7 +24,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_RATE = 16000;
 const CHANNELS = 1;
 const CHUNK_MS = 500;
-const SILENCE_CHUNKS = 6;
+// 5 s — matches the dfs default analysis_interval_s=5.0 so the fallback
+// fires at least one analysis window in CI.
+const SILENCE_CHUNKS = 10;
 
 // WAVE format tags. PCM 16-bit goes out as S16LE; IEEE float 32-bit as
 // F32LE — matching the formats deepfake-service's audio decoder accepts.
