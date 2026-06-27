@@ -72,13 +72,32 @@ interface SessionState {
 }
 
 interface TimelineItem {
-  kind: "curve_sample" | "event";
+  kind: "curve_sample" | "event" | "computed_emission";
   atMs: number;
   event?: ScenarioEvent;
+  // Set for kind=computed_emission (backend_simulation-driven).
+  durationMs?: number;
+  isSilent?: boolean;
+  silenceConfidence?: number;
+  // offsetMs usually equals atMs (fire-wallclock-time == audio offset under
+  // the existing simulator convention), but tail_strategy='recompute'
+  // slides it back so the offset reports where the slid window starts
+  // rather than where it ended. Falls back to atMs when absent.
+  offsetMs?: number;
 }
 
+// Bytes per sample for the AudioBuffer wire formats the deepfake-service
+// decoder accepts. Used by the audio drainer's fallback duration-from-bytes
+// calc when the client doesn't populate duration_ns.
+const BYTES_PER_SAMPLE: Record<string, number> = { S16LE: 2, F32LE: 4 };
+
 function makeSessionId(): string {
-  return `sim-${randomBytes(4).toString("hex")}`;
+  // "sim-" prefix identifies this session as simulator-generated, matching
+  // deepfake-service's "pre-" prefix (= prediction). Cross-cutting log
+  // searches can tell at a glance whether a session id came from the real
+  // backend or the scenario-driven simulator. 16 random bytes → 32 hex
+  // chars (mirrors uuid4 hex; we don't need RFC 4122 compliance here).
+  return `sim-${randomBytes(16).toString("hex")}`;
 }
 
 function mulberry32(seed: number): Rng {
@@ -111,11 +130,15 @@ async function applyNetwork(net: Scenario["network"], rng: Rng): Promise<void> {
 function buildTimeline(scenario: Scenario): TimelineItem[] {
   const items: TimelineItem[] = [];
 
-  const curve = scenario.confidenceCurve;
-  if (curve != null) {
-    const every = (curve.emit_every_ms ?? 1000) as number;
-    for (let t = every; t <= scenario.stream.durationMs; t += every) {
-      items.push({ kind: "curve_sample", atMs: t });
+  if (scenario.backendSimulation != null) {
+    items.push(...emissionsFromBackendSimulation(scenario));
+  } else {
+    const curve = scenario.confidenceCurve;
+    if (curve != null) {
+      const every = (curve.emit_every_ms ?? 1000) as number;
+      for (let t = every; t <= scenario.stream.durationMs; t += every) {
+        items.push({ kind: "curve_sample", atMs: t });
+      }
     }
   }
 
@@ -124,6 +147,78 @@ function buildTimeline(scenario: Scenario): TimelineItem[] {
   }
 
   items.sort((a, b) => a.atMs - b.atMs);
+  return items;
+}
+
+// Mirror dfs's window-emission rules over a finite stream. Walks
+// [0, duration_ms] in `analysis_interval_ms` steps and emits one
+// computed_emission per main window. Residual after the last main window
+// follows `tail_strategy`:
+//   - drop: residual < min_analysis_duration_ms → silently skipped
+//           residual ≥ min_analysis_duration_ms → short tail window
+//   - extend: residual < min_analysis_duration_ms → folded into prior window
+//             (last emission shifts to t=duration_ms, longer duration)
+//   - recompute: residual < min_analysis_duration_ms → last main emission
+//                slides back to end at end-of-stream (offset shifts to
+//                duration_ms - analysis_interval_ms, duration stays
+//                analysis_interval_ms). Mirrors backend-app HTTP
+//                /predict chunk_audio byte-for-byte.
+//   - extend|recompute with residual ≥ min_analysis_duration_ms → same as
+//     drop's else branch (standalone short tail).
+function emissionsFromBackendSimulation(scenario: Scenario): TimelineItem[] {
+  const bs = scenario.backendSimulation!;
+  const durationMs = scenario.stream.durationMs;
+  const interval = bs.analysisIntervalMs;
+  const minAnalysis = bs.minAnalysisDurationMs;
+  const silentSet = new Set(bs.silentWindows);
+  const nMain = Math.floor(durationMs / interval);
+  const residual = durationMs - nMain * interval;
+  const canAbsorbTail =
+    residual > 0 &&
+    residual < minAnalysis &&
+    nMain > 0 &&
+    (bs.tailStrategy === "extend" || bs.tailStrategy === "recompute");
+
+  const items: TimelineItem[] = [];
+  for (let i = 1; i <= nMain; i++) {
+    let atMs = i * interval;
+    let windowDur = interval;
+    let offsetMs = atMs;
+    if (i === nMain && canAbsorbTail) {
+      if (bs.tailStrategy === "extend") {
+        atMs = durationMs;
+        windowDur = interval + residual;
+        offsetMs = atMs;
+      } else {
+        // recompute — fire at end-of-stream, but report the audio offset
+        // as where the slid-back window starts (durationMs - interval).
+        atMs = durationMs;
+        windowDur = interval;
+        offsetMs = durationMs - interval;
+      }
+    }
+    items.push({
+      kind: "computed_emission",
+      atMs,
+      durationMs: windowDur,
+      isSilent: silentSet.has(i),
+      silenceConfidence: bs.silenceConfidence,
+      offsetMs,
+    });
+  }
+
+  if (residual > 0 && !canAbsorbTail && residual >= minAnalysis) {
+    const tailIdx = nMain + 1;
+    items.push({
+      kind: "computed_emission",
+      atMs: durationMs,
+      durationMs: residual,
+      isSilent: silentSet.has(tailIdx),
+      silenceConfidence: bs.silenceConfidence,
+      offsetMs: durationMs,
+    });
+  }
+
   return items;
 }
 
@@ -156,12 +251,45 @@ function materialise(
   rng: Rng,
   atMs: number,
 ): DetectDeepfakeResponse | null {
-  if (item.kind === "curve_sample") {
-    const curve = scenario.confidenceCurve!;
-    const score = curves.evaluate(curve, rng, atMs);
-    const label = curves.labelFor(curve, score);
+  // AnalysisResult.duration_ms resolution order, finest grained wins:
+  //   per-event payload.duration_ms > curve.analysis_window_ms > stream.chunk_interval_ms
+  // Lets one scenario emit windows of varying lengths (e.g. tail_extended_
+  // full_coverage where the last window is longer than the rest).
+  // Mirrors examples/python/sim/runner.py._materialise.
+  const curve = scenario.confidenceCurve ?? {};
+  const curveWindowMs = ((curve as any).analysis_window_ms as number | undefined) ?? scenario.stream.chunkIntervalMs;
+
+  if (item.kind === "computed_emission") {
+    // backend_simulation-driven emission. Silent windows skip the curve and
+    // emit a sentinel; otherwise the curve (if any) computes the score the
+    // same way curve_sample does.
+    //
+    // offsetMs is the wire audio_offset_ms. Usually equals atMs (fire-time ==
+    // audio-offset under the existing simulator convention), but recompute
+    // slides it back so the offset reports where the slid window starts.
+    const emitOffset = item.offsetMs ?? atMs;
+    const dur = item.durationMs ?? curveWindowMs;
+    if (item.isSilent) {
+      return makeAnalysisResult(
+        state, emitOffset, 0, "silence", item.silenceConfidence ?? 0.95, dur,
+      );
+    }
+    let score = 0;
+    let label = "bonafide";
+    if (scenario.confidenceCurve) {
+      score = curves.evaluate(scenario.confidenceCurve, rng, atMs);
+      label = curves.labelFor(scenario.confidenceCurve, score);
+    }
     const confidence = Math.round((0.85 + rng() * 0.14) * 1000) / 1000;
-    return makeAnalysisResult(state, atMs, score, label, confidence, scenario.stream.chunkIntervalMs);
+    return makeAnalysisResult(state, emitOffset, score, label, confidence, dur);
+  }
+
+  if (item.kind === "curve_sample") {
+    const c = scenario.confidenceCurve!;
+    const score = curves.evaluate(c, rng, atMs);
+    const label = curves.labelFor(c, score);
+    const confidence = Math.round((0.85 + rng() * 0.14) * 1000) / 1000;
+    return makeAnalysisResult(state, atMs, score, label, confidence, curveWindowMs);
   }
 
   const ev = item.event!;
@@ -173,14 +301,16 @@ function materialise(
     // Event-level errors are surfaced as a sentinel AnalysisResult with
     // label='error' and score 0; clients should treat label='error' as
     // non-actionable. (Future: dedicated proto message.)
-    return makeAnalysisResult(state, atMs, 0, "error", 0, scenario.stream.chunkIntervalMs);
+    const dur = (ev.payload.duration_ms as number | undefined) ?? curveWindowMs;
+    return makeAnalysisResult(state, atMs, 0, "error", 0, dur);
   }
   // CONFIDENCE_UPDATE or FAKE_DETECTED — both map to AnalysisResult.
   const payload = ev.payload;
   const score = (payload.fake_probability ?? state.lastScore) as number;
   const label = (payload.label ?? curves.labelFor(scenario.confidenceCurve ?? {}, score)) as string;
   const confidence = (payload.confidence ?? Math.round((0.85 + rng() * 0.14) * 1000) / 1000) as number;
-  return makeAnalysisResult(state, atMs, score, label, confidence, scenario.stream.chunkIntervalMs);
+  const dur = (payload.duration_ms as number | undefined) ?? curveWindowMs;
+  return makeAnalysisResult(state, atMs, score, label, confidence, dur);
 }
 
 function audioChunkMs(audio: {
@@ -188,6 +318,7 @@ function audioChunkMs(audio: {
   rate?: number;
   channels?: number;
   buffer?: Uint8Array;
+  format?: string;
 }): number {
   const durationNs = audio.durationNs ?? 0n;
   if (durationNs > 0n) {
@@ -197,7 +328,8 @@ function audioChunkMs(audio: {
   const channels = audio.channels ?? 0;
   const buf = audio.buffer;
   if (rate && channels && buf) {
-    return Math.round((buf.length / 2 / channels / rate) * 1000);
+    const bps = BYTES_PER_SAMPLE[audio.format ?? ""] ?? 2;
+    return Math.round((buf.length / bps / channels / rate) * 1000);
   }
   return 0;
 }
@@ -237,6 +369,7 @@ export async function runSession(scenario: Scenario, call: Call): Promise<void> 
     clientEndResolve = res;
   });
 
+  let loggedFormat = false;
   call.on("data", (msg: DetectDeepfakeRequest) => {
     if (!firstResolved) {
       firstResolved = true;
@@ -244,6 +377,14 @@ export async function runSession(scenario: Scenario, call: Call): Promise<void> 
       return;
     }
     if (msg.audio) {
+      if (!loggedFormat) {
+        const a = msg.audio as any;
+        log(
+          state.sessionId,
+          `audio | format=${a.format || "?"} | rate=${a.rate ?? 0} | channels=${a.channels ?? 0}`,
+        );
+        loggedFormat = true;
+      }
       state.accumulatedAudioMs += audioChunkMs(msg.audio as any);
     }
   });

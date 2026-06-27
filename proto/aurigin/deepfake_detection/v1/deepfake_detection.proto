@@ -77,9 +77,17 @@ message AnalysisResult {
   int64 duration_ms = 2;
   // Deepfake probability score [0-1]: 0.0 = fully bonafide, 1.0 = fully spoofed.
   float score = 3;
-  // Human-readable classification: "bonafide", "spoofed", or "partially_spoofed".
+  // Human-readable classification. Decision values: "bonafide", "spoofed",
+  // "partially_spoofed". Sentinel values (emitted when no decision was made):
+  //   - "silence": the VAD gate suppressed inference because the window was
+  //     classified non-speech. `score` is 0.0 and `confidence` carries the
+  //     silence fraction (≈silence_pct/100) so clients can render gradations.
+  //   - "error":   per-window inference failed; treat as non-actionable.
+  // Clients should accept and forward unknown label strings rather than
+  // failing — new sentinel values may be added without a wire break.
   string label = 4;
-  // Model confidence in this classification [0-1].
+  // Model confidence in this classification [0-1]. For "silence" sentinels
+  // this carries the VAD silence fraction; for "error" sentinels this is 0.0.
   float confidence = 5;
 }
 

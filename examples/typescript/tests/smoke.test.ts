@@ -110,7 +110,8 @@ test("client streams silence and roundtrips analyses", async () => {
     assert.equal(code, 0, `client failed: stderr=${stderr}`);
     assert.match(stdout, /Session: /, `missing session line in:\n${stdout}`);
     assert.match(stdout, /FINAL/);
-    // Simulator issues per-session ids like 'sim-<8 hex>'. Pin the prefix only.
+    // Simulator issues per-session ids like 'sim-<32 hex>' (matches dfs's
+    // 'pre-<32 hex>' shape). Pin the prefix only.
     assert.match(stdout, /sim-/, `missing simulator session id prefix in:\n${stdout}`);
     // NOTE: we deliberately don't assert AnalysisResult lines here. The
     // scenario-driven server emits curve samples at wallclock 1 s / 2 s / 3 s,
@@ -121,20 +122,87 @@ test("client streams silence and roundtrips analyses", async () => {
   });
 });
 
-test("phone_call streams a WAV fixture and roundtrips analyses", async () => {
-  const repoRoot = path.resolve(EXAMPLES_DIR, "..", "..");
-  const fixture = path.join(repoRoot, "examples", "audio", "fixtures", "test_call.wav");
-  assert.ok(fs.existsSync(fixture), `missing test fixture: ${fixture}`);
+const phoneCallFixtures: { name: string; file: string; header: RegExp }[] = [
+  // S16LE 8 kHz mono — the historical telephony fixture.
+  { name: "S16LE 8 kHz mono", file: "test_call.wav", header: /8000Hz\/1ch S16LE/ },
+  // F32LE 16 kHz mono — exercises the IEEE-float wire path so a regression
+  // that breaks the RIFF reader's format dispatch fails CI.
+  { name: "F32LE 16 kHz mono", file: "test_call_f32le.wav", header: /16000Hz\/1ch F32LE/ },
+  // S16LE 16 kHz mono — the 10.001 s boundary-case fixture (also used by
+  // backend_simulation tests below); default-scenario roundtrip coverage
+  // here, separate from the tail-strategy assertions there.
+  { name: "S16LE 16 kHz mono (10s tail)", file: "test_call_10s_tail.wav", header: /16000Hz\/1ch S16LE/ },
+];
 
-  await withServer(async (port) => {
-    const { code, stdout, stderr } = await runProc(
-      path.join(EXAMPLES_DIR, "phone_call.ts"),
-      ["--audio", fixture, "--duration", "1", "--chunk-ms", "100", "--target", `localhost:${port}`],
-    );
-    assert.equal(code, 0, `phone_call failed: stderr=${stderr}`);
-    // Header confirms the WAV reader parsed sr/channels correctly.
-    assert.match(stdout, /8000Hz\/1ch/, "WAV reader didn't pick up 8 kHz mono");
-    assert.match(stdout, /📞 Session:/);
-    assert.match(stdout, /Call ended/);
+for (const { name, file, header } of phoneCallFixtures) {
+  test(`phone_call streams a ${name} WAV fixture and roundtrips analyses`, async () => {
+    const repoRoot = path.resolve(EXAMPLES_DIR, "..", "..");
+    const fixture = path.join(repoRoot, "examples", "audio", "fixtures", file);
+    assert.ok(fs.existsSync(fixture), `missing test fixture: ${fixture}`);
+
+    await withServer(async (port) => {
+      const { code, stdout, stderr } = await runProc(
+        path.join(EXAMPLES_DIR, "phone_call.ts"),
+        ["--audio", fixture, "--duration", "1", "--chunk-ms", "100", "--target", `localhost:${port}`],
+      );
+      assert.equal(code, 0, `phone_call failed: stderr=${stderr}`);
+      // Header confirms the WAV reader parsed sr/channels/format correctly.
+      assert.match(stdout, header, `WAV reader didn't pick up ${name}`);
+      assert.match(stdout, /📞 Session:/);
+      assert.match(stdout, /Call ended/);
+    });
   });
-});
+}
+
+// Backend-simulation scenarios — pin the dfs config they mirror via
+// --scenario-id and assert the on-wire emission shape matches what the real
+// backend would produce for the same audio length + config.
+const backendSimScenarios: {
+  scenarioId: string;
+  durationS: number;
+  expectedAnalyses: number;
+  extraSubstrings: string[];
+}[] = [
+  // tail_strategy=drop → 2 main windows fire, 1ms tail silently skipped.
+  { scenarioId: "tail_dropped_below_min", durationS: 11, expectedAnalyses: 2, extraSubstrings: [] },
+  // tail_strategy=extend → 2 emissions, second covers the 1ms tail.
+  { scenarioId: "tail_extended_full_coverage", durationS: 11, expectedAnalyses: 2, extraSubstrings: [] },
+  // tail_strategy=recompute → 2 emissions, second slides back (offset
+  // shifts to audio time 5001ms, duration stays 5000ms).
+  { scenarioId: "tail_recomputed_full_coverage", durationS: 11, expectedAnalyses: 2, extraSubstrings: [] },
+  // silent_windows=[2] → one of the 5 emissions is the silence sentinel.
+  // Loop the 10s fixture to fill the 15s scenario timeline.
+  { scenarioId: "silence_gated_window", durationS: 16, expectedAnalyses: 5, extraSubstrings: ["label=silence"] },
+];
+
+for (const { scenarioId, durationS, expectedAnalyses, extraSubstrings } of backendSimScenarios) {
+  test(`phone_call drives backend_simulation scenario '${scenarioId}'`, async () => {
+    const repoRoot = path.resolve(EXAMPLES_DIR, "..", "..");
+    const fixture = path.join(repoRoot, "examples", "audio", "fixtures", "test_call_10s_tail.wav");
+    assert.ok(fs.existsSync(fixture), `missing test fixture: ${fixture}`);
+
+    await withServer(async (port) => {
+      const { code, stdout, stderr } = await runProc(
+        path.join(EXAMPLES_DIR, "phone_call.ts"),
+        [
+          "--audio", fixture,
+          "--duration", String(durationS),
+          "--chunk-ms", "100",
+          "--target", `localhost:${port}`,
+          "--scenario-id", scenarioId,
+        ],
+      );
+      assert.equal(code, 0, `phone_call failed: stderr=${stderr}`);
+      assert.ok(
+        stdout.includes(`analyses=${expectedAnalyses}`),
+        `scenario ${scenarioId}: expected analyses=${expectedAnalyses}\nstdout:\n${stdout}`,
+      );
+      for (const needle of extraSubstrings) {
+        assert.ok(
+          stdout.includes(needle),
+          `scenario ${scenarioId}: expected substring ${JSON.stringify(needle)}\nstdout:\n${stdout}`,
+        );
+      }
+    });
+  });
+}

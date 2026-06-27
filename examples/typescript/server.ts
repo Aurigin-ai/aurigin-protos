@@ -30,7 +30,7 @@ import {
 } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
 
 import { loadScenarios, runSession, type Scenario } from "./sim/index.js";
-import { serverCredentials, transportLabel } from "./tls.js";
+import { serverCredentials, transportLabel } from "./common/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SCENARIOS_DIR = path.resolve(__dirname, "..", "scenarios");

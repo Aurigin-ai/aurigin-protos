@@ -50,6 +50,11 @@ def _log(session_id: str, message: str) -> None:
 # main generator loop to know it can stop pulling from the queue.
 _TIMELINE_DONE = object()
 
+# Bytes per sample for the AudioBuffer wire formats the deepfake-service
+# decoder accepts. Used by _drain_audio's defensive duration-from-bytes
+# fallback when the client doesn't populate duration_ns.
+_BYTES_PER_SAMPLE = {"S16LE": 2, "F32LE": 4}
+
 
 @dataclass
 class _SessionState:
@@ -65,7 +70,12 @@ class _SessionState:
 
 
 def _make_session_id() -> str:
-    return f"sim-{uuid.uuid4().hex[:8]}"
+    # "sim-" prefix identifies this session as simulator-generated, matching
+    # deepfake-service's "pre-" prefix (= prediction). Cross-cutting log
+    # searches can tell at a glance whether a session id came from the real
+    # backend or the scenario-driven simulator. Full UUID hex (no truncation)
+    # so the format mirrors dfs.
+    return f"sim-{uuid.uuid4().hex}"
 
 
 def _make_analysis_result(
@@ -101,14 +111,22 @@ async def _apply_network(network, rng: random.Random) -> None:
 async def _drain_audio(request_iterator, state: _SessionState) -> None:
     """Consume audio chunks so the client can finish writing. Content ignored
     by the simulator — the scenario drives output, not the audio bytes."""
+    logged_format = False
     async for msg in request_iterator:
         if msg.HasField("audio"):
             buf = msg.audio
+            if not logged_format:
+                _log(
+                    state.session_id,
+                    f"audio | format={buf.format or '?'} | rate={buf.rate} | channels={buf.channels}",
+                )
+                logged_format = True
             if buf.duration_ns > 0:
                 state.accumulated_audio_ms += int(buf.duration_ns // 1_000_000)
             elif buf.rate and buf.channels:
+                bps = _BYTES_PER_SAMPLE.get(buf.format, 2)
                 state.accumulated_audio_ms += int(
-                    len(buf.buffer) / 2 / buf.channels / buf.rate * 1000
+                    len(buf.buffer) / bps / buf.channels / buf.rate * 1000
                 )
 
 
@@ -133,19 +151,121 @@ async def _emit_timeline(
 
 
 def _build_timeline(scenario: Scenario) -> list[tuple[int, dict[str, Any]]]:
-    """Combine curve sample points + explicit events into one ordered list."""
+    """Combine emissions (from backend_simulation or curve) + explicit events.
+
+    Two scheduling modes:
+      - **backend_simulation** (declarative): emissions are computed from
+        (stream.duration_ms, analysis_interval_ms, min_analysis_duration_ms,
+        tail_strategy). Mirrors how deepfake-service actually windows a
+        finite-length audio stream. Curve still consulted for score values.
+      - **curve.emit_every_ms** (scripted): emissions on a fixed wallclock
+        grid driven by the curve. Pre-existing behavior; unchanged.
+
+    Events are always overlaid on top.
+    """
     items: list[tuple[int, dict[str, Any]]] = []
 
-    curve = scenario.confidence_curve
-    if curve is not None:
-        every = curve.get("emit_every_ms", 1000)
-        for t in range(every, scenario.stream.duration_ms + 1, every):
-            items.append((t, {"kind": "curve_sample", "at_ms": t}))
+    bs = scenario.backend_simulation
+    if bs is not None:
+        items.extend(_emissions_from_backend_simulation(scenario))
+    else:
+        curve = scenario.confidence_curve
+        if curve is not None:
+            every = curve.get("emit_every_ms", 1000)
+            for t in range(every, scenario.stream.duration_ms + 1, every):
+                items.append((t, {"kind": "curve_sample", "at_ms": t}))
 
     for ev in scenario.events:
         items.append((ev.at_ms, {"kind": "event", "event": ev}))
 
     items.sort(key=lambda x: x[0])
+    return items
+
+
+def _emissions_from_backend_simulation(
+    scenario: Scenario,
+) -> list[tuple[int, dict[str, Any]]]:
+    """Mirror dfs's window-emission rules over a finite stream.
+
+    Walks the [0, duration_ms] interval in `analysis_interval_ms` steps and
+    emits one `computed_emission` per main window. Residual after the last
+    main window is handled per `tail_strategy`:
+
+      - drop: residual < min_analysis_duration_ms → silently skipped
+              residual ≥ min_analysis_duration_ms → emitted as a short tail
+              window with duration_ms = residual
+      - extend: residual < min_analysis_duration_ms → folded into the prior
+                window (last main emission shifts to t=duration_ms with
+                duration_ms = analysis_interval_ms + residual)
+                residual ≥ min_analysis_duration_ms → same as drop's else branch
+      - recompute: residual < min_analysis_duration_ms → last main emission
+                slides back so it ends at end-of-stream (offset shifts to
+                duration_ms - analysis_interval_ms, duration stays
+                analysis_interval_ms). Mirrors backend-app HTTP
+                /predict chunk_audio byte-for-byte. residual ≥
+                min_analysis_duration_ms → same as drop's else branch.
+    """
+    bs = scenario.backend_simulation
+    assert bs is not None
+    duration_ms = scenario.stream.duration_ms
+    interval = bs.analysis_interval_ms
+    min_analysis = bs.min_analysis_duration_ms
+    silent_set = set(bs.silent_windows)
+    n_main = duration_ms // interval
+    residual = duration_ms - n_main * interval
+    can_absorb_tail = (
+        residual > 0
+        and residual < min_analysis
+        and n_main > 0
+        and bs.tail_strategy in ("extend", "recompute")
+    )
+
+    items: list[tuple[int, dict[str, Any]]] = []
+    for i in range(1, n_main + 1):
+        at_ms = i * interval
+        window_dur = interval
+        if i == n_main and can_absorb_tail:
+            if bs.tail_strategy == "extend":
+                # Fold residual into the last window: end-of-stream offset,
+                # duration grows to cover both pieces.
+                at_ms = duration_ms
+                window_dur = interval + residual
+            else:  # recompute — slide back so the window ends at EOS at
+                   # exactly analysis_interval_ms long.
+                at_ms = duration_ms
+                window_dur = interval
+                # at_ms here is the emission's wallclock fire time (== audio
+                # offset under the existing simulator convention). For
+                # recompute parity with dfs the audio_offset_ms should be
+                # (total - interval) — encoded via a separate offset_ms key.
+        items.append((at_ms, {
+            "kind": "computed_emission",
+            "at_ms": at_ms,
+            "duration_ms": window_dur,
+            "is_silent": i in silent_set,
+            "silence_confidence": bs.silence_confidence,
+            # recompute slides the offset forward by residual; for every
+            # other case offset_ms == at_ms (preserves existing convention).
+            "offset_ms": (
+                duration_ms - interval
+                if i == n_main and can_absorb_tail and bs.tail_strategy == "recompute"
+                else at_ms
+            ),
+        }))
+
+    # Standalone tail emission (only when not folded into the prior window
+    # and large enough to clear the min_analysis floor).
+    if residual > 0 and not can_absorb_tail and residual >= min_analysis:
+        tail_idx = n_main + 1
+        items.append((duration_ms, {
+            "kind": "computed_emission",
+            "at_ms": duration_ms,
+            "duration_ms": residual,
+            "is_silent": tail_idx in silent_set,
+            "silence_confidence": bs.silence_confidence,
+            "offset_ms": duration_ms,
+        }))
+
     return items
 
 
@@ -156,8 +276,50 @@ def _materialise(
     rng: random.Random,
     at_ms: int,
 ) -> pb.DetectDeepfakeResponse | None:
+    # AnalysisResult.duration_ms resolution order, finest grained wins:
+    #   per-event payload.duration_ms > curve.analysis_window_ms > stream.chunk_interval_ms
+    # Lets one scenario emit windows of varying lengths (e.g. tail_extended_
+    # full_coverage where the last window is longer than the rest).
+    curve = scenario.confidence_curve or {}
+    curve_window_ms = curve.get("analysis_window_ms", scenario.stream.chunk_interval_ms)
+
+    if item["kind"] == "computed_emission":
+        # backend_simulation-driven emission. Silent windows skip the curve
+        # entirely and emit a sentinel; otherwise curve (if any) computes
+        # the score the same way curve_sample does.
+        #
+        # offset_ms is the AnalysisResult.audio_offset_ms wire value. It
+        # usually equals at_ms (fire-wallclock-time == audio-offset under
+        # the existing simulator convention), but tail_strategy='recompute'
+        # slides it back so the offset reports where the slid window starts
+        # rather than where it ended.
+        emit_offset = int(item.get("offset_ms", at_ms))
+        if item["is_silent"]:
+            return _make_analysis_result(
+                state,
+                t_ms=emit_offset,
+                score=0.0,
+                label="silence",
+                confidence=float(item["silence_confidence"]),
+                duration_ms=int(item["duration_ms"]),
+            )
+        if curve:
+            score = curves.evaluate(curve, rng, at_ms)
+            label = curves.label_for(curve, score)
+        else:
+            score = 0.0
+            label = "bonafide"
+        confidence = round(rng.uniform(0.85, 0.99), 3)
+        return _make_analysis_result(
+            state,
+            t_ms=emit_offset,
+            score=score,
+            label=label,
+            confidence=confidence,
+            duration_ms=int(item["duration_ms"]),
+        )
+
     if item["kind"] == "curve_sample":
-        curve = scenario.confidence_curve
         score = curves.evaluate(curve, rng, at_ms)
         label = curves.label_for(curve, score)
         confidence = round(rng.uniform(0.85, 0.99), 3)
@@ -167,7 +329,7 @@ def _materialise(
             score=score,
             label=label,
             confidence=confidence,
-            duration_ms=scenario.stream.chunk_interval_ms,
+            duration_ms=curve_window_ms,
         )
 
     ev = item["event"]
@@ -184,12 +346,12 @@ def _materialise(
             score=0.0,
             label="error",
             confidence=0.0,
-            duration_ms=scenario.stream.chunk_interval_ms,
+            duration_ms=ev.payload.get("duration_ms", curve_window_ms),
         )
     # CONFIDENCE_UPDATE or FAKE_DETECTED — both map to AnalysisResult.
     payload = ev.payload
     score = float(payload.get("fake_probability", state.last_score))
-    label = payload.get("label", curves.label_for(scenario.confidence_curve or {}, score))
+    label = payload.get("label", curves.label_for(curve, score))
     confidence = float(payload.get("confidence", round(rng.uniform(0.85, 0.99), 3)))
     return _make_analysis_result(
         state,
@@ -197,7 +359,7 @@ def _materialise(
         score=score,
         label=label,
         confidence=confidence,
-        duration_ms=scenario.stream.chunk_interval_ms,
+        duration_ms=int(payload.get("duration_ms", curve_window_ms)),
     )
 
 

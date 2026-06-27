@@ -1,0 +1,40 @@
+# Mirrors deepfake-service emitting a silent-sentinel AnalysisResult when its
+# Silero VAD gate suppresses a window. A 15 s stream at analysis_interval=3s
+# fires 5 windows; window 2 (covering 3-6 s) is flagged silent → instead of a
+# scored emission, the simulator emits label="silence" with confidence set
+# from silence_pct/100. The proto comment on AnalysisResult.label lists this
+# as a valid sentinel value.
+#
+# Expected on-wire shape:
+#   CreateSessionResponse
+#   AnalysisResult(offset=3000ms,  duration=3000ms, label=bonafide)
+#   AnalysisResult(offset=6000ms,  duration=3000ms, label=silence,  confidence≈0.95)
+#   AnalysisResult(offset=9000ms,  duration=3000ms, label=bonafide)
+#   AnalysisResult(offset=12000ms, duration=3000ms, label=bonafide)
+#   AnalysisResult(offset=15000ms, duration=3000ms, label=bonafide)
+#   FinalResult(total_audio_ms≥15000, analysis_count=5, label=bonafide)
+version: 1
+
+scenario:
+  id: silence_gated_window
+  description: 15s stream, 3s interval — window 2 is VAD-silent, emitted as label=silence sentinel.
+
+stream:
+  duration_ms: 15000
+  chunk_interval_ms: 100
+
+random:
+  seed: 42
+
+backend_simulation:
+  analysis_interval_ms: 3000
+  min_analysis_duration_ms: 1000
+  tail_strategy: drop
+  silent_windows: [2]
+  silence_confidence: 0.95
+
+confidence_curve:
+  type: noise
+  label_threshold: 0.5
+  base: 0.06
+  amplitude: 0.04

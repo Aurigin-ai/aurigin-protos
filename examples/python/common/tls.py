@@ -14,7 +14,10 @@ from pathlib import Path
 
 import grpc
 
-_DEFAULT_TLS_DIR = Path(__file__).resolve().parent.parent / "certs"
+# Resolve relative to this file: examples/python/common/tls.py
+# .parent → examples/python/common/   .parent → examples/python/
+# .parent → examples/   / certs → examples/certs/ (committed self-signed certs)
+_DEFAULT_TLS_DIR = Path(__file__).resolve().parent.parent.parent / "certs"
 
 
 def _load_ca() -> bytes | None:

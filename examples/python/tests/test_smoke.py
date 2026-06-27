@@ -108,7 +108,7 @@ def test_client_silence_roundtrip(server, env: dict[str, str], tmp_path):
     assert result.returncode == 0, f"client failed: stderr={result.stderr}"
     assert "Session:" in result.stdout, f"missing session line in:\n{result.stdout}"
     assert "FINAL" in result.stdout
-    # Simulator issues per-session ids like 'sim-<8 hex>'. We don't pin the
+    # Simulator issues per-session ids like 'sim-<32 hex>' (matches dfs's
     # specific value — just that the server emitted one.
     assert "sim-" in result.stdout, f"missing simulator session id prefix in:\n{result.stdout}"
     # NOTE: we deliberately don't assert AnalysisResult lines here. The
@@ -119,10 +119,25 @@ def test_client_silence_roundtrip(server, env: dict[str, str], tmp_path):
     # test below, which paces audio in real time.
 
 
-def test_phone_call_wav_roundtrip(server, env: dict[str, str]):
+@pytest.mark.parametrize(
+    ("fixture_name", "expected_header"),
+    [
+        # S16LE 8 kHz mono — the historical telephony fixture.
+        ("test_call.wav", "8000Hz/1ch S16LE"),
+        # F32LE 16 kHz mono — exercises the IEEE-float wire path so a
+        # regression that breaks the RIFF reader's format dispatch fails CI.
+        ("test_call_f32le.wav", "16000Hz/1ch F32LE"),
+        # S16LE 16 kHz mono — the 10.001 s boundary-case fixture (also
+        # used by backend_simulation tests below). Hitting it here too
+        # gives us roundtrip coverage on the default scenario, separate
+        # from the backend_simulation tail-strategy assertions.
+        ("test_call_10s_tail.wav", "16000Hz/1ch S16LE"),
+    ],
+)
+def test_phone_call_wav_roundtrip(server, env: dict[str, str], fixture_name: str, expected_header: str):
     """phone_call.py reads a real WAV fixture and streams it to the server."""
     _, port = server
-    fixture = REPO_ROOT / "examples" / "audio" / "fixtures" / "test_call.wav"
+    fixture = REPO_ROOT / "examples" / "audio" / "fixtures" / fixture_name
     assert fixture.is_file(), f"missing test fixture: {fixture}"
 
     result = subprocess.run(
@@ -140,7 +155,69 @@ def test_phone_call_wav_roundtrip(server, env: dict[str, str]):
         timeout=30,
     )
     assert result.returncode == 0, f"phone_call failed: stderr={result.stderr}"
-    # The header line confirms the WAV reader parsed sr/channels correctly.
-    assert "8000Hz/1ch" in result.stdout, f"WAV reader didn't pick up 8 kHz mono:\n{result.stdout}"
+    # The header line confirms the WAV reader picked sr/channels/format correctly.
+    assert expected_header in result.stdout, f"WAV reader didn't pick up {expected_header}:\n{result.stdout}"
     assert "📞 Session:" in result.stdout
     assert "Call ended" in result.stdout
+
+
+# Backend-simulation scenarios — pin the dfs config they mirror via x-scenario-id
+# metadata and assert the on-wire emission shape matches what the real backend
+# would produce for the same audio length + config.
+@pytest.mark.parametrize(
+    ("scenario_id", "duration_s", "expected_analyses", "extra_substrings"),
+    [
+        # tail_strategy=drop → 2 main windows fire, 1ms tail silently skipped.
+        ("tail_dropped_below_min", 11, 2, ()),
+        # tail_strategy=extend → 2 emissions, second covers the 1ms tail
+        # (duration_ms=5001). Check that duration in the analysis log line.
+        ("tail_extended_full_coverage", 11, 2, ()),
+        # tail_strategy=recompute → 2 emissions, second slides back so its
+        # offset is at audio time 5001ms (rather than the 5000ms grid).
+        # phone_call.py prints offsets as "Analysis @ 5.00s" — for recompute
+        # the second emission's offset is 5.001s, which rounds to "5.00s"
+        # in the 2-decimal print but is distinguishable in the FINAL line.
+        ("tail_recomputed_full_coverage", 11, 2, ()),
+        # silent_windows=[2] → one of the 5 emissions is the silence sentinel.
+        # Loop the fixture (10s) to fill the 15s scenario timeline.
+        ("silence_gated_window", 16, 5, ("label=silence",)),
+    ],
+)
+def test_phone_call_backend_simulation(
+    server,
+    env: dict[str, str],
+    scenario_id: str,
+    duration_s: int,
+    expected_analyses: int,
+    extra_substrings: tuple[str, ...],
+):
+    """phone_call.py drives the simulator through each backend_simulation scenario."""
+    _, port = server
+    fixture = REPO_ROOT / "examples" / "audio" / "fixtures" / "test_call_10s_tail.wav"
+    assert fixture.is_file(), f"missing test fixture: {fixture}"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(EXAMPLES_DIR / "phone_call.py"),
+            "--audio", str(fixture),
+            "--duration", str(duration_s),
+            "--chunk-ms", "100",
+            "--target", f"localhost:{port}",
+            "--scenario-id", scenario_id,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=duration_s + 15,
+    )
+    assert result.returncode == 0, f"phone_call failed: stderr={result.stderr}"
+    assert f"analyses={expected_analyses}" in result.stdout, (
+        f"scenario {scenario_id}: expected analyses={expected_analyses}\n"
+        f"stdout:\n{result.stdout}"
+    )
+    for needle in extra_substrings:
+        assert needle in result.stdout, (
+            f"scenario {scenario_id}: expected substring {needle!r}\n"
+            f"stdout:\n{result.stdout}"
+        )

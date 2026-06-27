@@ -20,15 +20,18 @@ uv run python examples/python/client.py   # in another
 
 ### Self-contained uv project
 
-The `examples/python/` directory ships a `pyproject.toml` so you can run it as a self-contained uv project. `[project.scripts]` defines `server`, `client`, and `phone-call` entry points, mirroring the TypeScript example's `npm run server` / `npm run client`:
+The `examples/python/` directory ships a `pyproject.toml` so you can run it as a self-contained uv project. `[project.scripts]` defines `server`, `client`, `phone-call`, and `phone-call-burst` entry points, mirroring the TypeScript example's `npm run server` / `npm run client` / etc.:
 
 ```bash
 cd examples/python
 uv sync                                   # creates .venv/, installs deps
 uv run server                             # scenario-driven simulator on :50051
-uv run client                             # client → localhost:50051
-uv run phone-call                         # paced WAV streamer → localhost:50051
+uv run client                             # batch client → localhost:50051
+uv run phone-call                         # single live call (the integration pattern)
+uv run phone-call-burst -c 5              # N concurrent calls (load test / multi-call architecture)
 ```
+
+Shared helpers (WAV reader, CSV writer, TLS auto-detect, signal-handler) live under `examples/python/common/` and re-export through `from common import …` — the three CLI scripts above stay focused on what they're demonstrating, not on infra glue.
 
 ### `just` wrapper
 
@@ -74,12 +77,14 @@ FINAL    | total=3000ms   | score=0.050 | label=bonafide
 
 The session id is generated per session (`sim-<8 hex>`) and the cadence comes from the loaded scenario (1 s by default). Pass `--scenario-id <id>` to `phone-call` to load a different scenario from `examples/scenarios/`.
 
-To run against real audio (real ML server required, e.g. backend-app's gRPC service), drop one or more `.wav` files (S16LE PCM, any sample rate, any channel count) into `examples/python/audio/` and re-run the client. It opens one session per file. The `audio/` dir is gitignored.
+To run against real audio (real ML server required, e.g. backend-app's gRPC service), drop one or more `.wav` files into `examples/audio/` and re-run the client. Both 16-bit PCM (`S16LE`) and 32-bit IEEE-float (`F32LE`) WAVs are accepted, at any sample rate and channel count — the client reads the format tag from the RIFF header and tags the outgoing `AudioBuffer.format` accordingly. It opens one session per file. The `audio/` dir is gitignored.
 
 Files:
 - `python/server.py` — scenario-driven simulator: loads YAML scenarios from `examples/scenarios/` at startup, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Listens on `[::]:50051`. Env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`.
-- `python/client.py` — streams every `.wav` in `examples/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` to point at a non-default server (default `localhost:50051`).
-- `python/phone_call.py` — simulates a live mobile call. Streams a WAV file looped to fill `--duration` (default 30 s) at real-time pace.
+- `python/client.py` — streams every `.wav` in `examples/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` to point at a non-default server (default `localhost:50051`). Pass `--csv PATH` to additionally write per-chunk results to a CSV — see [CSV export](#csv-export) below.
+- `python/phone_call.py` — **minimal worked example** of the FreeSWITCH-fork integration pattern. Single live call: open bidi → real-time-paced sender + concurrent receiver → close. Heavily commented at the send loop because that's exactly the line that becomes `for await frame in fork_socket: ...` in a real `mod_audio_fork` / Twilio Media Stream / SIPREC integration.
+- `python/phone_call_burst.py` — the **recommended multi-call architecture**: one long-lived gRPC channel multiplexing N concurrent bidi streams (vs N separate channels). Same per-call building blocks (imported from `phone_call.py`), plus `--concurrency N` / `--stagger-ms` / per-stream `call-NN` labels / graceful shutdown across all streams / summary aggregation. Use it to find the connection-count knee on a real backend or to capture per-chunk results across many concurrent sessions (`--csv PATH`).
+- `python/common/` — shared helpers (`wav_reader`, `result_csv`, `tls`, `shutdown`). The three CLI scripts above import from here so the files themselves stay focused on what they're demonstrating.
 
 ### Audio fixtures
 
@@ -99,34 +104,102 @@ bash examples/audio/generate-conversation.sh --gap-ms 800 --repeat 3
 
 Requires `ffmpeg` on `$PATH`. The output `.wav` is gitignored along with all other audio in the dir; the script itself is committed.
 
-### Phone-call simulation
+### Phone-call: single live call (the FreeSWITCH-fork integration pattern)
 
-The phone-call example mimics the steady-state behaviour of a live audio source: it sends ~1 s of audio per second of wallclock, loops the input if it's shorter than the requested call duration, and prints `AnalysisResult` events the moment they come back from the server. Useful for validating that the streaming pipeline keeps up with real-time without backlog.
+`phone_call.py` / `phone_call.ts` is the **minimal worked example** of plugging a real-time audio source into the gRPC bidi: send loop paced at wallclock (~1 s of audio per second of real time), receive loop running concurrently, single call, exits cleanly. The send loop's docstring/comment is the part to read — in a production integration the `samples.subarray(cursor, …)` slicing becomes `for await frame in fork_socket: …`, and the wallclock `asyncio.sleep` / `setTimeout` pacing goes away (the socket IS the clock).
 
 ```bash
-# Run against backend-app's gRPC server (assumes a real ML server on :50051)
+# Against backend-app's gRPC server (assumes a real ML server on :50051)
 uv run phone-call --duration 30 --chunk-ms 100 --audio audio/your_call.wav
 
 # Or pick the first .wav in examples/audio/ automatically
 uv run phone-call --duration 30
 
-# Drive the scenario-driven simulator on :50051 with a specific scenario
+# Drive the scenario-driven simulator with a specific scenario
 uv run phone-call --duration 30 --scenario-id fake_detected_rising_curve
 ```
 
 Sample output:
 
 ```
-📞 Calling localhost:50051 | source=your_call.wav (4.16s @ 24000Hz/1ch) | duration=12.0s | frame=100ms
+📞 Calling localhost:50051 | source=your_call.wav (4.16s @ 24000Hz/1ch S16LE) | duration=12.0s | frame=100ms | transport=TLS (self-signed, examples/certs/)
 ──────────────────────────────────────────────────────────────────────
 📞 Session: 538a241b-ebdf-4e9a-83a2-259352bd0b01
    Analysis @   0.00s | score=0.945 | label=spoofed            | confidence=1.00
-   Analysis @   2.90s | score=0.323 | label=bonafide           | confidence=1.00
-   Analysis @   5.96s | score=0.240 | label=bonafide           | confidence=1.00
-   Analysis @   9.01s | score=0.622 | label=partially_spoofed  | confidence=1.00
+   Analysis @   5.00s | score=0.240 | label=bonafide           | confidence=1.00
+   Analysis @  10.00s | score=0.622 | label=partially_spoofed  | confidence=1.00
 ──────────────────────────────────────────────────────────────────────
-☎️  Call ended | total=12.01s | score=0.532 | label=partially_spoofed | analyses=4
+☎️  Call ended | total=12.01s | score=0.532 | label=partially_spoofed | analyses=3
 ```
+
+### Phone-call burst: N concurrent calls (recommended multi-call architecture)
+
+`phone_call_burst.py` / `phone_call_burst.ts` mirrors how a PBX (FreeSWITCH instance running `mod_audio_fork`, etc.) handling many calls simultaneously should shape its gRPC plumbing: **one** long-lived channel multiplexing N concurrent bidi streams — *not* N separate channels. The per-call work is the exact same `send_call` / `recv_call` imported from `phone_call.py` (so the pattern reads as "do it N times"), wrapped with `--concurrency`, `--stagger-ms`, per-stream labels, graceful Ctrl-C across all streams, and a summary. Use it to find the connection-count knee on a real backend, or with `--csv` to capture per-chunk results across every concurrent call in one file.
+
+```bash
+# 5 concurrent calls of the rising-curve scenario, all starting at t=0
+uv run phone-call-burst -c 5 --duration 30 --scenario-id fake_detected_rising_curve
+
+# Same but stagger starts 200 ms apart (mimics arriving calls vs thundering herd)
+uv run phone-call-burst -c 5 --stagger-ms 200 --duration 30 --scenario-id fake_detected_rising_curve
+
+# Capture per-chunk results across all 10 streams into one CSV — for load
+# tuning / cross-revision regression comparison
+uv run phone-call-burst -c 10 --duration 60 --target real-backend:50051 --csv /tmp/burst.csv
+```
+
+Sample output (3 concurrent calls):
+
+```
+📞 Calling localhost:50051 | source=your_call.wav (4.16s @ 24000Hz/1ch S16LE) | duration=10.0s | frame=100ms | concurrency=3 | stagger=200ms | transport=TLS (...)
+──────────────────────────────────────────────────────────────────────
+[call-01] 📞 Session: a72b...
+[call-02] 📞 Session: 5d11...
+[call-03] 📞 Session: 9f08...
+[call-01]    Analysis @   5.00s | score=0.945 | label=spoofed            | confidence=1.00
+[call-02]    Analysis @   5.00s | score=0.943 | label=spoofed            | confidence=1.00
+[call-03]    Analysis @   5.00s | score=0.946 | label=spoofed            | confidence=1.00
+...
+[call-01] ☎️  Call ended | total=10.01s | score=0.901 | label=spoofed | analyses=2
+[call-02] ☎️  Call ended | total=10.01s | score=0.902 | label=spoofed | analyses=2
+[call-03] ☎️  Call ended | total=10.01s | score=0.899 | label=spoofed | analyses=2
+──────────────────────────────────────────────────────────────────────
+Summary: 3/3 streams OK, 0 failed
+```
+
+### CSV export
+
+Both `client.py` and `client.ts` accept `--csv PATH` to write per-chunk analysis results to a CSV file alongside the normal console output. One row per `AnalysisResult`, grouped by session — handy for diffing two runs (e.g. comparing the same fixtures against two model revisions, or against `tail_strategy=drop` vs `extend` vs `recompute`).
+
+```bash
+# Python
+uv run client --csv /tmp/results.csv
+
+# TypeScript
+npm run client -- --csv /tmp/results.csv
+```
+
+The file is **overwritten** on each run and the header is always written. Columns (in order):
+
+| Column | Source | Notes |
+|---|---|---|
+| `file_name` | the streamed `.wav` filename (or `"silence (3 s @ 16 kHz)"` for the silence-fallback session) | |
+| `prediction_id` | `CreateSessionResponse.session_id` | server-issued |
+| `chunk_id` | 0-indexed within session | |
+| `chunk_offset` | `AnalysisResult.audio_offset_ms` | ms |
+| `chunk_confidence` | `AnalysisResult.confidence` | `0.000000`–`1.000000` |
+| `chunk_result` | `AnalysisResult.label` | `bonafide` / `spoofed` / `partially_spoofed` / `silence` / `error` |
+| `chunk_duration` | `AnalysisResult.duration_ms` | ms |
+| `audio_duration` | `FinalResult.total_audio_ms` | ms; repeated on every row |
+| `chunks_count` | `len(chunks)` (matches `FinalResult.analysis_count`) | repeated on every row |
+| `processing_time_ms` | wallclock from session-open to `FinalResult`-received | ms, 1-decimal; user-perceived latency for this file. Distinct from `audio_duration` (which is the audio length itself). |
+| `global_confidence` | mean of per-chunk `confidence` across the session | matches `backend-app /predict`'s `avg_confidence` |
+| `global_result` | `FinalResult.overall_label` | repeated on every row |
+| `created_at` | ISO 8601 UTC timestamp when the row block was written | one timestamp per session |
+
+Both implementations share the column list — the column constant lives in [`examples/python/common/result_csv.py`](python/common/result_csv.py) and [`examples/typescript/common/result_csv.ts`](typescript/common/result_csv.ts), and parity is asserted in PRs. Data columns are byte-identical for the same inputs; only `created_at` differs (Python uses the `+00:00` UTC suffix, TS uses `Z` — both valid ISO 8601).
+
+`--csv` is supported on `client` (batch over a directory) and `phone-call-burst` (per-chunk capture across N concurrent calls — the typical "compare model A vs model B against the same audio set" or "what does the result distribution look like at load N=10" use case). `phone-call` (single live call) deliberately omits it since the console output is enough for one call.
 
 ## TypeScript
 
@@ -154,8 +227,10 @@ npm test                               # end-to-end smoke test
 
 Files:
 - `typescript/server.ts` — TS twin of `python/server.py`: scenario-driven simulator that loads YAML scenarios from `examples/scenarios/`, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Same env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`. Sim logic in `typescript/sim/{curves,loader,runner}.ts` mirrors `python/sim/`.
-- `typescript/client.ts` — streams every `.wav` in `examples/audio/` (one session per file) using `DeepfakeDetectionClient.detectDeepfake()`; falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` (e.g. `npm run client -- --target localhost:50051`) to point at a non-default server.
-- `typescript/phone_call.ts` — TS twin of `python/phone_call.py`: streams a paced WAV looped to fill `--duration`. Run with `npm run phone-call -- --audio ../audio/your.wav`
+- `typescript/client.ts` — streams every `.wav` in `examples/audio/` (one session per file) using `DeepfakeDetectionClient.detectDeepfake()`; falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` (e.g. `npm run client -- --target localhost:50051`) to point at a non-default server. Pass `--csv PATH` to additionally write per-chunk results to a CSV — see [CSV export](#csv-export) below.
+- `typescript/phone_call.ts` — TS twin of `python/phone_call.py`: single live call, the FreeSWITCH-fork integration pattern. Run with `npm run phone-call -- --audio ../audio/your.wav`.
+- `typescript/phone_call_burst.ts` — TS twin of `python/phone_call_burst.py`: N concurrent calls (recommended multi-call architecture). Run with `npm run phone-call-burst -- -c 5`. Supports `--csv PATH`.
+- `typescript/common/` — shared helpers (`wav_reader`, `result_csv`, `tls`, `shutdown`) mirroring `python/common/`.
 
 ### Notes on ts-proto naming
 

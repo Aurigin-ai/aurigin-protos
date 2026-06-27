@@ -1,0 +1,39 @@
+# Mirrors deepfake-service with tail_strategy="drop" (default), running on a
+# 10.001 s clip (examples/audio/fixtures/test_call_10s_tail.wav) with
+# analysis_interval_s=5.0 and min_analysis_duration_s=1.0.
+#
+# The backend_simulation block declares the dfs config and the simulator
+# computes the emission timeline from it. With duration_ms=10001 and
+# analysis_interval_ms=5000:
+#   - 2 main windows fire at t=5000ms and t=10000ms (each duration=5000)
+#   - residual = 10001 - 2×5000 = 1ms
+#   - 1ms < min_analysis_duration_ms=1000 → dropped (silently skipped)
+#
+# Expected on-wire shape:
+#   CreateSessionResponse
+#   AnalysisResult(offset=5000ms,  duration=5000ms, label=bonafide)
+#   AnalysisResult(offset=10000ms, duration=5000ms, label=bonafide)
+#   FinalResult(total_audio_ms≥10001, analysis_count=2, label=bonafide)
+version: 1
+
+scenario:
+  id: tail_dropped_below_min
+  description: 10.001s clip, 5s analysis interval — 1ms tail below min_analysis_duration silently dropped.
+
+stream:
+  duration_ms: 10001
+  chunk_interval_ms: 100
+
+random:
+  seed: 42
+
+backend_simulation:
+  analysis_interval_ms: 5000
+  min_analysis_duration_ms: 1000
+  tail_strategy: drop
+
+confidence_curve:
+  type: noise
+  label_threshold: 0.5
+  base: 0.06
+  amplitude: 0.04
