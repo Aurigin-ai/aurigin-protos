@@ -93,6 +93,7 @@ def _run_session(stub, request_iter, label: str, csv_out: ResultCSV | None = Non
             chunks.append(ChunkRow(
                 offset_ms=r.audio_offset_ms,
                 duration_ms=r.duration_ms,
+                score=r.score,
                 confidence=r.confidence,
                 label=r.label,
             ))

@@ -96,6 +96,7 @@ function runSession(
         chunks.push({
           offsetMs: Number(r.audioOffsetMs),
           durationMs: Number(r.durationMs),
+          score: r.score,
           confidence: r.confidence,
           label: r.label,
         });

@@ -149,7 +149,7 @@ async def recv_call(
             if sink is not None:
                 sink["chunks"].append(ChunkRow(
                     offset_ms=r.audio_offset_ms, duration_ms=r.duration_ms,
-                    confidence=r.confidence, label=r.label,
+                    score=r.score, confidence=r.confidence, label=r.label,
                 ))
             log(
                 f"   Analysis @ {r.audio_offset_ms / 1000:6.2f}s "

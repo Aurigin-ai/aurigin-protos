@@ -12,17 +12,23 @@
 import * as fs from "node:fs";
 
 // Column order — keep in sync with examples/python/result_csv.py.
+// `chunk_score` is the raw spoof probability from AnalysisResult.score
+// (= backend-app's fake_probabilities). `chunk_confidence` is the derived
+// |score - 0.5| * 2 distance-from-boundary value. Keep both so cross-pipeline
+// comparisons against backend-app's prob_positive are 1:1 on chunk_score.
 export const CSV_COLUMNS = [
   "file_name", "prediction_id",
-  "chunk_id", "chunk_offset", "chunk_confidence", "chunk_result", "chunk_duration",
+  "chunk_id", "chunk_offset",
+  "chunk_score", "chunk_confidence", "chunk_result", "chunk_duration",
   "audio_duration", "chunks_count", "processing_time_ms",
-  "global_confidence", "global_result", "created_at",
+  "global_score", "global_confidence", "global_result", "created_at",
 ] as const;
 
 // One AnalysisResult flattened to its CSV-relevant fields.
 export interface ChunkRow {
   offsetMs: number;
   durationMs: number;
+  score: number;
   confidence: number;
   label: string;
 }
@@ -70,14 +76,18 @@ export class ResultCSV {
     const globalConfidence = chunksCount
       ? chunks.reduce((acc, c) => acc + c.confidence, 0) / chunksCount
       : 0;
+    const globalScore = chunksCount
+      ? chunks.reduce((acc, c) => acc + c.score, 0) / chunksCount
+      : 0;
     const createdAt = new Date().toISOString();
     for (let chunkId = 0; chunkId < chunks.length; chunkId++) {
       const c = chunks[chunkId];
       const row = [
         fileName, sessionId,
-        chunkId, c.offsetMs, c.confidence.toFixed(6), c.label, c.durationMs,
+        chunkId, c.offsetMs,
+        c.score.toFixed(6), c.confidence.toFixed(6), c.label, c.durationMs,
         audioDurationMs, chunksCount, processingTimeMs.toFixed(1),
-        globalConfidence.toFixed(6), globalResult, createdAt,
+        globalScore.toFixed(6), globalConfidence.toFixed(6), globalResult, createdAt,
       ].map(csvEscape).join(",");
       this.stream.write(row + "\n");
     }
