@@ -19,11 +19,16 @@ from pathlib import Path
 
 
 # Column order — keep in sync with examples/typescript/result_csv.ts.
+# `chunk_score` is the raw spoof probability from AnalysisResult.score
+# (= backend-app's fake_probabilities). `chunk_confidence` is the derived
+# |score - 0.5| * 2 distance-from-boundary value. Keep both so cross-pipeline
+# comparisons against backend-app's prob_positive are 1:1 on chunk_score.
 COLUMNS: tuple[str, ...] = (
     "file_name", "prediction_id",
-    "chunk_id", "chunk_offset", "chunk_confidence", "chunk_result", "chunk_duration",
+    "chunk_id", "chunk_offset",
+    "chunk_score", "chunk_confidence", "chunk_result", "chunk_duration",
     "audio_duration", "chunks_count", "processing_time_ms",
-    "global_confidence", "global_result", "created_at",
+    "global_score", "global_confidence", "global_result", "created_at",
 )
 
 
@@ -32,6 +37,7 @@ class ChunkRow:
     """One AnalysisResult flattened to its CSV-relevant fields."""
     offset_ms: int
     duration_ms: int
+    score: float
     confidence: float
     label: str
 
@@ -79,13 +85,17 @@ class ResultCSV:
         global_confidence = (
             sum(c.confidence for c in chunks) / chunks_count if chunks_count else 0.0
         )
+        global_score = (
+            sum(c.score for c in chunks) / chunks_count if chunks_count else 0.0
+        )
         created_at = datetime.now(timezone.utc).isoformat()
         for chunk_id, c in enumerate(chunks):
             self._writer.writerow([
                 file_name, session_id,
-                chunk_id, c.offset_ms, f"{c.confidence:.6f}", c.label, c.duration_ms,
+                chunk_id, c.offset_ms,
+                f"{c.score:.6f}", f"{c.confidence:.6f}", c.label, c.duration_ms,
                 audio_duration_ms, chunks_count, f"{processing_time_ms:.1f}",
-                f"{global_confidence:.6f}", global_result, created_at,
+                f"{global_score:.6f}", f"{global_confidence:.6f}", global_result, created_at,
             ])
 
     def close(self) -> None:
