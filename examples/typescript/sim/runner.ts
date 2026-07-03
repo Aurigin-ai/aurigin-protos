@@ -42,6 +42,47 @@ function log(sessionId: string, message: string): void {
   console.error(`[${sessionId}] ${message}`);
 }
 
+// Per-window label sentinels — kept as bare literals so the sim has no
+// runtime dependency on a producer enum module. Mirrors the Python
+// backend-simulator and deepfake-service.
+const LABEL_SILENCE = "silence";
+const LABEL_BONAFIDE = "bonafide";
+const LABEL_SPOOFED = "spoofed";
+const LABEL_PARTIALLY_SPOOFED = "partially_spoofed";
+const LABEL_UNKNOWN = "unknown";
+
+// Session-level decision threshold matching deepfake-service's default.
+const DECISION_THRESHOLD = 0.5;
+
+/**
+ * Aggregate the session over actionable windows only.
+ *
+ * Mirrors the deepfake-service aggregator (A1 rule): silence sentinels
+ * are excluded from the mean so their 0.0 scores don't bias the result
+ * toward bonafide; a session with both a spoofed-side and bonafide-side
+ * actionable window emits ``partially_spoofed``.
+ */
+function aggregateFinal(
+  actionableScores: number[],
+  analysisCount: number,
+): { overallScore: number; overallLabel: string } {
+  const overallScore = actionableScores.length > 0
+    ? actionableScores.reduce((a, b) => a + b, 0) / actionableScores.length
+    : 0.0;
+  if (analysisCount === 0) {
+    return { overallScore, overallLabel: LABEL_UNKNOWN };
+  }
+  if (actionableScores.length === 0) {
+    return { overallScore, overallLabel: LABEL_SILENCE };
+  }
+  const hasSpoof = actionableScores.some((s) => s >= DECISION_THRESHOLD);
+  const hasBona = actionableScores.some((s) => s < DECISION_THRESHOLD);
+  if (hasSpoof && hasBona) {
+    return { overallScore, overallLabel: LABEL_PARTIALLY_SPOOFED };
+  }
+  return { overallScore, overallLabel: hasSpoof ? LABEL_SPOOFED : LABEL_BONAFIDE };
+}
+
 const STATUS_CODE_BY_NAME: Record<string, number> = {
   OK: GrpcStatus.OK,
   CANCELLED: GrpcStatus.CANCELLED,
@@ -69,6 +110,9 @@ interface SessionState {
   lastScore: number;
   lastLabel: string;
   analysisCount: number;
+  // A1 (see aggregateFinal): scores from actionable windows only —
+  // silence sentinels are excluded so they don't bias the final mean.
+  actionableScores: number[];
 }
 
 interface TimelineItem {
@@ -233,6 +277,9 @@ function makeAnalysisResult(
   state.lastScore = score;
   state.lastLabel = label;
   state.analysisCount += 1;
+  if (label !== LABEL_SILENCE) {
+    state.actionableScores.push(score);
+  }
   return {
     analysisResult: {
       audioOffsetMs: BigInt(tMs),
@@ -353,6 +400,7 @@ export async function runSession(scenario: Scenario, call: Call): Promise<void> 
     lastScore: 0,
     lastLabel: "bonafide",
     analysisCount: 0,
+    actionableScores: [],
   };
 
   let firstResolved = false;
@@ -501,17 +549,20 @@ export async function runSession(scenario: Scenario, call: Call): Promise<void> 
   }
 
   const totalAudioMs = Math.max(state.accumulatedAudioMs, scenario.stream.durationMs);
-  const overallLabel = state.analysisCount > 0 ? state.lastLabel : "unknown";
+  // A1: aggregate over actionable windows only, matching deepfake-service.
+  const { overallScore, overallLabel } = aggregateFinal(
+    state.actionableScores, state.analysisCount,
+  );
   log(
     state.sessionId,
     // 'end  ' padded to verb width 5 — matches 'start' / 'fault'.
     `end   | total=${totalAudioMs}ms | analyses=${state.analysisCount} ` +
-      `| score=${state.lastScore.toFixed(3)} | label=${overallLabel}`,
+      `| score=${overallScore.toFixed(3)} | label=${overallLabel}`,
   );
   call.write({
     finalResult: {
       totalAudioMs: BigInt(totalAudioMs),
-      overallScore: state.lastScore,
+      overallScore,
       overallLabel,
       analysisCount: state.analysisCount,
     },
