@@ -74,10 +74,10 @@ breaking:
 
 generate: install
 	buf generate
-	# Ensure every Python sub-package is importable
+	@# Ensure every Python sub-package is importable
 	@find gen/py/aurigin gen/py/twilio -type d -exec touch {}/__init__.py \;
-	# Drop the repo LICENSE into each language package so it ships in the
-	# published tarball and PyPI / npm display the right SPDX identifier.
+	@# Drop the repo LICENSE into each language package so it ships in the
+	@# published tarball and PyPI / npm display the right SPDX identifier.
 	@cp LICENSE gen/py/LICENSE
 	@cp LICENSE gen/ts/LICENSE
 

@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "long": "^5.2.3",
-    "protobufjs": "^7.2.5"
+    "protobufjs": "^7.6.5"
   },
   "peerDependencies": {
     "@grpc/grpc-js": "^1.10.0"
