@@ -36,9 +36,9 @@
   "peerDependencies": {
     "@grpc/grpc-js": "^1.10.0"
   },
-  "trustedDependencies": [
-    "protobufjs"
-  ],
+  "allowScripts": {
+    "protobufjs@7.6.5": true
+  },
   "devDependencies": {
     "@grpc/grpc-js": "^1.10.0",
     "ts-proto": "^1.181.0",

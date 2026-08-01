@@ -19,9 +19,9 @@
     "@aurigin/protos": "^0.2.0",
     "@grpc/grpc-js": "^1.10.0"
   },
-  "trustedDependencies": [
-    "protobufjs"
-  ],
+  "allowScripts": {
+    "protobufjs@7.6.5": true
+  },
   "devDependencies": {
     "tsx": "^4.7.0",
     "typescript": "^5.4.0"
