@@ -26,11 +26,23 @@ import grpc
 
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2_grpc as pb_grpc
 
-from sim import Scenario, load_scenarios, run_session
+from .sim import Scenario, load_scenarios, run_session
 
 
-DEFAULT_SCENARIOS_DIR = Path(__file__).resolve().parent.parent / "scenarios"
-DEFAULT_TLS_DIR = Path(__file__).resolve().parent.parent / "certs"
+# Default paths resolve to the shared examples/ tree (scenarios + certs live
+# with the client examples so both language sims can reference them). The
+# Docker image overrides both via env — SCENARIOS_DIR points at the baked-in
+# /scenarios volume, and certs typically arrive via a mounted volume.
+# Walk from the package file:
+#   deepfake_simulator_service/server.py
+#     → parents[0] = deepfake_simulator_service/
+#     → parents[1] = src/
+#     → parents[2] = deepfake/
+#     → parents[3] = simulator/
+#     → parents[4] = examples/
+_EXAMPLES_DIR = Path(__file__).resolve().parents[4]
+DEFAULT_SCENARIOS_DIR = _EXAMPLES_DIR / "scenarios"
+DEFAULT_TLS_DIR = _EXAMPLES_DIR / "certs"
 
 
 def _load_tls() -> tuple[bytes, bytes] | None:

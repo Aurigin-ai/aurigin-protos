@@ -104,10 +104,17 @@ clean:
 
 # ─── run ─────────────────────────────────────────────────────────────────────
 
-# Stub DeepfakeDetection server on :50051 (fixed bonafide score, no ML).
+# The scenario-driven simulator lives in `examples/simulator/deepfake/`
+# now. `just server` used to run it from here; run it from that
+# directory instead:
+#   cd ../simulator/deepfake && uv run deepfake-simulator-service
+# or via docker-compose in that same directory. This recipe is kept
+# only to redirect anyone who muscle-memory-typed `just server`.
 [group('run')]
 server:
-    uv run server
+    @echo "server extracted to examples/simulator/deepfake/. Run:"
+    @echo "  cd ../simulator/deepfake && uv run deepfake-simulator-service"
+    @exit 1
 
 # Pass any client.py flag as a trailing argument:
 #   just client                                          # default target
@@ -134,13 +141,14 @@ phone-call *FLAGS:
 
 # ─── scenarios ──────────────────────────────────────────────────────────────
 
-# Uses the same loader the server uses, so the list always matches what the
-# server would accept via the x-scenario-id metadata header.
+# Uses the same loader the simulator uses, so the list always matches
+# what it accepts via the x-scenario-id metadata header. Imports the
+# loader from the extracted simulator package via a PYTHONPATH shim.
 #
 # List loadable scenarios as `<id>  <description>`.
 [group('scenarios')]
 scenarios:
-    @uv run python -c "from sim import load_scenarios; ss = load_scenarios('../scenarios'); [print(f'{s.id:38s}  {s.description}') for s in sorted(ss.values(), key=lambda s: s.id)]"
+    @PYTHONPATH="../simulator/deepfake/src:$PYTHONPATH" uv run python -c "from deepfake_simulator_service.sim import load_scenarios; ss = load_scenarios('../scenarios'); [print(f'{s.id:38s}  {s.description}') for s in sorted(ss.values(), key=lambda s: s.id)]"
 
 # Defaults to a 10-second call so most curves fire ≥1 analysis even on short
 # scenarios. Pass any phone_call.py flag as a trailing argument:
@@ -177,10 +185,14 @@ phone-call-burst N SCENARIO_ID *FLAGS:
 # discoverable in `just --list` and aliases stay in sync if the underlying
 # recipe signature changes.
 
-# Same as `just server`, but the server demands a client cert (mTLS).
+# Simulator now lives in `examples/simulator/deepfake/` — set MTLS=1 in
+# that directory instead:
+#   cd ../simulator/deepfake && MTLS=1 uv run deepfake-simulator-service
 [group('mtls')]
 mtls-server:
-    MTLS=1 just server
+    @echo "server extracted to examples/simulator/deepfake/. Run:"
+    @echo "  cd ../simulator/deepfake && MTLS=1 uv run deepfake-simulator-service"
+    @exit 1
 
 # Same as `just call`, but presents the example client cert.
 [group('mtls')]

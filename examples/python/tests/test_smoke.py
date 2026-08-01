@@ -1,12 +1,17 @@
 """End-to-end smoke test for the Python example.
 
-Spawns examples/python/server.py and runs examples/python/client.py
-against it. The client falls back to streaming 3 s of silence when
+Spawns the deepfake-simulator-service (canonical location:
+`examples/simulator/deepfake/`) and runs examples/python/client.py against
+it. The client falls back to streaming 3 s of silence when
 examples/audio/ is empty (always the case in CI), so this test exercises
 the full proto + gRPC wire path without needing any audio fixtures.
 
 Catches anything that breaks the example: proto field renames, message
-removals, RPC name changes, generated stub API shifts, server impl bugs.
+removals, RPC name changes, generated stub API shifts, simulator impl bugs.
+
+The simulator was extracted out of examples/python/ so both Python and
+TypeScript example clients drive the same reference implementation. This
+smoke test spawns it as a subprocess — no Docker required.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ import pytest
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = EXAMPLES_DIR.parent.parent
+SIMULATOR_SRC = REPO_ROOT / "examples" / "simulator" / "deepfake" / "src"
 
 
 def _free_port() -> int:
@@ -48,13 +54,17 @@ def _wait_for_port(port: int, timeout: float = 15.0) -> bool:
 
 @pytest.fixture
 def env() -> dict[str, str]:
-    """Environment with PYTHONPATH covering the generated stubs + example dir."""
+    """Environment with PYTHONPATH covering the generated stubs + example dir
+    + the simulator package src/ (so `python -m deepfake_simulator_service`
+    resolves without a full `uv sync` in CI).
+    """
     return {
         **os.environ,
         "PYTHONPATH": os.pathsep.join(
             [
                 str(REPO_ROOT / "gen" / "py"),
                 str(EXAMPLES_DIR),
+                str(SIMULATOR_SRC),
                 os.environ.get("PYTHONPATH", ""),
             ]
         ),
@@ -63,10 +73,11 @@ def env() -> dict[str, str]:
 
 @pytest.fixture
 def server(env: dict[str, str]):
-    """Spawn the example server on a free port and tear it down at the end."""
+    """Spawn the deepfake-simulator-service on a free port and tear it down
+    at the end."""
     port = _free_port()
     proc = subprocess.Popen(
-        [sys.executable, str(EXAMPLES_DIR / "server.py")],
+        [sys.executable, "-m", "deepfake_simulator_service"],
         env={**env, "PORT": str(port)},
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

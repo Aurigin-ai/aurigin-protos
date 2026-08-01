@@ -1,0 +1,31 @@
+# One-command local run for the deepfake simulator service.
+#
+#   cd examples/simulator/deepfake
+#   docker compose up --build
+#
+# Exposes 50051 on the host. Point any DetectDeepfake client (the Python /
+# TypeScript example clients under examples/, or your own) at
+# `localhost:50051` — insecure by default because no ./certs volume is
+# mounted. See README.md for TLS / mTLS overrides.
+
+services:
+  deepfake-simulator:
+    build:
+      # Context is examples/ (two directories up from this file) so the
+      # Dockerfile can `COPY scenarios /scenarios` and pick up the
+      # shared examples/scenarios/ tree.
+      context: ../..
+      dockerfile: simulator/deepfake/Dockerfile
+    image: aurigin/deepfake-simulator-service:local
+    container_name: deepfake-simulator
+    ports:
+      - "50051:50051"
+    environment:
+      PORT: "50051"
+      SCENARIO_DEFAULT: "default"
+      # Override the baked-in scenarios by mounting your own tree over
+      # /scenarios and pointing SCENARIOS_DIR at it. Uncomment:
+      # SCENARIOS_DIR: "/scenarios"
+    # volumes:
+    #   - ./custom-scenarios:/scenarios:ro
+    restart: unless-stopped

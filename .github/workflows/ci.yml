@@ -94,8 +94,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python build deps
-        # pyyaml + jsonschema are needed by examples/python/sim/loader.py at
-        # server startup (scenario YAML + schema validation).
+        # pyyaml + jsonschema are runtime deps of the deepfake simulator
+        # service (examples/simulator/deepfake/) — the sim/loader.py inside
+        # loads scenario YAML and validates against scenario.schema.json at
+        # startup. Kept on the system Python so both the Python and
+        # TypeScript smoke tests (both spawn the simulator as a subprocess)
+        # can import them without a per-language `uv sync`.
         run: pip install --upgrade build grpcio protobuf pytest pyyaml jsonschema
 
       - name: Generate stubs

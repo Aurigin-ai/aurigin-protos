@@ -1,12 +1,18 @@
-// End-to-end smoke test for the TS example.
+// End-to-end smoke test for the TS example clients.
 //
-// Spawns examples/typescript/server.ts and runs examples/typescript/client.ts
-// against it on a non-default port. The client falls back to streaming 3 s
-// of silence when examples/audio/ is empty (always the case in CI), so this
-// test exercises the full proto + gRPC wire path without needing fixtures.
+// Spawns the Python deepfake-simulator-service (canonical location:
+// examples/simulator/deepfake/) and runs the TypeScript client examples
+// against it on a non-default port. The client falls back to streaming
+// 3 s of silence when examples/audio/ is empty (always the case in CI),
+// so this test exercises the full proto + gRPC wire path without needing
+// fixtures.
 //
 // Catches anything that breaks the example: proto field renames, message
-// removals, RPC name changes, ts-proto API shifts, server impl bugs.
+// removals, RPC name changes, ts-proto API shifts, simulator impl bugs.
+//
+// Requires `python3` and the aurigin-deepfake-simulator-service package
+// importable on PYTHONPATH (or `uv sync`-ed at that location). CI does the
+// same via a small pre-test shell block.
 //
 // Run with: node --import tsx --test tests/smoke.test.ts
 
@@ -20,6 +26,9 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXAMPLES_DIR = path.resolve(__dirname, "..");
+const REPO_ROOT = path.resolve(EXAMPLES_DIR, "..", "..");
+const SIMULATOR_SRC = path.join(REPO_ROOT, "examples", "simulator", "deepfake", "src");
+const GEN_PY = path.join(REPO_ROOT, "gen", "py");
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -53,8 +62,15 @@ async function waitForPort(port: number, timeoutMs = 15_000): Promise<boolean> {
 }
 
 function startServer(port: number): ChildProcess {
-  return spawn("npx", ["tsx", path.join(EXAMPLES_DIR, "server.ts")], {
-    env: { ...process.env, PORT: String(port) },
+  // Spawn the canonical Python simulator. PYTHONPATH covers the generated
+  // protobuf stubs + the simulator package src/ so no `uv sync` or install
+  // is required — this matches how the Python smoke test spawns it.
+  return spawn("python3", ["-m", "deepfake_simulator_service"], {
+    env: {
+      ...process.env,
+      PORT: String(port),
+      PYTHONPATH: [GEN_PY, SIMULATOR_SRC, process.env.PYTHONPATH ?? ""].join(path.delimiter),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
 }

@@ -95,10 +95,12 @@ publish-py-codeartifact: build-py
 
 publish-codeartifact: publish-ts-codeartifact publish-py-codeartifact
 
-# End-to-end example smoke tests. Each spawns the example server on a free
-# port and runs the example client against it, asserting the proto + gRPC
-# wire path round-trips. Catches breakage from proto renames, stub API
-# shifts, and server impl regressions before they reach consumers.
+# End-to-end example smoke tests. Both language tests spawn the canonical
+# Python simulator (examples/simulator/deepfake/) as a subprocess on a
+# free port and run the language-specific example client against it,
+# asserting the proto + gRPC wire path round-trips. No Docker required.
+# Catches breakage from proto renames, stub API shifts, and simulator
+# impl regressions before they reach consumers.
 #
 # The Python target deliberately sidesteps examples/python/pyproject.toml
 # (which pins `aurigin-protos` to the CodeArtifact index and would need an
@@ -113,7 +115,13 @@ smoke-py: generate
 	  --with grpcio --with protobuf --with pyyaml --with jsonschema --with pytest \
 	  python -m pytest examples/python/tests/ -v
 
+# TS smoke spawns the Python simulator too. Install the simulator's
+# runtime deps into the runner's system Python so `python3 -m
+# deepfake_simulator_service` (invoked by tests/smoke.test.ts) can import
+# pyyaml + jsonschema. PYTHONPATH covers the generated stubs + the
+# simulator package src/ inside the test itself.
 smoke-ts: generate
+	uv pip install --system --quiet grpcio protobuf pyyaml jsonschema
 	cd examples/typescript && npm install --silent && npm test
 
 clean:

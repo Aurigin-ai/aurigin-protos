@@ -2,6 +2,17 @@
 
 Reference snippets showing how to consume the generated packages.
 
+> **Note**: the scenario-driven simulator server used to live at
+> `python/server.py` + `typescript/server.ts`. It's been extracted to a
+> single canonical Python implementation at
+> [`simulator/deepfake/`](simulator/deepfake/), packaged as
+> `aurigin-deepfake-simulator-service` with a Dockerfile and
+> docker-compose. The `python/` and `typescript/` trees under here are
+> now **client-only** — the smoke tests in both languages spawn the
+> Python simulator as a subprocess. Wherever this README says "run the
+> server", read: `cd examples/simulator/deepfake && uv run
+> deepfake-simulator-service` (or `docker compose up`).
+
 ## Python (with `uv`)
 
 [`uv`](https://github.com/astral-sh/uv) is the recommended Python package manager for this repo's consumers — it's a drop-in pip replacement that's ~10–100× faster and handles project venvs automatically.
@@ -14,21 +25,26 @@ Install once: `brew install uv`.
 uv venv                                   # create .venv/
 uv pip install aurigin-protos grpcio
 
-uv run python examples/python/server.py   # in one terminal
-uv run python examples/python/client.py   # in another
+uv run python -m deepfake_simulator_service                # in one terminal (see simulator/deepfake/)
+uv run python examples/python/client.py                    # in another
 ```
 
 ### Self-contained uv project
 
-The `examples/python/` directory ships a `pyproject.toml` so you can run it as a self-contained uv project. `[project.scripts]` defines `server`, `client`, `phone-call`, and `phone-call-burst` entry points, mirroring the TypeScript example's `npm run server` / `npm run client` / etc.:
+The `examples/python/` directory ships a `pyproject.toml` so you can run it as a self-contained uv project. `[project.scripts]` defines `client`, `phone-call`, and `phone-call-burst` entry points, mirroring the TypeScript example's `npm run client` / etc. The scenario-driven simulator server lives in `examples/simulator/deepfake/` — see that directory for `uv run deepfake-simulator-service`.
 
 ```bash
+# Terminal 1 — start the simulator
+cd examples/simulator/deepfake
+uv sync
+uv run deepfake-simulator-service          # scenario-driven simulator on :50051
+
+# Terminal 2 — run a client
 cd examples/python
-uv sync                                   # creates .venv/, installs deps
-uv run server                             # scenario-driven simulator on :50051
-uv run client                             # batch client → localhost:50051
-uv run phone-call                         # single live call (the integration pattern)
-uv run phone-call-burst -c 5              # N concurrent calls (load test / multi-call architecture)
+uv sync                                    # creates .venv/, installs deps
+uv run client                              # batch client → localhost:50051
+uv run phone-call                          # single live call (the integration pattern)
+uv run phone-call-burst -c 5               # N concurrent calls (load test / multi-call architecture)
 ```
 
 Shared helpers (WAV reader, CSV writer, TLS auto-detect, signal-handler) live under `examples/python/common/` and re-export through `from common import …` — the three CLI scripts above stay focused on what they're demonstrating, not on infra glue.
@@ -41,10 +57,13 @@ Shared helpers (WAV reader, CSV writer, TLS auto-detect, signal-handler) live un
 cd examples/python
 
 just sync                                 # uv sync
-just server                               # scenario-driven simulator on :50051
+# The `just server` recipe is gone — the simulator lives in
+# examples/simulator/deepfake/ and is run from there. See that
+# directory's README for `uv run deepfake-simulator-service`
+# or `docker compose up`.
 just client                               # client → localhost:50051
 just client 127.0.0.1:50051               # client → aurigin-router backend-simulator
-just smoke                                # end-to-end pytest
+just smoke                                # end-to-end pytest (spawns the simulator as a subprocess)
 ```
 
 ### For a downstream service
