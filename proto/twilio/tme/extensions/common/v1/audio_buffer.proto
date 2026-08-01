@@ -9,7 +9,16 @@ option java_package = "com.twilio.tme.extensions.common.v1";
 // Vendored copy of Twilio's AudioBuffer message used by Twilio Media
 // Extensions. Kept here so Aurigin services that consume Twilio media
 // streams can import it as a stable, locally-published proto.
+//
+// DEPRECATED as of aurigin-protos 0.3.0. New Aurigin-originated media
+// streams should use `aurigin.media.v1.AudioFrame`, which is
+// self-describing (codec + sample rate + channels on the message) and
+// avoids the free-form `format` string this message carries. This file
+// is retained for backwards compatibility with 0.2.x consumers and is
+// scheduled for removal in 0.4.0. See docs/audioframe-rollout-plan.md
+// in platform-backend-services.
 message AudioBuffer {
+  option deprecated = true;
   // audio type, always "audio/x-raw"
   string type = 1;
   // audio format, i.e. S16LE
