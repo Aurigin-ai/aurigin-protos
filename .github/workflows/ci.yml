@@ -54,6 +54,13 @@ jobs:
         with:
           node-version: '22'
 
+      # `uv` is needed by the TS smoke test — tests/smoke.test.ts spawns
+      # the Python simulator via `uv run --with …` so its runtime deps
+      # (grpcio/protobuf/pyyaml/jsonschema) resolve in an ephemeral env
+      # without a pre-install step. Same interpreter pin as the smoke-py
+      # target (Python 3.11).
+      - uses: astral-sh/setup-uv@v6
+
       - name: Generate stubs
         run: make generate
 

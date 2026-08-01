@@ -62,17 +62,30 @@ async function waitForPort(port: number, timeoutMs = 15_000): Promise<boolean> {
 }
 
 function startServer(port: number): ChildProcess {
-  // Spawn the canonical Python simulator. PYTHONPATH covers the generated
-  // protobuf stubs + the simulator package src/ so no `uv sync` or install
-  // is required — this matches how the Python smoke test spawns it.
-  return spawn("python3", ["-m", "deepfake_simulator_service"], {
-    env: {
-      ...process.env,
-      PORT: String(port),
-      PYTHONPATH: [GEN_PY, SIMULATOR_SRC, process.env.PYTHONPATH ?? ""].join(path.delimiter),
+  // Spawn the canonical Python simulator via `uv run --with …` so its
+  // runtime deps (grpcio/protobuf/pyyaml/jsonschema) resolve in an
+  // ephemeral env without needing a pre-install step. PYTHONPATH still
+  // covers the generated protobuf stubs + the simulator package src/.
+  // Mirrors the smoke-py Makefile target so both language jobs use the
+  // same "no persistent Python env" invocation, PEP 668-safe on macOS
+  // Homebrew Python 3.14 and clean on CI Ubuntu alike.
+  return spawn(
+    "uv",
+    [
+      "run", "--no-project", "--python", "3.11",
+      "--with", "grpcio", "--with", "protobuf",
+      "--with", "pyyaml", "--with", "jsonschema",
+      "python", "-m", "deepfake_simulator_service",
+    ],
+    {
+      env: {
+        ...process.env,
+        PORT: String(port),
+        PYTHONPATH: [GEN_PY, SIMULATOR_SRC, process.env.PYTHONPATH ?? ""].join(path.delimiter),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
 }
 
 function runProc(scriptPath: string, args: string[] = []): Promise<{ code: number | null; stdout: string; stderr: string }> {

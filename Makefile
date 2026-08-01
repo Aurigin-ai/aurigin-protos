@@ -115,13 +115,11 @@ smoke-py: generate
 	  --with grpcio --with protobuf --with pyyaml --with jsonschema --with pytest \
 	  python -m pytest examples/python/tests/ -v
 
-# TS smoke spawns the Python simulator too. Install the simulator's
-# runtime deps into the runner's system Python so `python3 -m
-# deepfake_simulator_service` (invoked by tests/smoke.test.ts) can import
-# pyyaml + jsonschema. PYTHONPATH covers the generated stubs + the
-# simulator package src/ inside the test itself.
+# TS smoke spawns the Python simulator too, but via `uv run --with …`
+# inside the test itself — no pre-install step needed. PYTHONPATH covers
+# the generated stubs + the simulator package src/. Requires `uv` on
+# PATH (the setup-uv action does that on CI).
 smoke-ts: generate
-	uv pip install --system --quiet grpcio protobuf pyyaml jsonschema
 	cd examples/typescript && npm install --silent && npm test
 
 clean:
