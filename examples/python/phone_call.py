@@ -30,7 +30,7 @@ from pathlib import Path
 
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2_grpc as pb_grpc
-from twilio.tme.extensions.common.v1 import audio_buffer_pb2 as ab_pb
+from aurigin.media.v1 import audio_frame_pb2 as af_pb
 
 from common import (
     ChunkRow, WavData, install_signal_shutdown, make_aio_channel, read_wav,
@@ -57,7 +57,7 @@ def _resolve_audio(arg: Path | None) -> Path:
 
 
 async def send_call(call, wav: WavData, chunk_ms: int, duration_s: float) -> None:
-    """Stream `wav` in real-time-paced AudioBuffer chunks until `duration_s` is up.
+    """Stream `wav` in real-time-paced AudioFrame chunks until `duration_s` is up.
 
     Also imported by phone_call_burst.py — same loop, just instantiated N times.
 
@@ -66,15 +66,15 @@ async def send_call(call, wav: WavData, chunk_ms: int, duration_s: float) -> Non
 
         async for frame in fork_socket:
             await call.write(pb.DetectDeepfakeRequest(
-                audio=ab_pb.AudioBuffer(
-                    type="audio/x-raw", format="S16LE",
-                    channels=1, rate=8000,
-                    duration_ns=int(len(frame) / 8000 * 1e9),
+                audio_frame=af_pb.AudioFrame(
+                    codec=af_pb.AUDIO_CODEC_S16LE,
+                    sample_rate_hz=8000,
+                    channels=1,
+                    payload=frame,
                     pts_ns=pts_ns,
-                    size=len(frame), buffer=frame,
                 ),
             ))
-            pts_ns += duration_ns
+            pts_ns += int(len(frame) / 2 / 1 / 8000 * 1e9)  # bytes_per_sample=2, channels=1
 
     No manual `asyncio.sleep` pacing needed in that version — the socket IS
     the clock. We loop a finite WAV here just so the example self-contains.
@@ -99,11 +99,12 @@ async def send_call(call, wav: WavData, chunk_ms: int, duration_s: float) -> Non
         duration_ns = int(actual_frames / wav.rate * 1e9)
 
         await call.write(pb.DetectDeepfakeRequest(
-            audio=ab_pb.AudioBuffer(
-                type="audio/x-raw", format=wav.wire_format,
-                channels=wav.channels, rate=wav.rate,
-                duration_ns=duration_ns, pts_ns=pts_ns,
-                size=len(chunk), buffer=chunk,
+            audio_frame=af_pb.AudioFrame(
+                codec=wav.audio_codec,
+                sample_rate_hz=wav.rate,
+                channels=wav.channels,
+                payload=chunk,
+                pts_ns=pts_ns,
             ),
         ))
         pts_ns += duration_ns
@@ -198,7 +199,7 @@ async def main() -> None:
         call = stub.DetectDeepfake(metadata=metadata) if metadata else stub.DetectDeepfake()
 
         # Send + receive concurrently: this is the bidi pattern. Sender writes
-        # AudioBuffer messages at real-time pace; receiver reads
+        # AudioFrame messages at real-time pace; receiver reads
         # AnalysisResult / FinalResult messages as the server emits them.
         # Wrapped in an inner coroutine so we can asyncio.create_task() it —
         # gather() returns a _GatheringFuture (not a coroutine), which

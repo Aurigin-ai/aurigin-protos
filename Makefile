@@ -115,12 +115,22 @@ smoke-py: generate
 	  --with grpcio --with protobuf --with pyyaml --with jsonschema --with pytest \
 	  python -m pytest examples/python/tests/ -v
 
-# TS smoke spawns the Python simulator too, but via `uv run --with …`
-# inside the test itself — no pre-install step needed. PYTHONPATH covers
+# TS smoke spawns the Python simulator via `uv run --with …` inside the
+# test itself — no per-language Python install needed. PYTHONPATH covers
 # the generated stubs + the simulator package src/. Requires `uv` on
-# PATH (the setup-uv action does that on CI).
-smoke-ts: generate
-	cd examples/typescript && npm install --silent && npm test
+# PATH (setup-uv action provides it on CI).
+#
+# Depends on `build-ts` so gen/ts/dist/ exists. We then `npm pack` the
+# built package into a tarball and `npm install --no-save` it into the
+# example — this side-steps the `file:` symlink pitfall where node's
+# ESM resolver follows the symlink to gen/ts/dist/ and can't find
+# @grpc/grpc-js because it was hoisted to the consumer's node_modules.
+# Tarball installs extract cleanly and deduplicate properly.
+smoke-ts: build-ts
+	cd gen/ts && npm pack --silent
+	cd examples/typescript && npm install --silent \
+	  && npm install --no-save --silent ../../gen/ts/aurigin-protos-*.tgz \
+	  && npm test
 
 clean:
 	rm -rf gen/ts/src gen/ts/dist gen/ts/node_modules

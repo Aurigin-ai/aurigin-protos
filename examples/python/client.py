@@ -15,7 +15,7 @@ from pathlib import Path
 
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2_grpc as pb_grpc
-from twilio.tme.extensions.common.v1 import audio_buffer_pb2 as ab_pb
+from aurigin.media.v1 import audio_frame_pb2 as af_pb
 
 from common import (
     ChunkRow, ResultCSV, WavData, make_sync_channel, read_wav, transport_label,
@@ -35,20 +35,20 @@ def _silent_session_iter():
     for _ in range(SILENCE_CHUNKS):
         samples = int(DEFAULT_RATE * CHUNK_MS / 1000)
         chunk = b"\x00\x00" * samples * CHANNELS
-        duration_ns = CHUNK_MS * 1_000_000
         yield pb.DetectDeepfakeRequest(
-            audio=ab_pb.AudioBuffer(
-                type="audio/x-raw", format="S16LE",
-                channels=CHANNELS, rate=DEFAULT_RATE,
-                duration_ns=duration_ns, pts_ns=pts_ns,
-                size=len(chunk), buffer=chunk,
+            audio_frame=af_pb.AudioFrame(
+                codec=af_pb.AUDIO_CODEC_S16LE,
+                sample_rate_hz=DEFAULT_RATE,
+                channels=CHANNELS,
+                payload=chunk,
+                pts_ns=pts_ns,
             ),
         )
-        pts_ns += duration_ns
+        pts_ns += CHUNK_MS * 1_000_000
 
 
 def _wav_session_iter(wav: WavData):
-    """Stream a WAV file (S16LE or F32LE) as CreateSession + AudioBuffer chunks."""
+    """Stream a WAV file (S16LE or F32LE) as CreateSession + AudioFrame chunks."""
     bytes_per_chunk = int(wav.rate * CHUNK_MS / 1000) * wav.bytes_per_sample
 
     yield pb.DetectDeepfakeRequest(create_session_request=pb.CreateSessionRequest())
@@ -59,16 +59,16 @@ def _wav_session_iter(wav: WavData):
         if not chunk:
             break
         actual_frames = len(chunk) // wav.bytes_per_sample
-        duration_ns = int(actual_frames / wav.rate * 1e9)
         yield pb.DetectDeepfakeRequest(
-            audio=ab_pb.AudioBuffer(
-                type="audio/x-raw", format=wav.wire_format,
-                channels=wav.channels, rate=wav.rate,
-                duration_ns=duration_ns, pts_ns=pts_ns,
-                size=len(chunk), buffer=chunk,
+            audio_frame=af_pb.AudioFrame(
+                codec=wav.audio_codec,
+                sample_rate_hz=wav.rate,
+                channels=wav.channels,
+                payload=chunk,
+                pts_ns=pts_ns,
             ),
         )
-        pts_ns += duration_ns
+        pts_ns += int(actual_frames / wav.rate * 1e9)
 
 
 def _run_session(stub, request_iter, label: str, csv_out: ResultCSV | None = None) -> None:

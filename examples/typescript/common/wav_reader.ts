@@ -1,4 +1,4 @@
-// Tiny RIFF reader supporting S16LE PCM + F32LE IEEE-float WAVs.
+// Tiny RIFF reader supporting linear PCM + IEEE-float + G.711 μ-law/A-law WAVs.
 //
 // Used by client.ts + phone_call.ts + phone_call_burst.ts — the WAV reader
 // is the one piece of "I/O glue" all three examples share. In a real
@@ -10,22 +10,48 @@
 // same validation, same error messages.
 
 import * as fs from "node:fs";
+import { AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
 
-// WAVE format tags. Anything else (μ-law, A-law, ADPCM, …) throws — the
-// deepfake-service decoder only accepts S16LE / F32LE today.
-const WAVE_FORMAT_PCM = 0x0001;
+// WAVE format tags per Microsoft's RIFF spec. Anything else (ADPCM, WMA, …)
+// throws — the deepfake-service decoder only accepts the codecs listed
+// below.
+const WAVE_FORMAT_PCM        = 0x0001;
 const WAVE_FORMAT_IEEE_FLOAT = 0x0003;
+const WAVE_FORMAT_ALAW       = 0x0006;
+const WAVE_FORMAT_MULAW      = 0x0007;
 
-export type WireFormat = "S16LE" | "F32LE";
+export type WireFormat = "S16LE" | "F32LE" | "PCMU" | "PCMA";
 
-// A WAV file's data chunk + the metadata the gRPC AudioBuffer needs.
+// Format-tag + bit-depth → (wire format string, bytes-per-sample) dispatch.
+// Key is `${tag}:${bits}` for string-map lookup. Bit-depth requirements
+// per WAV spec:
+//   PCM        → 16 (8-bit unsigned PCM is not a wire format we support)
+//   IEEE-float → 32
+//   μ-law/A-law → 8 (always, per G.711)
+const FORMAT_TABLE: Record<string, { wireFormat: WireFormat; bytesPerSample: number }> = {
+  [`${WAVE_FORMAT_PCM}:16`]:        { wireFormat: "S16LE", bytesPerSample: 2 },
+  [`${WAVE_FORMAT_IEEE_FLOAT}:32`]: { wireFormat: "F32LE", bytesPerSample: 4 },
+  [`${WAVE_FORMAT_MULAW}:8`]:       { wireFormat: "PCMU",  bytesPerSample: 1 },
+  [`${WAVE_FORMAT_ALAW}:8`]:        { wireFormat: "PCMA",  bytesPerSample: 1 },
+};
+
+const CODEC_FOR_WIRE_FORMAT: Record<WireFormat, AudioCodec> = {
+  S16LE: AudioCodec.AUDIO_CODEC_S16LE,
+  F32LE: AudioCodec.AUDIO_CODEC_F32LE,
+  PCMU:  AudioCodec.AUDIO_CODEC_PCMU,
+  PCMA:  AudioCodec.AUDIO_CODEC_PCMA,
+};
+
+// A WAV file's data chunk + the metadata the gRPC audio message needs.
 // `wireFormat` is the value that goes straight into `AudioBuffer.format`
-// — matching the deepfake-service decoder's vocabulary.
+// (legacy 0.2.x wire); `audioCodec` is the equivalent AudioCodec enum
+// for building AudioFrame (0.3.0+ wire).
 export interface WavData {
   samples: Buffer;
   rate: number;
   channels: number;
   wireFormat: WireFormat;
+  audioCodec: AudioCodec;
   bytesPerSample: number;  // per *sample*, not per frame — multiply by channels for frame size
 }
 
@@ -60,23 +86,21 @@ export function readWav(filePath: string): WavData {
   }
   if (dataStart < 0) throw new Error(`${filePath}: no data chunk`);
 
-  let wireFormat: WireFormat;
-  if (audioFormat === WAVE_FORMAT_PCM && bitsPerSample === 16) {
-    wireFormat = "S16LE";
-  } else if (audioFormat === WAVE_FORMAT_IEEE_FLOAT && bitsPerSample === 32) {
-    wireFormat = "F32LE";
-  } else {
+  const entry = FORMAT_TABLE[`${audioFormat}:${bitsPerSample}`];
+  if (!entry) {
     throw new Error(
-      `${filePath}: unsupported WAV (format tag ${audioFormat}, ${bitsPerSample}-bit) — ` +
-        `expected 16-bit PCM or 32-bit IEEE float`,
+      `${filePath}: unsupported WAV (format tag 0x${audioFormat.toString(16).padStart(4, "0")}, ` +
+        `${bitsPerSample}-bit) — expected one of: ` +
+        `16-bit PCM / 32-bit IEEE float / 8-bit μ-law / 8-bit A-law`,
     );
   }
   return {
     samples: buf.subarray(dataStart, dataStart + dataLen),
     rate: sampleRate,
     channels,
-    wireFormat,
-    bytesPerSample: bitsPerSample / 8,
+    wireFormat: entry.wireFormat,
+    audioCodec: CODEC_FOR_WIRE_FORMAT[entry.wireFormat],
+    bytesPerSample: entry.bytesPerSample,
   };
 }
 

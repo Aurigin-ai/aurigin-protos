@@ -73,12 +73,17 @@ jobs:
         run: npm pack
 
       - name: tsc strict check on examples
+        # The example ships with `@aurigin/protos: ^0.2.0` in package.json
+        # (matches the last publicly-published version). Override with the
+        # locally-built tarball via `--no-save` so tsc checks against the
+        # current proto surface (AudioFrame, AudioCodec) without needing
+        # the new version published yet.
         working-directory: examples/typescript
         run: |
           npm install --no-save ../../gen/ts/aurigin-protos-*.tgz tsx typescript @grpc/grpc-js
           npx tsc --noEmit
 
-      - name: Example end-to-end smoke test (server + client roundtrip)
+      - name: Example end-to-end smoke test (client → Python simulator roundtrip)
         working-directory: examples/typescript
         run: npm test
 

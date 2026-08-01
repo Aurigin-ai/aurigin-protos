@@ -34,6 +34,7 @@ import {
   type DetectDeepfakeRequest,
   type DetectDeepfakeResponse,
 } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+import { AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
 
 import {
   type ChunkRow,
@@ -80,7 +81,7 @@ function resolveAudio(arg: string | null): string {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// Stream `wav` in real-time-paced AudioBuffer chunks until `durationS` is up.
+// Stream `wav` in real-time-paced AudioFrame chunks until `durationS` is up.
 //
 // Also imported by phone_call_burst.ts — same loop, just instantiated N times.
 //
@@ -112,10 +113,12 @@ export async function sendCall(
     const durationNs = BigInt(Math.round((actualFrames / wav.rate) * 1e9));
 
     call.write({
-      audio: {
-        type: "audio/x-raw", format: wav.wireFormat,
-        channels: wav.channels, rate: wav.rate,
-        durationNs, ptsNs, size: BigInt(chunk.length), buffer: chunk,
+      audioFrame: {
+        codec: wav.audioCodec,
+        sampleRateHz: wav.rate,
+        channels: wav.channels,
+        payload: chunk,
+        ptsNs,
       },
     });
     ptsNs += durationNs;

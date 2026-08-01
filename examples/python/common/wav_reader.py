@@ -1,9 +1,13 @@
-"""Tiny RIFF reader supporting S16LE PCM + F32LE IEEE-float WAVs.
+"""Tiny RIFF reader supporting linear PCM + IEEE-float + G.711 μ-law/A-law WAVs.
 
-The stdlib `wave` module rejects float WAVs (raises on format tag 0x0003),
-so we parse RIFF ourselves and dispatch the audio_format tag to the wire
-formats the deepfake-service decoder accepts: S16LE (16-bit PCM) and
-F32LE (32-bit IEEE float).
+The stdlib `wave` module rejects anything that isn't 16-bit PCM (raises on
+float and μ/A-law format tags), so we parse RIFF ourselves and dispatch the
+audio_format tag to the wire formats the deepfake-service decoder accepts:
+
+  - `S16LE` — 16-bit signed linear PCM, little-endian (WAVE_FORMAT_PCM 0x0001)
+  - `F32LE` — 32-bit IEEE-float PCM,   little-endian (WAVE_FORMAT_IEEE_FLOAT 0x0003)
+  - `PCMU`  — G.711 μ-law, 8-bit                     (WAVE_FORMAT_MULAW 0x0007)
+  - `PCMA`  — G.711 A-law, 8-bit                     (WAVE_FORMAT_ALAW  0x0006)
 
 Used by client.py + phone_call.py + phone_call_burst.py — the WAV reader
 is the one piece of "I/O glue" all three examples share. In a real
@@ -18,10 +22,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-# WAVE format tags. Anything else (μ-law, A-law, ADPCM, …) raises ValueError —
-# the deepfake-service decoder only accepts S16LE / F32LE today.
-_WAVE_FORMAT_PCM = 0x0001
+# WAVE format tags per Microsoft's RIFF spec. Anything else (ADPCM, WMA, …)
+# raises ValueError — the deepfake-service decoder only accepts the codecs
+# listed below.
+_WAVE_FORMAT_PCM        = 0x0001
 _WAVE_FORMAT_IEEE_FLOAT = 0x0003
+_WAVE_FORMAT_ALAW       = 0x0006
+_WAVE_FORMAT_MULAW      = 0x0007
+
+# Format-tag → (wire_format string, bytes_per_sample) dispatch. The wire
+# format string matches AudioBuffer.format (legacy 0.2.x wire); the codec
+# enum for AudioFrame is resolved on demand via WavData.audio_codec.
+# Bit-depth requirements per WAV spec:
+#   PCM        → 16 (we don't support 8-bit unsigned PCM — that's a
+#                    separate wire format we can't ship raw to the model)
+#   IEEE-float → 32
+#   μ-law/A-law → 8 (always, per G.711)
+_FORMAT_TABLE: dict[tuple[int, int], tuple[str, int]] = {
+    (_WAVE_FORMAT_PCM,        16): ("S16LE", 2),
+    (_WAVE_FORMAT_IEEE_FLOAT, 32): ("F32LE", 4),
+    (_WAVE_FORMAT_MULAW,       8): ("PCMU",  1),
+    (_WAVE_FORMAT_ALAW,        8): ("PCMA",  1),
+}
 
 
 @dataclass(frozen=True)
@@ -29,8 +51,8 @@ class WavData:
     """A WAV file's data chunk + the metadata the gRPC audio message needs.
 
     `wire_format` is the value that goes straight into `AudioBuffer.format`
-    — "S16LE" or "F32LE" — matching the deepfake-service decoder's vocabulary
-    for the legacy Twilio-vendored AudioBuffer wire.
+    — "S16LE" / "F32LE" / "PCMU" / "PCMA" — matching the deepfake-service
+    decoder's vocabulary for the legacy Twilio-vendored AudioBuffer wire.
 
     `audio_codec` is the equivalent AudioCodec enum value for building
     `aurigin.media.v1.AudioFrame` messages (the new-in-0.3.0 wire shape).
@@ -38,12 +60,13 @@ class WavData:
     samples: bytes
     rate: int
     channels: int
-    wire_format: str  # "S16LE" | "F32LE"
+    wire_format: str  # "S16LE" | "F32LE" | "PCMU" | "PCMA"
+    _bytes_per_frame_sample: int = 2  # width in bytes of a single sample (per-channel)
 
     @property
     def bytes_per_sample(self) -> int:
-        """Bytes per audio frame (sample × channels). 2 for S16LE, 4 for F32LE."""
-        return (4 if self.wire_format == "F32LE" else 2) * self.channels
+        """Bytes per audio frame (sample-width × channels)."""
+        return self._bytes_per_frame_sample * self.channels
 
     @property
     def duration_s(self) -> float:
@@ -59,7 +82,12 @@ class WavData:
         pinned to aurigin-protos 0.2.x).
         """
         from aurigin.media.v1 import audio_frame_pb2 as af_pb
-        return af_pb.AUDIO_CODEC_F32LE if self.wire_format == "F32LE" else af_pb.AUDIO_CODEC_S16LE
+        return {
+            "S16LE": af_pb.AUDIO_CODEC_S16LE,
+            "F32LE": af_pb.AUDIO_CODEC_F32LE,
+            "PCMU":  af_pb.AUDIO_CODEC_PCMU,
+            "PCMA":  af_pb.AUDIO_CODEC_PCMA,
+        }[self.wire_format]
 
 
 def read_wav(path: Path) -> WavData:
@@ -96,16 +124,16 @@ def read_wav(path: Path) -> WavData:
     if data_start < 0:
         raise ValueError(f"{path.name}: no data chunk")
 
-    if audio_format == _WAVE_FORMAT_PCM and bits_per_sample == 16:
-        wire_format = "S16LE"
-    elif audio_format == _WAVE_FORMAT_IEEE_FLOAT and bits_per_sample == 32:
-        wire_format = "F32LE"
-    else:
+    key = (audio_format, bits_per_sample)
+    if key not in _FORMAT_TABLE:
         raise ValueError(
-            f"{path.name}: unsupported WAV (format tag {audio_format}, "
-            f"{bits_per_sample}-bit) — expected 16-bit PCM or 32-bit IEEE float",
+            f"{path.name}: unsupported WAV (format tag 0x{audio_format:04x}, "
+            f"{bits_per_sample}-bit) — expected one of: "
+            f"16-bit PCM / 32-bit IEEE float / 8-bit μ-law / 8-bit A-law",
         )
+    wire_format, bytes_per_frame_sample = _FORMAT_TABLE[key]
     return WavData(
         samples=buf[data_start : data_start + data_len],
         rate=rate, channels=channels, wire_format=wire_format,
+        _bytes_per_frame_sample=bytes_per_frame_sample,
     )
