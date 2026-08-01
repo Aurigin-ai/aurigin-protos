@@ -100,13 +100,13 @@ call.end();
 |---|---|---|
 | `AUDIO_CODEC_UNSPECIFIED = 0` | — | **Reject sentinel.** Receivers return `INVALID_ARGUMENT` — proto3 injects 0 on unset scalars, and this catches clients that forgot to set the field. |
 | `AUDIO_CODEC_S16LE = 1` | 16-bit signed linear PCM, LE | Teams Media Bot, FreeSWITCH `mod_audio_fork`, most SDKs. |
-| `AUDIO_CODEC_F32LE = 2` | 32-bit IEEE-float PCM, LE, [-1, +1] | `soundfile` / librosa export. |
-| `AUDIO_CODEC_L16 = 3`   | 16-bit signed linear PCM, **big-endian** | IETF L16 (RFC 3551) — Genesys AudioHook high-fidelity option. |
-| `AUDIO_CODEC_PCMU = 4`  | G.711 μ-law, 8-bit | Telco default — NICE VoiceStream, Genesys AudioHook default, SIPREC PT=0. |
-| `AUDIO_CODEC_PCMA = 5`  | G.711 A-law, 8-bit | European PSTN trunks and SIPREC PT=8. |
-| `AUDIO_CODEC_OPUS = 6`  | — (reserved) | Value stable from 0.3.0; decoder not shipped. Receivers reject with `UNIMPLEMENTED`. |
-| `AUDIO_CODEC_S24LE = 7` | 24-bit signed linear PCM, LE | Pro-audio and broadcast WAVs. |
-| `AUDIO_CODEC_S32LE = 8` | 32-bit signed linear PCM, LE | Same wire width as F32LE but integer, not float. |
+| `AUDIO_CODEC_S16BE = 2` | 16-bit signed linear PCM, **big-endian** | Wire-compatible with IETF L16 (RFC 3551, `audio/L16`) — Genesys AudioHook high-fidelity option. |
+| `AUDIO_CODEC_S24LE = 3` | 24-bit signed linear PCM, LE | Pro-audio and broadcast WAVs. |
+| `AUDIO_CODEC_S32LE = 4` | 32-bit signed linear PCM, LE | Same wire width as F32LE but integer, not float. |
+| `AUDIO_CODEC_F32LE = 5` | 32-bit IEEE-float PCM, LE, [-1, +1] | `soundfile` / librosa export. |
+| `AUDIO_CODEC_PCMU = 6`  | G.711 μ-law, 8-bit | Telco default — NICE VoiceStream, Genesys AudioHook default, SIPREC PT=0. |
+| `AUDIO_CODEC_PCMA = 7`  | G.711 A-law, 8-bit | European PSTN trunks and SIPREC PT=8. |
+| `AUDIO_CODEC_OPUS = 8`  | — (reserved) | Value stable from 0.3.0; decoder not shipped. Receivers reject with `UNIMPLEMENTED`. |
 
 ### Migrating from `AudioBuffer` (0.2.x → 0.3.0)
 

@@ -129,7 +129,7 @@ Requires `ffmpeg` on `$PATH`. The output `.wav` is gitignored along with all oth
 
 ```bash
 # Against backend-app's gRPC server (assumes a real ML server on :50051)
-uv run phone-call --duration 30 --chunk-ms 100 --audio audio/your_call.wav
+uv run phone-call --duration 30 --chunk-ms 20 --audio audio/your_call.wav
 
 # Or pick the first .wav in examples/audio/ automatically
 uv run phone-call --duration 30
@@ -309,13 +309,13 @@ message AudioFrame {
 |---|---|
 | `AUDIO_CODEC_UNSPECIFIED = 0` | **Reject sentinel.** proto3 injects 0 when the client forgets to set the field; the simulator (and every real deepfake receiver) returns `INVALID_ARGUMENT` on receipt so the bug surfaces on frame 1. Never a valid runtime codec. |
 | `AUDIO_CODEC_S16LE = 1` | 16-bit signed linear PCM, little-endian. What Teams' Media Bot host, FreeSWITCH `mod_audio_fork`, and most SDKs emit after their own decode. 2 bytes/sample. |
-| `AUDIO_CODEC_F32LE = 2` | 32-bit IEEE-float PCM, little-endian, samples in `[-1, +1]`. What `soundfile` / librosa export for high-precision recordings. 4 bytes/sample. |
-| `AUDIO_CODEC_L16 = 3`   | 16-bit signed linear PCM, **big-endian** (IETF L16 per RFC 3551 — Genesys AudioHook's high-fidelity option). Distinct from S16LE. |
-| `AUDIO_CODEC_PCMU = 4`  | G.711 μ-law, 8-bit — telco default (NICE VoiceStream, Genesys AudioHook default, SIPREC PT=0). 1 byte/sample. |
-| `AUDIO_CODEC_PCMA = 5`  | G.711 A-law, 8-bit — European PSTN trunks and SIPREC PT=8. 1 byte/sample. |
-| `AUDIO_CODEC_OPUS = 6`  | Opus (RFC 6716). **Reserved from 0.3.0** so the enum value is stable for future clients; the decoder is not shipped in this wave. Receivers reject with `UNIMPLEMENTED`. |
-| `AUDIO_CODEC_S24LE = 7` | 24-bit signed linear PCM, little-endian, packed 3-bytes-per-sample. Common in pro-audio and broadcast WAVs. Deepfake decodes via a vectorised numpy pad-to-int32 + astype-to-float32 pass. 3 bytes/sample. |
-| `AUDIO_CODEC_S32LE = 8` | 32-bit signed linear PCM, little-endian. Same wire width as F32LE but different interpretation (integer, not float). Deepfake decodes via a single vectorised numpy int32→float32 pass. 4 bytes/sample. |
+| `AUDIO_CODEC_S16BE = 2` | 16-bit signed linear PCM, **big-endian**. Wire-compatible with IETF L16 (RFC 3551, `audio/L16`) — Genesys AudioHook's high-fidelity option. 2 bytes/sample. |
+| `AUDIO_CODEC_S24LE = 3` | 24-bit signed linear PCM, little-endian, packed 3-bytes-per-sample. Common in pro-audio and broadcast WAVs. Deepfake decodes via a vectorised numpy pad-to-int32 + astype-to-float32 pass. 3 bytes/sample. |
+| `AUDIO_CODEC_S32LE = 4` | 32-bit signed linear PCM, little-endian. Same wire width as F32LE but different interpretation (integer, not float). Deepfake decodes via a single vectorised numpy int32→float32 pass. 4 bytes/sample. |
+| `AUDIO_CODEC_F32LE = 5` | 32-bit IEEE-float PCM, little-endian, samples in `[-1, +1]`. What `soundfile` / librosa export for high-precision recordings. 4 bytes/sample. |
+| `AUDIO_CODEC_PCMU = 6`  | G.711 μ-law, 8-bit — telco default (NICE VoiceStream, Genesys AudioHook default, SIPREC PT=0). 1 byte/sample. |
+| `AUDIO_CODEC_PCMA = 7`  | G.711 A-law, 8-bit — European PSTN trunks and SIPREC PT=8. 1 byte/sample. |
+| `AUDIO_CODEC_OPUS = 8`  | Opus (RFC 6716). **Reserved from 0.3.0** so the enum value is stable for future clients; the decoder is not shipped in this wave. Receivers reject with `UNIMPLEMENTED`. |
 
 ### `AudioBuffer` — deprecated
 

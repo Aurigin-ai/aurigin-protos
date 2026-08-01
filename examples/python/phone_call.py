@@ -14,7 +14,7 @@ sibling `phone_call_burst.py`.
 
 CLI:
     python phone_call.py [--audio FILE] [--target localhost:50051]
-                         [--chunk-ms 100] [--duration 30]
+                         [--chunk-ms 20] [--duration 30]
                          [--scenario-id ID]
 
 Defaults:
@@ -37,7 +37,11 @@ from common import (
     transport_label,
 )
 
-DEFAULT_CHUNK_MS = 100
+# 20 ms matches RTP wire packetization (RFC 3551 ptime=20 for PCMU/PCMA)
+# and every real ingress we care about — Twilio Media Streams, Genesys
+# AudioHook, NICE VoiceStream, FreeSWITCH mod_audio_fork default, Teams
+# Media Bot. Overridable via --chunk-ms for perf experiments.
+DEFAULT_CHUNK_MS = 20
 DEFAULT_DURATION_S = 30.0
 
 

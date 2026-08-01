@@ -32,7 +32,7 @@ message AudioFrame {
   uint32 channels = 3;
 
   // The audio bytes, encoded per `codec`. Length interpretation:
-  //   - S16LE / L16:  2 * samples * channels
+  //   - S16LE / S16BE:  2 * samples * channels
   //   - F32LE:        4 * samples * channels
   //   - PCMU / PCMA:  1 * samples * channels
   //   - OPUS:         opus-frame length (variable)
@@ -51,11 +51,10 @@ message AudioFrame {
   optional uint64 sequence = 6;
 }
 
-// Wire codec of an AudioFrame.payload byte string. The enum is
-// intentionally small — one entry per codec Aurigin's deepfake service
-// can decode natively (linear PCM variants + G.711) plus a reserved
-// slot for Opus. New codecs should be added at the end with the next
-// unused number; do not reuse retired numbers.
+// Wire codec of an AudioFrame.payload byte string. Grouped by family:
+// linear PCM signed integer (LE + BE), IEEE float, G.711 telco, then
+// reserved compressed codecs. New codecs should be added at the end
+// with the next unused number; do not reuse retired numbers.
 enum AudioCodec {
   // Zero-value sentinel. proto3 requires enums to define a zero
   // entry; we deliberately name it UNSPECIFIED (rather than aliasing a
@@ -64,48 +63,57 @@ enum AudioCodec {
   // runtime codec — receivers MUST reject with INVALID_ARGUMENT.
   AUDIO_CODEC_UNSPECIFIED = 0;
 
-  // 16-bit signed linear PCM, little-endian. The format gstreamer +
-  // Twilio Media Streams emit; also what Teams Media Bot host and
-  // FreeSWITCH mod_audio_fork produce after their own decode. 2 bytes
-  // per sample.
+  // ── Linear PCM, signed integer (endian encoded in the name) ─────
+  // Uniform S<bits><endian> naming so the family is obvious at a
+  // glance. Byte order matters: S16LE and S16BE carry the same
+  // sample width but opposite byte order — receivers must not
+  // confuse them.
+
+  // 16-bit signed linear PCM, little-endian. What gstreamer + Twilio
+  // Media Streams emit; also what Teams Media Bot host and FreeSWITCH
+  // mod_audio_fork produce after their own decode. 2 bytes per sample.
   AUDIO_CODEC_S16LE = 1;
 
-  // 32-bit IEEE float PCM, little-endian, samples in [-1, +1]. What
-  // `soundfile` / librosa export for high-precision recordings. 4
-  // bytes per sample.
-  AUDIO_CODEC_F32LE = 2;
-
-  // 16-bit signed linear PCM, BIG-endian. IETF L16 per RFC 3551 —
-  // Genesys AudioHook's high-fidelity option. Distinct from S16LE
-  // because the byte order is opposite; receivers must not confuse
-  // them.
-  AUDIO_CODEC_L16 = 3;
-
-  // G.711 μ-law, 8-bit logarithmic companding. The telco default —
-  // NICE VoiceStream, Genesys AudioHook default, SIPREC PT=0 payload
-  // type. 1 byte per sample.
-  AUDIO_CODEC_PCMU = 4;
-
-  // G.711 A-law, 8-bit logarithmic companding. Telco variant used on
-  // European PSTN trunks and SIPREC PT=8 payload type. 1 byte per
-  // sample.
-  AUDIO_CODEC_PCMA = 5;
-
-  // Opus (RFC 6716), variable bitrate wideband codec. Reserved from
-  // 0.3.0 so the enum value is stable for future clients; the
-  // decoder is not shipped in this wave (see the AudioFrame rollout
-  // plan §"OPUS handling"). Receivers that don't yet implement Opus
-  // decoding MUST reject with UNIMPLEMENTED.
-  AUDIO_CODEC_OPUS = 6;
+  // 16-bit signed linear PCM, big-endian. Wire-compatible with IETF
+  // L16 (RFC 3551, media type `audio/L16`) — Genesys AudioHook's
+  // high-fidelity option. 2 bytes per sample.
+  AUDIO_CODEC_S16BE = 2;
 
   // 24-bit signed linear PCM, little-endian, packed 3-bytes-per-sample.
   // Common in pro-audio and broadcast WAVs. Deepfake decodes via a
   // vectorised numpy pad-to-int32 + astype-to-float32 pass — single
   // allocation, no per-sample Python.
-  AUDIO_CODEC_S24LE = 7;
+  AUDIO_CODEC_S24LE = 3;
 
   // 32-bit signed linear PCM, little-endian. Same wire width as F32LE
   // but different interpretation (integer, not float). Deepfake decodes
   // via a single vectorised numpy int32→float32 pass.
-  AUDIO_CODEC_S32LE = 8;
+  AUDIO_CODEC_S32LE = 4;
+
+  // ── IEEE float PCM ──────────────────────────────────────────────
+
+  // 32-bit IEEE-float PCM, little-endian, samples in [-1, +1]. What
+  // `soundfile` / librosa export for high-precision recordings. 4
+  // bytes per sample.
+  AUDIO_CODEC_F32LE = 5;
+
+  // ── G.711 telco ─────────────────────────────────────────────────
+
+  // G.711 μ-law, 8-bit logarithmic companding. The telco default —
+  // NICE VoiceStream, Genesys AudioHook default, SIPREC PT=0 payload
+  // type. 1 byte per sample.
+  AUDIO_CODEC_PCMU = 6;
+
+  // G.711 A-law, 8-bit logarithmic companding. Telco variant used on
+  // European PSTN trunks and SIPREC PT=8 payload type. 1 byte per
+  // sample.
+  AUDIO_CODEC_PCMA = 7;
+
+  // ── Compressed (reserved) ───────────────────────────────────────
+
+  // Opus (RFC 6716), variable bitrate wideband codec. Reserved from
+  // 0.3.0 so the enum value is stable for future clients; the
+  // decoder is not shipped in this wave. Receivers that don't yet
+  // implement Opus decoding MUST reject with UNIMPLEMENTED.
+  AUDIO_CODEC_OPUS = 8;
 }

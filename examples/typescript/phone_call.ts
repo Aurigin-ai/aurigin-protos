@@ -15,7 +15,7 @@
 //
 // CLI:
 //   tsx phone_call.ts [--audio FILE] [--target localhost:50051]
-//                     [--chunk-ms 100] [--duration 30]
+//                     [--chunk-ms 20] [--duration 30]
 //                     [--scenario-id ID]
 //
 // Defaults:
@@ -46,7 +46,11 @@ import {
   transportLabel,
 } from "./common/index.js";
 
-const DEFAULT_CHUNK_MS = 100;
+// 20 ms matches RTP wire packetization (RFC 3551 ptime=20 for PCMU/PCMA)
+// and every real ingress we care about — Twilio Media Streams, Genesys
+// AudioHook, NICE VoiceStream, FreeSWITCH mod_audio_fork default, Teams
+// Media Bot. Overridable via --chunk-ms for perf experiments.
+const DEFAULT_CHUNK_MS = 20;
 const DEFAULT_DURATION_S = 30;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
