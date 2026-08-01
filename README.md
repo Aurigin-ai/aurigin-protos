@@ -42,7 +42,8 @@ uv pip install aurigin-protos
 aurigin-protos/
 ├── proto/                    # .proto sources, mirrored by package path:
 │   ├── aurigin/deepfake_detection/v1/deepfake_detection.proto
-│   └── twilio/tme/extensions/common/v1/audio_buffer.proto  # vendored Twilio Media Extensions type
+│   ├── aurigin/media/v1/audio_frame.proto                  # AudioFrame + AudioCodec enum (new in 0.3.0)
+│   └── twilio/tme/extensions/common/v1/audio_buffer.proto  # vendored Twilio Media Extensions type (deprecated as of 0.3.0)
 ├── gen/
 │   ├── ts/                   # TypeScript package (ts-proto + @grpc/grpc-js)
 │   │   ├── package.json
@@ -167,6 +168,10 @@ npm install @aurigin/protos @grpc/grpc-js
 ```ts
 import { credentials } from "@grpc/grpc-js";
 import { DeepfakeDetectionClient } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+// New in 0.3.0 — self-describing audio frame (codec / sample_rate_hz /
+// channels on the message). Preferred over the deprecated Twilio-vendored
+// AudioBuffer for all new integrations.
+import { AudioFrame, AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
 
 const client = new DeepfakeDetectionClient(
   "localhost:50051",
@@ -174,7 +179,8 @@ const client = new DeepfakeDetectionClient(
 );
 ```
 
-Full server + client snippets: [examples/typescript/](examples/typescript/).
+Full client snippets: [examples/typescript/](examples/typescript/).
+Simulator server: [examples/simulator/deepfake/](examples/simulator/deepfake/).
 
 > *Aurigin engineers who need to install from the internal CodeArtifact channel (e.g. to pick up a tagged version before it has been promoted to public npm): see [`infra/aws/`](infra/aws/) for the connection details.*
 
@@ -186,10 +192,17 @@ uv pip install aurigin-protos
 
 ```python
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2, deepfake_detection_pb2_grpc
-from twilio.tme.extensions.common.v1 import audio_buffer_pb2
+# New in 0.3.0 — self-describing audio frame (codec / sample_rate_hz /
+# channels on the message). Preferred over the deprecated Twilio-vendored
+# AudioBuffer for all new integrations.
+from aurigin.media.v1 import audio_frame_pb2
+# Deprecated — kept importable so 0.2.x consumers keep working. Scheduled
+# for removal in 0.4.0.
+from twilio.tme.extensions.common.v1 import audio_buffer_pb2  # noqa: F401
 ```
 
-Full server + client snippets: [examples/python/](examples/python/).
+Full client snippets: [examples/python/](examples/python/).
+Simulator server: [examples/simulator/deepfake/](examples/simulator/deepfake/).
 
 > *Aurigin engineers who need to install from the internal CodeArtifact channel (e.g. to pick up a tagged version before it has been promoted to public PyPI, or to keep build inputs inside the AWS perimeter): see [`infra/aws/`](infra/aws/) for the connection details.*
 

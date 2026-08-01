@@ -96,7 +96,7 @@ FINAL    | total=3000ms   | score=0.050 | label=bonafide
 
 The session id is generated per session (`sim-<8 hex>`) and the cadence comes from the loaded scenario (1 s by default). Pass `--scenario-id <id>` to `phone-call` to load a different scenario from `examples/scenarios/`.
 
-To run against real audio (real ML server required, e.g. backend-app's gRPC service), drop one or more `.wav` files into `examples/audio/` and re-run the client. Both 16-bit PCM (`S16LE`) and 32-bit IEEE-float (`F32LE`) WAVs are accepted, at any sample rate and channel count — the client reads the format tag from the RIFF header and tags the outgoing `AudioBuffer.format` accordingly. It opens one session per file. The `audio/` dir is gitignored.
+To run against real audio (real ML server required, e.g. backend-app's gRPC service), drop one or more `.wav` files into `examples/audio/` and re-run the client. Both 16-bit PCM (`S16LE`) and 32-bit IEEE-float (`F32LE`) WAVs are accepted, at any sample rate and channel count — the client reads the format tag from the RIFF header and stamps the outgoing message's codec accordingly (`AudioFrame.codec` on the new 0.3.0 wire, or legacy `AudioBuffer.format` on the deprecated 0.2.x path — see [Wire messages](#wire-messages--audioframe-new-in-030-and-audiobuffer-deprecated) below). It opens one session per file. The `audio/` dir is gitignored.
 
 Files:
 - `simulator/deepfake/` — **canonical scenario-driven simulator**, extracted here so both Python and TypeScript clients drive the same reference implementation. Packaged as `aurigin-deepfake-simulator-service` with a Dockerfile + docker-compose. Loads YAML scenarios from `examples/scenarios/` at startup, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Listens on `[::]:50051`. Env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`. See its own README for `uv run deepfake-simulator-service` and `docker compose up --build`.
@@ -268,6 +268,125 @@ Files:
 | `oneof response { ... }` | discriminated optional fields on the message (e.g. `response.analysisResult`) |
 
 Deep imports use the proto path: `@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection`.
+
+## Wire messages — `AudioFrame` (new in 0.3.0) and `AudioBuffer` (deprecated)
+
+`DetectDeepfakeRequest.oneof request` accepts three alternatives — one
+for session setup and **two shapes for audio frames**:
+
+```proto
+message DetectDeepfakeRequest {
+  oneof request {
+    CreateSessionRequest              create_session_request = 1;
+    twilio.tme.extensions.common.v1.AudioBuffer  audio       = 2 [deprecated = true];  // legacy 0.2.x shape
+    aurigin.media.v1.AudioFrame                  audio_frame = 3;                       // new in 0.3.0 — preferred
+  }
+}
+```
+
+### `AudioFrame` — the recommended shape
+
+Self-describing: `codec` + `sample_rate_hz` + `channels` ride on every
+message, so no session-open coordination or free-form format string is
+needed. The codec may even change mid-stream (e.g. Teams SDP renegotiation)
+without a wire break.
+
+```proto
+message AudioFrame {
+  AudioCodec codec        = 1;
+  uint32     sample_rate_hz = 2;   // 8000 / 16000 / 48000
+  uint32     channels      = 3;   // 1 at Aurigin edge today; kept for headroom
+  bytes      payload       = 4;   // the audio bytes
+
+  optional uint64 pts_ns   = 5;   // presentation timestamp, advisory
+  optional uint64 sequence = 6;   // monotonic per-stream, gap detection
+}
+```
+
+### `AudioCodec` — the enum
+
+| Value | Notes |
+|---|---|
+| `AUDIO_CODEC_UNSPECIFIED = 0` | **Reject sentinel.** proto3 injects 0 when the client forgets to set the field; the simulator (and every real deepfake receiver) returns `INVALID_ARGUMENT` on receipt so the bug surfaces on frame 1. Never a valid runtime codec. |
+| `AUDIO_CODEC_S16LE = 1` | 16-bit signed linear PCM, little-endian. What Teams' Media Bot host, FreeSWITCH `mod_audio_fork`, and most SDKs emit after their own decode. 2 bytes/sample. |
+| `AUDIO_CODEC_F32LE = 2` | 32-bit IEEE-float PCM, little-endian, samples in `[-1, +1]`. What `soundfile` / librosa export for high-precision recordings. 4 bytes/sample. |
+| `AUDIO_CODEC_L16 = 3`   | 16-bit signed linear PCM, **big-endian** (IETF L16 per RFC 3551 — Genesys AudioHook's high-fidelity option). Distinct from S16LE. |
+| `AUDIO_CODEC_PCMU = 4`  | G.711 μ-law, 8-bit — telco default (NICE VoiceStream, Genesys AudioHook default, SIPREC PT=0). 1 byte/sample. |
+| `AUDIO_CODEC_PCMA = 5`  | G.711 A-law, 8-bit — European PSTN trunks and SIPREC PT=8. 1 byte/sample. |
+| `AUDIO_CODEC_OPUS = 6`  | Opus (RFC 6716). **Reserved from 0.3.0** so the enum value is stable for future clients; the decoder is not shipped in this wave. Receivers reject with `UNIMPLEMENTED`. |
+
+### `AudioBuffer` — deprecated
+
+The Twilio-vendored `AudioBuffer` message still works — 0.2.x consumers
+don't have to change anything to keep talking to a 0.3.0+ server. It's
+marked `[deprecated = true]` and scheduled for removal in **0.4.0**.
+Its free-form `format` string field carries codec identity in the old
+shape (`"S16LE"` / `"F32LE"` only — telco codecs were never accepted
+through this path).
+
+### Building an `AudioFrame` — Python
+
+```python
+from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
+from aurigin.media.v1 import audio_frame_pb2 as af
+
+req = pb.DetectDeepfakeRequest(
+    audio_frame=af.AudioFrame(
+        codec=af.AUDIO_CODEC_PCMU,       # G.711 μ-law
+        sample_rate_hz=8000,
+        channels=1,
+        payload=ulaw_bytes,              # raw wire bytes — no client-side decode
+        # pts_ns / sequence optional
+    ),
+)
+```
+
+The `examples/python/common/wav_reader.py` `WavData` helper exposes an
+`audio_codec` property that returns the matching `AudioCodec` value
+(S16LE or F32LE) so client code doesn't have to repeat the
+format→enum mapping.
+
+### Building an `AudioFrame` — TypeScript
+
+```ts
+import { DetectDeepfakeRequest } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+import { AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
+
+const req: DetectDeepfakeRequest = {
+  request: {
+    $case: "audioFrame",
+    audioFrame: {
+      codec: AudioCodec.AUDIO_CODEC_PCMU,
+      sampleRateHz: 8000,
+      channels: 1,
+      payload: ulawBytes,
+    },
+  },
+};
+```
+
+### Migration guidance
+
+- **New integrations**: use `audio_frame`. Full stop.
+- **Existing 0.2.x consumers**: keep working with `audio` (AudioBuffer)
+  until you're ready to migrate. Field-for-field mapping:
+
+  | AudioBuffer field | AudioFrame equivalent |
+  |---|---|
+  | `format = "S16LE"` string | `codec = AUDIO_CODEC_S16LE` enum |
+  | `format = "F32LE"` string | `codec = AUDIO_CODEC_F32LE` enum |
+  | `rate` | `sample_rate_hz` |
+  | `channels` | `channels` |
+  | `buffer` | `payload` |
+  | `pts_ns` | `pts_ns` (unchanged) |
+  | `duration_ns` | *derived by the receiver* from `len(payload) / bytes_per_sample / channels / sample_rate_hz` |
+  | `type = "audio/x-raw"` | *dropped* (was always the same constant) |
+  | `size` | *dropped* (redundant with `len(payload)`) |
+
+- **Simulator behaviour**: `examples/simulator/deepfake/` accepts both
+  wire shapes on the same server, so a mixed-consumer environment
+  (some clients on 0.2.x, others on 0.3.0) works without a coordinated
+  cut-over.
 
 ## TLS (on by default) and mTLS (opt-in)
 
