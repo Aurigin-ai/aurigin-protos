@@ -143,6 +143,13 @@ def test_client_silence_roundtrip(server, env: dict[str, str], tmp_path):
         # gives us roundtrip coverage on the default scenario, separate
         # from the backend_simulation tail-strategy assertions.
         ("test_call_10s_tail.wav", "16000Hz/1ch S16LE"),
+        # G.711 μ-law 8 kHz mono — exercises the new-in-0.3.0 PCMU
+        # codec branch (both the WAV reader's format-tag dispatch AND
+        # AudioFrame.codec=AUDIO_CODEC_PCMU on the wire, decoded
+        # server-side by the deepfake simulator's ULAW LUT).
+        ("test_call_mulaw.wav", "8000Hz/1ch PCMU"),
+        # G.711 A-law 8 kHz mono — same as above for the PCMA branch.
+        ("test_call_alaw.wav", "8000Hz/1ch PCMA"),
     ],
 )
 def test_phone_call_wav_roundtrip(server, env: dict[str, str], fixture_name: str, expected_header: str):

@@ -161,6 +161,12 @@ const phoneCallFixtures: { name: string; file: string; header: RegExp }[] = [
   // backend_simulation tests below); default-scenario roundtrip coverage
   // here, separate from the tail-strategy assertions there.
   { name: "S16LE 16 kHz mono (10s tail)", file: "test_call_10s_tail.wav", header: /16000Hz\/1ch S16LE/ },
+  // G.711 μ-law 8 kHz mono — exercises the new-in-0.3.0 PCMU codec
+  // branch (both the WAV reader's format-tag dispatch AND
+  // AudioFrame.codec=AUDIO_CODEC_PCMU on the wire).
+  { name: "PCMU 8 kHz mono", file: "test_call_mulaw.wav", header: /8000Hz\/1ch PCMU/ },
+  // G.711 A-law 8 kHz mono — same as above for the PCMA branch.
+  { name: "PCMA 8 kHz mono", file: "test_call_alaw.wav", header: /8000Hz\/1ch PCMA/ },
 ];
 
 for (const { name, file, header } of phoneCallFixtures) {
