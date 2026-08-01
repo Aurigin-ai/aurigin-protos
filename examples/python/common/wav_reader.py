@@ -26,10 +26,14 @@ _WAVE_FORMAT_IEEE_FLOAT = 0x0003
 
 @dataclass(frozen=True)
 class WavData:
-    """A WAV file's data chunk + the metadata the gRPC AudioBuffer needs.
+    """A WAV file's data chunk + the metadata the gRPC audio message needs.
 
     `wire_format` is the value that goes straight into `AudioBuffer.format`
-    — "S16LE" or "F32LE" — matching the deepfake-service decoder's vocabulary.
+    — "S16LE" or "F32LE" — matching the deepfake-service decoder's vocabulary
+    for the legacy Twilio-vendored AudioBuffer wire.
+
+    `audio_codec` is the equivalent AudioCodec enum value for building
+    `aurigin.media.v1.AudioFrame` messages (the new-in-0.3.0 wire shape).
     """
     samples: bytes
     rate: int
@@ -45,6 +49,17 @@ class WavData:
     def duration_s(self) -> float:
         denom = self.rate * self.bytes_per_sample
         return len(self.samples) / denom if denom else 0.0
+
+    @property
+    def audio_codec(self) -> int:
+        """AudioCodec enum value matching `wire_format`, for building AudioFrame.
+
+        Lazy import so pure AudioBuffer-only consumers of this module don't
+        drag in the aurigin.media.v1 stubs (relevant for older client code
+        pinned to aurigin-protos 0.2.x).
+        """
+        from aurigin.media.v1 import audio_frame_pb2 as af_pb
+        return af_pb.AUDIO_CODEC_F32LE if self.wire_format == "F32LE" else af_pb.AUDIO_CODEC_S16LE
 
 
 def read_wav(path: Path) -> WavData:

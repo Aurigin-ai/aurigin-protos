@@ -23,6 +23,7 @@ from typing import Any
 import grpc
 
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
+from aurigin.media.v1 import audio_frame_pb2 as af_pb
 
 from . import curves
 from .loader import Scenario
@@ -50,10 +51,17 @@ def _log(session_id: str, message: str) -> None:
 # main generator loop to know it can stop pulling from the queue.
 _TIMELINE_DONE = object()
 
-# Bytes per sample for the AudioBuffer wire formats the deepfake-service
-# decoder accepts. Used by _drain_audio's defensive duration-from-bytes
-# fallback when the client doesn't populate duration_ns.
-_BYTES_PER_SAMPLE = {"S16LE": 2, "F32LE": 4}
+# Bytes per sample for the wire formats the deepfake-service decoder
+# accepts. Used by _drain_audio's defensive duration-from-bytes fallback
+# when the AudioBuffer doesn't populate duration_ns, and by the
+# AudioFrame branch (which never carries a duration field). Keyed both
+# by AudioBuffer.format strings and AudioCodec enum values.
+_BYTES_PER_SAMPLE = {
+    "S16LE": 2, "F32LE": 4,                           # AudioBuffer.format strings
+    af_pb.AUDIO_CODEC_S16LE: 2, af_pb.AUDIO_CODEC_F32LE: 4,
+    af_pb.AUDIO_CODEC_L16: 2,
+    af_pb.AUDIO_CODEC_PCMU: 1, af_pb.AUDIO_CODEC_PCMA: 1,
+}
 
 
 @dataclass
@@ -113,12 +121,15 @@ async def _drain_audio(request_iterator, state: _SessionState) -> None:
     by the simulator — the scenario drives output, not the audio bytes."""
     logged_format = False
     async for msg in request_iterator:
+        # Accept both wire shapes so the simulator works against clients
+        # on either aurigin-protos 0.2.x (AudioBuffer) or 0.3.x+ (AudioFrame).
         if msg.HasField("audio"):
             buf = msg.audio
             if not logged_format:
                 _log(
                     state.session_id,
-                    f"audio | format={buf.format or '?'} | rate={buf.rate} | channels={buf.channels}",
+                    f"audio | shape=AudioBuffer | format={buf.format or '?'} | "
+                    f"rate={buf.rate} | channels={buf.channels}",
                 )
                 logged_format = True
             if buf.duration_ns > 0:
@@ -127,6 +138,24 @@ async def _drain_audio(request_iterator, state: _SessionState) -> None:
                 bps = _BYTES_PER_SAMPLE.get(buf.format, 2)
                 state.accumulated_audio_ms += int(
                     len(buf.buffer) / bps / buf.channels / buf.rate * 1000
+                )
+        elif msg.HasField("audio_frame"):
+            frame = msg.audio_frame
+            if not logged_format:
+                codec_name = af_pb.AudioCodec.Name(frame.codec)
+                _log(
+                    state.session_id,
+                    f"audio | shape=AudioFrame | codec={codec_name} | "
+                    f"rate={frame.sample_rate_hz} | channels={frame.channels}",
+                )
+                logged_format = True
+            # AudioFrame has no duration field; derive from bytes when
+            # the codec + rate + channels let us. Unknown codecs
+            # (UNSPECIFIED, OPUS) are skipped from the accumulator.
+            bps = _BYTES_PER_SAMPLE.get(frame.codec)
+            if bps and frame.sample_rate_hz and frame.channels:
+                state.accumulated_audio_ms += int(
+                    len(frame.payload) / bps / frame.channels / frame.sample_rate_hz * 1000
                 )
 
 
