@@ -150,6 +150,19 @@ def test_client_silence_roundtrip(server, env: dict[str, str], tmp_path):
         ("test_call_mulaw.wav", "8000Hz/1ch PCMU"),
         # G.711 A-law 8 kHz mono — same as above for the PCMA branch.
         ("test_call_alaw.wav", "8000Hz/1ch PCMA"),
+        # 24-bit signed linear PCM 8 kHz mono — exercises AUDIO_CODEC_S24LE
+        # + doubles as coverage for the WAVE_FORMAT_EXTENSIBLE (0xfffe)
+        # unwrap path, since ffmpeg emits >16-bit PCM under the EXTENSIBLE
+        # envelope by default (SubFormat GUID = KSDATAFORMAT_SUBTYPE_PCM).
+        ("test_call_s24le.wav", "8000Hz/1ch S24LE"),
+        # 32-bit signed linear PCM 8 kHz mono — AUDIO_CODEC_S32LE path,
+        # also under an EXTENSIBLE envelope.
+        ("test_call_s32le.wav", "8000Hz/1ch S32LE"),
+        # WebRTC-shape S16LE 48 kHz mono — exercises the 48 kHz rate that
+        # native WebRTC audio graphs (browsers, aurigin client SDKs) emit,
+        # and confirms the deepfake resampler handles a 48k → 16k target
+        # ratio without regressions.
+        ("test_call_webrtc_48k.wav", "48000Hz/1ch S16LE"),
     ],
 )
 def test_phone_call_wav_roundtrip(server, env: dict[str, str], fixture_name: str, expected_header: str):

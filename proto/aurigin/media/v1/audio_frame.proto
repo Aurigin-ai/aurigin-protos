@@ -97,4 +97,15 @@ enum AudioCodec {
   // plan §"OPUS handling"). Receivers that don't yet implement Opus
   // decoding MUST reject with UNIMPLEMENTED.
   AUDIO_CODEC_OPUS = 6;
+
+  // 24-bit signed linear PCM, little-endian, packed 3-bytes-per-sample.
+  // Common in pro-audio and broadcast WAVs. Deepfake decodes via a
+  // vectorised numpy pad-to-int32 + astype-to-float32 pass — single
+  // allocation, no per-sample Python.
+  AUDIO_CODEC_S24LE = 7;
+
+  // 32-bit signed linear PCM, little-endian. Same wire width as F32LE
+  // but different interpretation (integer, not float). Deepfake decodes
+  // via a single vectorised numpy int32→float32 pass.
+  AUDIO_CODEC_S32LE = 8;
 }

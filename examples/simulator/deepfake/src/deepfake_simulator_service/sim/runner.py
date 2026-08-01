@@ -95,6 +95,7 @@ _BYTES_PER_SAMPLE = {
     "S16LE": 2, "F32LE": 4,                           # AudioBuffer.format strings
     af_pb.AUDIO_CODEC_S16LE: 2, af_pb.AUDIO_CODEC_F32LE: 4,
     af_pb.AUDIO_CODEC_L16: 2,
+    af_pb.AUDIO_CODEC_S24LE: 3, af_pb.AUDIO_CODEC_S32LE: 4,
     af_pb.AUDIO_CODEC_PCMU: 1, af_pb.AUDIO_CODEC_PCMA: 1,
 }
 

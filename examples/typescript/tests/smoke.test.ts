@@ -167,6 +167,17 @@ const phoneCallFixtures: { name: string; file: string; header: RegExp }[] = [
   { name: "PCMU 8 kHz mono", file: "test_call_mulaw.wav", header: /8000Hz\/1ch PCMU/ },
   // G.711 A-law 8 kHz mono — same as above for the PCMA branch.
   { name: "PCMA 8 kHz mono", file: "test_call_alaw.wav", header: /8000Hz\/1ch PCMA/ },
+  // 24-bit signed linear PCM 8 kHz mono — exercises AUDIO_CODEC_S24LE
+  // + doubles as coverage for the WAVE_FORMAT_EXTENSIBLE (0xfffe)
+  // unwrap path, since ffmpeg emits >16-bit PCM under the EXTENSIBLE
+  // envelope by default (SubFormat GUID = KSDATAFORMAT_SUBTYPE_PCM).
+  { name: "S24LE 8 kHz mono", file: "test_call_s24le.wav", header: /8000Hz\/1ch S24LE/ },
+  // 32-bit signed linear PCM 8 kHz mono — AUDIO_CODEC_S32LE path,
+  // also under an EXTENSIBLE envelope.
+  { name: "S32LE 8 kHz mono", file: "test_call_s32le.wav", header: /8000Hz\/1ch S32LE/ },
+  // WebRTC-shape S16LE 48 kHz mono — exercises the 48 kHz rate that
+  // native WebRTC audio graphs (browsers, aurigin client SDKs) emit.
+  { name: "WebRTC S16LE 48 kHz mono", file: "test_call_webrtc_48k.wav", header: /48000Hz\/1ch S16LE/ },
 ];
 
 for (const { name, file, header } of phoneCallFixtures) {
