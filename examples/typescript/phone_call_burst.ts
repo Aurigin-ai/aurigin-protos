@@ -197,7 +197,7 @@ async function main() {
       `(${wavDurationS(wav).toFixed(2)}s @ ${wav.rate}Hz/${wav.channels}ch ${wav.wireFormat}) ` +
       `| duration=${args.duration.toFixed(1)}s | frame=${args.chunkMs}ms | ` +
       `concurrency=${args.concurrency}${staggerSuffix}${scenarioSuffix} ` +
-      `| transport=${transportLabel("client")}`,
+      `| transport=${transportLabel()}`,
   );
   console.log("─".repeat(70));
 

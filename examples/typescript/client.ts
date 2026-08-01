@@ -146,7 +146,7 @@ async function main() {
     ? fs.readdirSync(audioDir).filter((f) => f.endsWith(".wav")).sort().map((f) => path.join(audioDir, f))
     : [];
 
-  console.error(`# transport=${transportLabel("client")}`);
+  console.error(`# transport=${transportLabel()}`);
 
   let csv: ResultCSV | null = null;
   if (csvPath) {

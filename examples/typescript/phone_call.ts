@@ -241,7 +241,7 @@ async function main() {
     `📞 Calling ${args.target} | source=${path.basename(audioPath)} ` +
       `(${wavDurationS(wav).toFixed(2)}s @ ${wav.rate}Hz/${wav.channels}ch ${wav.wireFormat}) ` +
       `| duration=${args.duration.toFixed(1)}s | frame=${args.chunkMs}ms` +
-      `${scenarioSuffix} | transport=${transportLabel("client")}`,
+      `${scenarioSuffix} | transport=${transportLabel()}`,
   );
   console.log("─".repeat(70));
 
