@@ -17,7 +17,8 @@ import os
 import random
 import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from statistics import mean
 from typing import Any
 
 import grpc
@@ -27,6 +28,40 @@ from aurigin.media.v1 import audio_frame_pb2 as af_pb
 
 from . import curves
 from .loader import Scenario
+
+# Per-window label sentinels — kept as bare literals so the sim has no
+# runtime dependency on a producer enum module.
+_LABEL_SILENCE = "silence"
+_LABEL_BONAFIDE = "bonafide"
+_LABEL_SPOOFED = "spoofed"
+_LABEL_PARTIALLY_SPOOFED = "partially_spoofed"
+_LABEL_UNKNOWN = "unknown"
+
+# Session-level decision threshold matching deepfake-service's default.
+_DECISION_THRESHOLD = 0.5
+
+
+def _aggregate_final(
+    actionable_scores: list[float],
+    analysis_count: int,
+) -> tuple[float, str]:
+    """Aggregate the session over actionable windows only.
+
+    Mirrors the deepfake-service aggregator (A1 rule): silence
+    sentinels are excluded from the mean so their 0.0 scores don't
+    bias the result toward bonafide; a session with both a spoofed-
+    side and bonafide-side actionable window emits ``partially_spoofed``.
+    """
+    overall_score = float(mean(actionable_scores)) if actionable_scores else 0.0
+    if analysis_count == 0:
+        return overall_score, _LABEL_UNKNOWN
+    if not actionable_scores:
+        return overall_score, _LABEL_SILENCE
+    has_spoof = any(s >= _DECISION_THRESHOLD for s in actionable_scores)
+    has_bona = any(s < _DECISION_THRESHOLD for s in actionable_scores)
+    if has_spoof and has_bona:
+        return overall_score, _LABEL_PARTIALLY_SPOOFED
+    return overall_score, _LABEL_SPOOFED if has_spoof else _LABEL_BONAFIDE
 
 _STATUS_CODE_BY_NAME = {code.name: code for code in grpc.StatusCode}
 
@@ -72,6 +107,9 @@ class _SessionState:
     last_score: float = 0.0
     last_label: str = "bonafide"
     analysis_count: int = 0
+    # A1 (see _aggregate_final): scores from actionable windows only —
+    # silence sentinels are excluded so they don't bias the final mean.
+    actionable_scores: list[float] = field(default_factory=list)
 
     def now_ms(self, loop: asyncio.AbstractEventLoop) -> int:
         return int((loop.time() - self.started_at) * 1000)
@@ -97,6 +135,8 @@ def _make_analysis_result(
     state.last_score = score
     state.last_label = label
     state.analysis_count += 1
+    if label != _LABEL_SILENCE:
+        state.actionable_scores.append(score)
     return pb.DetectDeepfakeResponse(
         analysis_result=pb.AnalysisResult(
             audio_offset_ms=t_ms,
@@ -482,16 +522,19 @@ async def run_session(scenario: Scenario, request_iterator, context):
             context.set_trailing_metadata(list(scenario.grpc.trailing_metadata.items()))
 
         total_audio_ms = max(state.accumulated_audio_ms, scenario.stream.duration_ms)
-        overall_label = state.last_label if state.analysis_count > 0 else "unknown"
+        # A1: aggregate over actionable windows only, matching deepfake-service.
+        overall_score, overall_label = _aggregate_final(
+            state.actionable_scores, state.analysis_count,
+        )
         _log(
             state.session_id,
             f"end   | total={total_audio_ms}ms | analyses={state.analysis_count} "
-            f"| score={state.last_score:.3f} | label={overall_label}",
+            f"| score={overall_score:.3f} | label={overall_label}",
         )  # 'end  ' padded to verb width 5 — matches 'start' and 'fault'
         yield pb.DetectDeepfakeResponse(
             final_result=pb.FinalResult(
                 total_audio_ms=total_audio_ms,
-                overall_score=state.last_score,
+                overall_score=overall_score,
                 overall_label=overall_label,
                 analysis_count=state.analysis_count,
             ),
