@@ -50,9 +50,9 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
 
       # `uv` is needed by the TS smoke test — tests/smoke.test.ts spawns
       # the Python simulator via `uv run --with …` so its runtime deps
@@ -97,9 +97,9 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
 
       - uses: actions/setup-python@v6
         with:
@@ -138,7 +138,11 @@ jobs:
           print('OK')
           "
 
-      - name: Example end-to-end smoke test (server + client roundtrip)
+      - name: Example end-to-end smoke test (client → Python simulator roundtrip)
+        # The test spawns the deepfake-simulator-service (examples/simulator/
+        # deepfake/) as a subprocess and manages PYTHONPATH for that child
+        # inside the test itself; this parent-process PYTHONPATH is only for
+        # pytest's own imports (the examples/python/common package).
         env:
           PYTHONPATH: ${{ github.workspace }}/gen/py:${{ github.workspace }}/examples/python
         run: pytest examples/python/tests/ -v

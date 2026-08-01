@@ -5,9 +5,10 @@ lint:
   use:
     - STANDARD
   except:
-    # Service is `DeepfakeDetection`, not `DeepfakeDetectionService`,
-    # to match the wire format already consumed by backend-app.
-    # Revisit when we're free to break the wire format.
+    # Service is `DeepfakeDetection`, not `DeepfakeDetectionService`.
+    # Renaming would be a wire break for every current consumer; the
+    # suffix rule stays disabled until we intentionally cut a wire
+    # version that renames the service.
     - SERVICE_SUFFIX
 breaking:
   use:

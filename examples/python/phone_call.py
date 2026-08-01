@@ -218,10 +218,12 @@ async def main() -> None:
 
 def cli() -> None:
     """Sync entrypoint for `uv run phone-call`."""
-    # See the long note in server.py: asyncio.run() installs a Python-level
-    # SIGINT handler that conflicts with grpc.aio's own handlers, racing on
-    # Ctrl-C and leaving a noisy traceback. Driving the loop manually keeps
-    # the shutdown path clean: KeyboardInterrupt → finally → loop.close().
+    # asyncio.run() installs a Python-level SIGINT handler that races with
+    # grpc.aio's own signal handling, leaving a noisy traceback on Ctrl-C.
+    # Driving the loop manually keeps the shutdown path clean:
+    # KeyboardInterrupt → finally → loop.close(). Same reasoning applies in
+    # the simulator's server.py; see the extended note there for the exact
+    # symptom this avoids.
     loop = asyncio.new_event_loop()
     try:
         loop.run_until_complete(main())

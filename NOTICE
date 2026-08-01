@@ -14,3 +14,6 @@ definitions, redistributed under their original licenses:
   Copyright Twilio, Inc.
   Distributed under the terms of the Apache License, Version 2.0.
   Source: https://github.com/twilio/twilio-media-extensions
+  Status: DEPRECATED as of aurigin-protos 0.3.0 in favour of the
+  Aurigin-native aurigin.media.v1.AudioFrame. Scheduled for removal
+  in 0.4.0; this attribution will be removed with the file.

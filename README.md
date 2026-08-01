@@ -93,8 +93,17 @@ aurigin-protos/
 For maintainers (publishing):
 
 - `buf` — `brew install bufbuild/buf/buf`
-- Node 22+ — used to run `ts-proto` and build the TS package
-- Python 3.10+ with `build` (only — the publish workflows run `twine` themselves)
+- **Node 24** across every workflow (`ci.yml`, `publish-codeartifact.yml`,
+  `publish-npm.yml`), all via `actions/setup-node@v6`. Node 24 is
+  required because public npm publishing uses Trusted Publishing (OIDC
+  → npmjs.com) which needs npm ≥ 11.5.1, and that npm version ships
+  bundled with Node 24 + setup-node@v6. Local dev on Node 22 mostly
+  works but a fresh `npm publish` locally would fail the trusted-
+  publishing handshake.
+- **Python 3.11** for every workflow (`ci.yml`, `publish-pypi.yml`,
+  `publish-codeartifact.yml` all pin 3.11). Consumer minimum is 3.10 —
+  what `gen/py/pyproject.toml` declares. Any 3.11+ with `build` on it
+  works for local dry-runs.
 - AWS CLI v2 with credentials for the shared account, for local dry-runs of the CodeArtifact path. Not required for public publishing — `publish-pypi.yml` and `publish-npm.yml` run purely on OIDC tokens from GitHub.
 - `gh` CLI authenticated against the `Aurigin-ai` org — required to cut a release (`gh workflow run release.yml -f version=X.Y.Z`, which dispatches all three publish workflows for you). Direct dispatch of `publish-codeartifact.yml` / `publish-pypi.yml` / `publish-npm.yml` is available for re-runs and recoveries.
 
