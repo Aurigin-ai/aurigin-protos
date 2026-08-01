@@ -2,9 +2,13 @@ version: v2
 
 plugins:
   # ---- Python: messages + gRPC service stubs (remote plugins from buf.build) ----
-  - remote: buf.build/protocolbuffers/python
+  # Pinned to specific plugin versions — buf.build's remote-plugin
+  # execution now rate-limits (and 403s) unpinned `:latest` references
+  # from CI runners, while pinned versions stay cache-hittable and
+  # anonymous. Bump these on protobuf / grpcio releases we care about.
+  - remote: buf.build/protocolbuffers/python:v29.3
     out: gen/py
-  - remote: buf.build/grpc/python
+  - remote: buf.build/grpc/python:v1.66.0
     out: gen/py
 
   # ---- TypeScript: ts-proto, gRPC-JS compatible (local plugin from gen/ts node_modules) ----
