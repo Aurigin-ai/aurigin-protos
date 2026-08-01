@@ -83,7 +83,7 @@ dependencies = [
 
 > **Aurigin engineers** consuming a pre-promotion version from the internal AWS CodeArtifact mirror: see [`infra/aws/`](../infra/aws/) for the index URL and the `uv` configuration pattern.
 
-Expected client output (against `examples/python/server.py` running the `default` scenario, with no WAVs in `audio/`):
+Expected client output (against `deepfake-simulator-service` from `examples/simulator/deepfake/` running the `default` scenario, with no WAVs in `audio/`):
 
 ```
 === silence (3 s @ 16 kHz) ===
@@ -99,7 +99,7 @@ The session id is generated per session (`sim-<8 hex>`) and the cadence comes fr
 To run against real audio (real ML server required, e.g. backend-app's gRPC service), drop one or more `.wav` files into `examples/audio/` and re-run the client. Both 16-bit PCM (`S16LE`) and 32-bit IEEE-float (`F32LE`) WAVs are accepted, at any sample rate and channel count — the client reads the format tag from the RIFF header and tags the outgoing `AudioBuffer.format` accordingly. It opens one session per file. The `audio/` dir is gitignored.
 
 Files:
-- `python/server.py` — scenario-driven simulator: loads YAML scenarios from `examples/scenarios/` at startup, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Listens on `[::]:50051`. Env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`.
+- `simulator/deepfake/` — **canonical scenario-driven simulator**, extracted here so both Python and TypeScript clients drive the same reference implementation. Packaged as `aurigin-deepfake-simulator-service` with a Dockerfile + docker-compose. Loads YAML scenarios from `examples/scenarios/` at startup, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Listens on `[::]:50051`. Env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`. See its own README for `uv run deepfake-simulator-service` and `docker compose up --build`.
 - `python/client.py` — streams every `.wav` in `examples/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` to point at a non-default server (default `localhost:50051`). Pass `--csv PATH` to additionally write per-chunk results to a CSV — see [CSV export](#csv-export) below.
 - `python/phone_call.py` — **minimal worked example** of the FreeSWITCH-fork integration pattern. Single live call: open bidi → real-time-paced sender + concurrent receiver → close. Heavily commented at the send loop because that's exactly the line that becomes `for await frame in fork_socket: ...` in a real `mod_audio_fork` / Twilio Media Stream / SIPREC integration.
 - `python/phone_call_burst.py` — the **recommended multi-call architecture**: one long-lived gRPC channel multiplexing N concurrent bidi streams (vs N separate channels). Same per-call building blocks (imported from `phone_call.py`), plus `--concurrency N` / `--stagger-ms` / per-stream `call-NN` labels / graceful shutdown across all streams / summary aggregation. Use it to find the connection-count knee on a real backend or to capture per-chunk results across many concurrent sessions (`--csv PATH`).
@@ -225,27 +225,34 @@ Both implementations share the column list — the column constant lives in [`ex
 The `examples/typescript/` directory has its own `package.json` so you can install and run directly — `@aurigin/protos` resolves from public npmjs.com, no auth:
 
 ```bash
+# Terminal 1 — start the simulator (Python; see examples/simulator/deepfake/)
+cd examples/simulator/deepfake && uv run deepfake-simulator-service
+# or: docker compose up --build
+
+# Terminal 2 — TypeScript client
 cd examples/typescript
 npm install
 
-npm run server                         # scenario-driven simulator on :50051
 npm run client                         # client → localhost:50051
 npm run phone-call                     # paced WAV streamer → localhost:50051
-npm run scenarios                      # list available scenarios
 npm run call -- fake_detected_rising_curve       # 10 s call against that scenario
 npm run call -- fake_detected_rising_curve --duration 30   # override duration
 npm run burst -- --concurrency 5 --scenario-id fake_detected_rising_curve              # 5 simultaneous calls
 npm run burst -- --concurrency 5 --scenario-id fake_detected_rising_curve --stagger-ms 500   # 5, 500ms apart
 npm run tls                            # regenerate the committed self-signed certs (server + client)
-MTLS=1 npm run server                  # same server, demands a client cert (see TLS section)
 MTLS=1 npm run call -- default         # client presents its cert, transport=mTLS
-npm test                               # end-to-end smoke test
+npm test                               # end-to-end smoke test (spawns the Python simulator as a subprocess)
 ```
+
+> The `server` and `scenarios` npm scripts (and their `mtls-server`
+> variant) are gone — the scenario-driven simulator lives in
+> `examples/simulator/deepfake/` now. Run it from there or via
+> `docker compose up --build`.
 
 > **Aurigin engineers** consuming a pre-promotion version from the internal AWS CodeArtifact mirror: see [`infra/aws/`](../infra/aws/) for the npm registry config.
 
 Files:
-- `typescript/server.ts` — TS twin of `python/server.py`: scenario-driven simulator that loads YAML scenarios from `examples/scenarios/`, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Same env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`. Sim logic in `typescript/sim/{curves,loader,runner}.ts` mirrors `python/sim/`.
+- `simulator/deepfake/` — the same canonical simulator both language clients target (see the Python section above for the full description). No TS twin: the previous `typescript/server.ts` and `typescript/sim/` were deleted when the simulator was extracted.
 - `typescript/client.ts` — streams every `.wav` in `examples/audio/` (one session per file) using `DeepfakeDetectionClient.detectDeepfake()`; falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` (e.g. `npm run client -- --target localhost:50051`) to point at a non-default server. Pass `--csv PATH` to additionally write per-chunk results to a CSV — see [CSV export](#csv-export) below.
 - `typescript/phone_call.ts` — TS twin of `python/phone_call.py`: single live call, the FreeSWITCH-fork integration pattern. Run with `npm run phone-call -- --audio ../audio/your.wav`.
 - `typescript/phone_call_burst.ts` — TS twin of `python/phone_call_burst.py`: N concurrent calls (recommended multi-call architecture). Run with `npm run phone-call-burst -- -c 5`. Supports `--csv PATH`.
@@ -287,15 +294,19 @@ DeepfakeDetection simulator listening on :50051 | ... | transport=mTLS (self-sig
 
 ### Plain TLS (default)
 
-Nothing to set. Start the server and client; the cert auto-detect kicks in.
+Nothing to set. Start the simulator and client; the cert auto-detect kicks in.
 
 ```bash
-# Python
-just server                            # transport=TLS
+# Simulator (Python — canonical, drives both language clients)
+cd examples/simulator/deepfake
+uv run deepfake-simulator-service      # transport=TLS
+
+# Python client
+cd examples/python
 just call default                      # transport=TLS
 
-# TypeScript
-npm run server                         # transport=TLS
+# TypeScript client
+cd examples/typescript
 npm run call -- default                # transport=TLS
 ```
 
@@ -311,13 +322,17 @@ Set `MTLS=1` on the **server** and the **client** process. Asymmetric configurat
 | **1** | **1** | mTLS — both sides verify each other |
 
 ```bash
-# Python
-MTLS=1 just server                     # transport=mTLS
+# Simulator (Python — canonical)
+cd examples/simulator/deepfake
+MTLS=1 uv run deepfake-simulator-service   # transport=mTLS
+
+# Python client
+cd examples/python
 MTLS=1 just call default               # transport=mTLS
 MTLS=1 just burst 5 default            # 5 mTLS streams, all over the same channel
 
-# TypeScript
-MTLS=1 npm run server                  # transport=mTLS
+# TypeScript client
+cd examples/typescript
 MTLS=1 npm run call -- default         # transport=mTLS
 ```
 
@@ -343,8 +358,13 @@ Useful for benchmarking or for pointing the client at a server that's behind a T
 
 ```bash
 rm examples/certs/server.{crt,key}                       # permanent — remove the cert from the tree
-TLS_CERT=/dev/null TLS_KEY=/dev/null just server         # one-shot override (server)
-TLS_CA=/dev/null just client                             # one-shot override (client / phone-call)
+
+# One-shot override (simulator)
+cd examples/simulator/deepfake
+TLS_CERT=/dev/null TLS_KEY=/dev/null uv run deepfake-simulator-service
+
+# One-shot override (client / phone-call — Python or TypeScript)
+TLS_CA=/dev/null just client
 ```
 
 The server side reads `TLS_CERT` + `TLS_KEY` (TLS) and `TLS_CLIENT_CA` (mTLS). The client side reads `TLS_CA` (TLS) and `TLS_CLIENT_CERT` / `TLS_CLIENT_KEY` (mTLS). Pointing any of them at a non-existent path takes the insecure branch.
@@ -353,9 +373,13 @@ The server side reads `TLS_CERT` + `TLS_KEY` (TLS) and `TLS_CLIENT_CA` (mTLS). T
 
 Drop your own `server.crt` and `server.key` (and `client.{crt,key}` if you want mTLS) into `examples/certs/`, overwriting the committed examples, and restart. The auto-detect logic doesn't care who signed them. For Let's Encrypt or internal CAs, see the trust-model breakdown in [`certs/README.md`](certs/README.md).
 
-## Configuring the server
+## Configuring the simulator
 
-Both `python/server.py` and `typescript/server.ts` are the same scenario-driven simulator — same env vars, same `x-scenario-id` metadata selector, same YAML scenario format. Everything below applies to either implementation.
+The simulator lives in [`simulator/deepfake/`](simulator/deepfake/) and
+is packaged as `aurigin-deepfake-simulator-service`. Both the Python and
+TypeScript client examples target it — the previous per-language server
+implementations were retired. Everything below applies to that one
+canonical service.
 
 ### Env vars
 
@@ -365,11 +389,15 @@ Both `python/server.py` and `typescript/server.ts` are the same scenario-driven 
 | `SCENARIOS_DIR` | `<repo>/examples/scenarios` | Directory the server walks at startup. Every `*.yaml` under it (recursive) is loaded and validated against `scenario.schema.json`. Duplicate `scenario.id` is a startup error. |
 | `SCENARIO_DEFAULT` | `default` | Scenario id used when the client doesn't send `x-scenario-id` or sends an unknown id. Must match one of the loaded scenarios or the server exits at startup. |
 
-Example — point both servers at a custom directory on a non-default port:
+Example — point the simulator at a custom directory on a non-default port:
 
 ```bash
-PORT=50061 SCENARIOS_DIR=$HOME/my-scenarios uv run server                 # Python
-PORT=50061 SCENARIOS_DIR=$HOME/my-scenarios npm run server                # TypeScript
+cd examples/simulator/deepfake
+PORT=50061 SCENARIOS_DIR=$HOME/my-scenarios uv run deepfake-simulator-service
+
+# Or via docker-compose (same env vars work — either export them or
+# add them to the `environment:` block in docker-compose.yml):
+PORT=50061 SCENARIOS_DIR=/scenarios docker compose up --build
 ```
 
 ### Selecting a scenario per session

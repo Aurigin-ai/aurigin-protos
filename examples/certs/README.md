@@ -18,11 +18,12 @@ a getting-started example; it's a disaster for anything customer-facing.
 
 ## How it's wired up
 
-**Plain TLS (default).** `server.py` / `server.ts` and `client.py` /
-`client.ts` / `phone_call.{py,ts}` all look at `examples/certs/server.crt`
-(and `server.key` on the server side) at startup. If both files exist —
-the default, since this directory is committed — they switch to TLS
-automatically.
+**Plain TLS (default).** The simulator server
+(`examples/simulator/deepfake/`) and the client examples (`client.py`
+/ `client.ts` / `phone_call.{py,ts}`) all look at
+`examples/certs/server.crt` (and `server.key` on the server side) at
+startup. If both files exist — the default, since this directory is
+committed — they switch to TLS automatically.
 
 **mTLS (opt-in via `MTLS=1`).** Set `MTLS=1` on the server *and* the
 client process. The server then demands a client cert chaining to

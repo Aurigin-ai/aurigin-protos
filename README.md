@@ -64,12 +64,14 @@ aurigin-protos/
 │   │   ├── happy/                # canonical bonafide/spoofed/curve flows
 │   │   ├── edge/                 # oscillating, tail-strategy, silence-gate, etc.
 │   │   └── failure/              # event-level ERROR, gRPC UNAVAILABLE, DEADLINE_EXCEEDED
-│   ├── python/               # uv-managed: `uv run server|client|phone-call|phone-call-burst`
-│   │   ├── common/           # shared helpers: wav_reader / result_csv / tls / shutdown
-│   │   └── sim/              # scenario-driven simulator (loader + curves + runner)
-│   └── typescript/           # npm-managed: `npm run server|client|phone-call|phone-call-burst`
-│       ├── common/           # mirror of python/common/
-│       └── sim/              # mirror of python/sim/
+│   ├── python/               # client examples: `uv run client|phone-call|phone-call-burst`
+│   │   └── common/           # shared helpers: wav_reader / result_csv / tls / shutdown
+│   ├── typescript/           # client examples: `npm run client|phone-call|phone-call-burst`
+│   │   └── common/           # mirror of python/common/
+│   └── simulator/            # scenario-driven simulator services (one dir per RPC)
+│       └── deepfake/         # aurigin-deepfake-simulator-service (Python package,
+│                             #   Docker image, docker-compose). Drives both Python
+│                             #   and TypeScript client smoke tests.
 ├── infra/                    # AWS + public-registry runbooks (no IaC, just docs)
 │   ├── aws/                  # OIDC + publisher role + CodeArtifact setup
 │   └── public/               # PyPI / npm Trusted Publishers + visibility checklist
@@ -207,8 +209,8 @@ A few conventions enforced at the repo level — worth knowing before opening a 
 1. Create `proto/<package-path>/<service>.proto` (file path must mirror the proto `package`).
 2. `make lint` — fail fast on naming, package, version-suffix and other STANDARD-rule violations before generating anything.
 3. `make generate` — produce Python and TypeScript stubs.
-4. Wire the new RPC into the example server and at least one example client in **both** languages (`examples/python/` and `examples/typescript/`). The Python server is a config-driven simulator (`examples/python/sim/`) — for a new RPC, extend `sim/runner.py` to handle its message types, and add one or more YAML scenarios under `examples/scenarios/` so consumers can exercise the new service end-to-end. The TypeScript server stays a thin stub. **Stub / scenario logic only — no real ML in this repo.**
-5. Add an end-to-end smoke test for the new RPC in **both** test suites (`examples/python/tests/test_smoke.py`, `examples/typescript/tests/smoke.test.ts`). The existing `DetectDeepfake` test is the template.
+4. Wire the new RPC into at least one example client in **both** languages (`examples/python/` and `examples/typescript/`). For the simulator side, either extend the existing `examples/simulator/deepfake/` service (if the new RPC belongs to the same detection surface) or add a sibling `examples/simulator/<service>/` package following the same layout (`pyproject.toml`, `Dockerfile`, `docker-compose.yml`, `src/<service>_simulator_service/`). Add one or more YAML scenarios under `examples/scenarios/` so consumers can exercise the new service end-to-end. **Stub / scenario logic only — no real ML in this repo.**
+5. Add an end-to-end smoke test for the new RPC in **both** test suites (`examples/python/tests/test_smoke.py`, `examples/typescript/tests/smoke.test.ts`). Both suites spawn the Python simulator as a subprocess; the existing `DetectDeepfake` test is the template.
 6. Run everything locally before pushing:
    ```bash
    make lint && make generate && \
