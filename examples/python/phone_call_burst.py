@@ -24,7 +24,7 @@ exactly that shape:
 
 CLI:
     python phone_call_burst.py [--audio FILE] [--target localhost:50051]
-                               [--chunk-ms 100] [--duration 30]
+                               [--chunk-ms 20] [--duration 30]
                                [--concurrency 5] [--stagger-ms 500]
                                [--scenario-id ID] [--csv PATH]
 
@@ -55,7 +55,7 @@ from common import (
 # explicit and prevents drift between the two files' send/recv loops.
 from phone_call import recv_call, send_call
 
-DEFAULT_CHUNK_MS = 100
+DEFAULT_CHUNK_MS = 20   # RTP wire default (see phone_call.py rationale)
 DEFAULT_DURATION_S = 30.0
 DEFAULT_CONCURRENCY = 1
 

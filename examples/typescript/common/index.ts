@@ -1,10 +1,10 @@
-// Shared helpers for the aurigin-protos TypeScript example clients/server.
+// Shared helpers for the aurigin-protos TypeScript example clients.
 //
 // Four small modules — all "infra glue" rather than the actual gRPC
 // example, so they live here together to keep the call-site files
 // focused on what they're demonstrating:
 //
-//   - wav_reader  — WavData type + readWav() (S16LE / F32LE)
+//   - wav_reader  — WavData type + readWav() (S16LE / F32LE / PCMU / PCMA)
 //   - result_csv  — ResultCSV writer for per-chunk run captures
 //   - tls         — TLS auto-detect for example clients (server-cert + mTLS)
 //   - shutdown    — graceful SIGINT/SIGTERM handler for grpc-js calls
@@ -20,9 +20,7 @@ export { CSV_COLUMNS, ResultCSV } from "./result_csv.js";
 
 export {
   channelCredentials,
-  serverCredentials,
   tlsAvailableForClient,
-  tlsAvailableForServer,
   transportLabel,
 } from "./tls.js";
 

@@ -74,10 +74,10 @@ breaking:
 
 generate: install
 	buf generate
-	# Ensure every Python sub-package is importable
+	@# Ensure every Python sub-package is importable
 	@find gen/py/aurigin gen/py/twilio -type d -exec touch {}/__init__.py \;
-	# Drop the repo LICENSE into each language package so it ships in the
-	# published tarball and PyPI / npm display the right SPDX identifier.
+	@# Drop the repo LICENSE into each language package so it ships in the
+	@# published tarball and PyPI / npm display the right SPDX identifier.
 	@cp LICENSE gen/py/LICENSE
 	@cp LICENSE gen/ts/LICENSE
 
@@ -95,10 +95,12 @@ publish-py-codeartifact: build-py
 
 publish-codeartifact: publish-ts-codeartifact publish-py-codeartifact
 
-# End-to-end example smoke tests. Each spawns the example server on a free
-# port and runs the example client against it, asserting the proto + gRPC
-# wire path round-trips. Catches breakage from proto renames, stub API
-# shifts, and server impl regressions before they reach consumers.
+# End-to-end example smoke tests. Both language tests spawn the canonical
+# Python simulator (examples/simulator/deepfake/) as a subprocess on a
+# free port and run the language-specific example client against it,
+# asserting the proto + gRPC wire path round-trips. No Docker required.
+# Catches breakage from proto renames, stub API shifts, and simulator
+# impl regressions before they reach consumers.
 #
 # The Python target deliberately sidesteps examples/python/pyproject.toml
 # (which pins `aurigin-protos` to the CodeArtifact index and would need an
@@ -113,8 +115,22 @@ smoke-py: generate
 	  --with grpcio --with protobuf --with pyyaml --with jsonschema --with pytest \
 	  python -m pytest examples/python/tests/ -v
 
-smoke-ts: generate
-	cd examples/typescript && npm install --silent && npm test
+# TS smoke spawns the Python simulator via `uv run --with …` inside the
+# test itself — no per-language Python install needed. PYTHONPATH covers
+# the generated stubs + the simulator package src/. Requires `uv` on
+# PATH (setup-uv action provides it on CI).
+#
+# Depends on `build-ts` so gen/ts/dist/ exists. We then `npm pack` the
+# built package into a tarball and `npm install --no-save` it into the
+# example — this side-steps the `file:` symlink pitfall where node's
+# ESM resolver follows the symlink to gen/ts/dist/ and can't find
+# @grpc/grpc-js because it was hoisted to the consumer's node_modules.
+# Tarball installs extract cleanly and deduplicate properly.
+smoke-ts: build-ts
+	cd gen/ts && npm pack --silent
+	cd examples/typescript && npm install --silent \
+	  && npm install --no-save --silent ../../gen/ts/aurigin-protos-*.tgz \
+	  && npm test
 
 clean:
 	rm -rf gen/ts/src gen/ts/dist gen/ts/node_modules

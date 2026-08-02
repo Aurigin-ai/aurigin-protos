@@ -17,15 +17,51 @@ import os
 import random
 import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from statistics import mean
 from typing import Any
 
 import grpc
 
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
+from aurigin.media.v1 import audio_frame_pb2 as af_pb
 
 from . import curves
 from .loader import Scenario
+
+# Per-window label sentinels — kept as bare literals so the sim has no
+# runtime dependency on a producer enum module.
+_LABEL_SILENCE = "silence"
+_LABEL_BONAFIDE = "bonafide"
+_LABEL_SPOOFED = "spoofed"
+_LABEL_PARTIALLY_SPOOFED = "partially_spoofed"
+_LABEL_UNKNOWN = "unknown"
+
+# Session-level decision threshold matching deepfake-service's default.
+_DECISION_THRESHOLD = 0.5
+
+
+def _aggregate_final(
+    actionable_scores: list[float],
+    analysis_count: int,
+) -> tuple[float, str]:
+    """Aggregate the session over actionable windows only.
+
+    Mirrors the deepfake-service aggregator (A1 rule): silence
+    sentinels are excluded from the mean so their 0.0 scores don't
+    bias the result toward bonafide; a session with both a spoofed-
+    side and bonafide-side actionable window emits ``partially_spoofed``.
+    """
+    overall_score = float(mean(actionable_scores)) if actionable_scores else 0.0
+    if analysis_count == 0:
+        return overall_score, _LABEL_UNKNOWN
+    if not actionable_scores:
+        return overall_score, _LABEL_SILENCE
+    has_spoof = any(s >= _DECISION_THRESHOLD for s in actionable_scores)
+    has_bona = any(s < _DECISION_THRESHOLD for s in actionable_scores)
+    if has_spoof and has_bona:
+        return overall_score, _LABEL_PARTIALLY_SPOOFED
+    return overall_score, _LABEL_SPOOFED if has_spoof else _LABEL_BONAFIDE
 
 _STATUS_CODE_BY_NAME = {code.name: code for code in grpc.StatusCode}
 
@@ -50,10 +86,18 @@ def _log(session_id: str, message: str) -> None:
 # main generator loop to know it can stop pulling from the queue.
 _TIMELINE_DONE = object()
 
-# Bytes per sample for the AudioBuffer wire formats the deepfake-service
-# decoder accepts. Used by _drain_audio's defensive duration-from-bytes
-# fallback when the client doesn't populate duration_ns.
-_BYTES_PER_SAMPLE = {"S16LE": 2, "F32LE": 4}
+# Bytes per sample for the wire formats the deepfake-service decoder
+# accepts. Used by _drain_audio's defensive duration-from-bytes fallback
+# when the AudioBuffer doesn't populate duration_ns, and by the
+# AudioFrame branch (which never carries a duration field). Keyed both
+# by AudioBuffer.format strings and AudioCodec enum values.
+_BYTES_PER_SAMPLE = {
+    "S16LE": 2, "F32LE": 4,                           # AudioBuffer.format strings
+    af_pb.AUDIO_CODEC_S16LE: 2, af_pb.AUDIO_CODEC_S16BE: 2,
+    af_pb.AUDIO_CODEC_S24LE: 3, af_pb.AUDIO_CODEC_S32LE: 4,
+    af_pb.AUDIO_CODEC_F32LE: 4,
+    af_pb.AUDIO_CODEC_PCMU: 1, af_pb.AUDIO_CODEC_PCMA: 1,
+}
 
 
 @dataclass
@@ -64,6 +108,9 @@ class _SessionState:
     last_score: float = 0.0
     last_label: str = "bonafide"
     analysis_count: int = 0
+    # A1 (see _aggregate_final): scores from actionable windows only —
+    # silence sentinels are excluded so they don't bias the final mean.
+    actionable_scores: list[float] = field(default_factory=list)
 
     def now_ms(self, loop: asyncio.AbstractEventLoop) -> int:
         return int((loop.time() - self.started_at) * 1000)
@@ -89,6 +136,8 @@ def _make_analysis_result(
     state.last_score = score
     state.last_label = label
     state.analysis_count += 1
+    if label != _LABEL_SILENCE:
+        state.actionable_scores.append(score)
     return pb.DetectDeepfakeResponse(
         analysis_result=pb.AnalysisResult(
             audio_offset_ms=t_ms,
@@ -113,12 +162,15 @@ async def _drain_audio(request_iterator, state: _SessionState) -> None:
     by the simulator — the scenario drives output, not the audio bytes."""
     logged_format = False
     async for msg in request_iterator:
+        # Accept both wire shapes so the simulator works against clients
+        # on either aurigin-protos 0.2.x (AudioBuffer) or 0.3.x+ (AudioFrame).
         if msg.HasField("audio"):
             buf = msg.audio
             if not logged_format:
                 _log(
                     state.session_id,
-                    f"audio | format={buf.format or '?'} | rate={buf.rate} | channels={buf.channels}",
+                    f"audio | shape=AudioBuffer | format={buf.format or '?'} | "
+                    f"rate={buf.rate} | channels={buf.channels}",
                 )
                 logged_format = True
             if buf.duration_ns > 0:
@@ -127,6 +179,24 @@ async def _drain_audio(request_iterator, state: _SessionState) -> None:
                 bps = _BYTES_PER_SAMPLE.get(buf.format, 2)
                 state.accumulated_audio_ms += int(
                     len(buf.buffer) / bps / buf.channels / buf.rate * 1000
+                )
+        elif msg.HasField("audio_frame"):
+            frame = msg.audio_frame
+            if not logged_format:
+                codec_name = af_pb.AudioCodec.Name(frame.codec)
+                _log(
+                    state.session_id,
+                    f"audio | shape=AudioFrame | codec={codec_name} | "
+                    f"rate={frame.sample_rate_hz} | channels={frame.channels}",
+                )
+                logged_format = True
+            # AudioFrame has no duration field; derive from bytes when
+            # the codec + rate + channels let us. Unknown codecs
+            # (UNSPECIFIED, OPUS) are skipped from the accumulator.
+            bps = _BYTES_PER_SAMPLE.get(frame.codec)
+            if bps and frame.sample_rate_hz and frame.channels:
+                state.accumulated_audio_ms += int(
+                    len(frame.payload) / bps / frame.channels / frame.sample_rate_hz * 1000
                 )
 
 
@@ -453,16 +523,19 @@ async def run_session(scenario: Scenario, request_iterator, context):
             context.set_trailing_metadata(list(scenario.grpc.trailing_metadata.items()))
 
         total_audio_ms = max(state.accumulated_audio_ms, scenario.stream.duration_ms)
-        overall_label = state.last_label if state.analysis_count > 0 else "unknown"
+        # A1: aggregate over actionable windows only, matching deepfake-service.
+        overall_score, overall_label = _aggregate_final(
+            state.actionable_scores, state.analysis_count,
+        )
         _log(
             state.session_id,
             f"end   | total={total_audio_ms}ms | analyses={state.analysis_count} "
-            f"| score={state.last_score:.3f} | label={overall_label}",
+            f"| score={overall_score:.3f} | label={overall_label}",
         )  # 'end  ' padded to verb width 5 — matches 'start' and 'fault'
         yield pb.DetectDeepfakeResponse(
             final_result=pb.FinalResult(
                 total_audio_ms=total_audio_ms,
-                overall_score=state.last_score,
+                overall_score=overall_score,
                 overall_label=overall_label,
                 analysis_count=state.analysis_count,
             ),

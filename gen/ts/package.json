@@ -1,15 +1,28 @@
 {
   "name": "@aurigin/protos",
   "version": "0.0.0",
-  "description": "Generated gRPC TypeScript stubs for Aurigin services",
+  "description": "Generated gRPC TypeScript stubs for Aurigin services (DeepfakeDetection + shared media types)",
   "license": "Apache-2.0",
+  "author": "Aurigin.ai <security@aurigin.ai>",
+  "keywords": [
+    "grpc",
+    "protobuf",
+    "aurigin",
+    "deepfake",
+    "deepfake-detection",
+    "audio",
+    "voice-authenticity"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Aurigin-ai/aurigin-protos.git"
   },
-  "homepage": "https://github.com/Aurigin-ai/aurigin-protos",
+  "homepage": "https://github.com/Aurigin-ai/aurigin-protos#readme",
   "bugs": {
     "url": "https://github.com/Aurigin-ai/aurigin-protos/issues"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -31,10 +44,13 @@
   },
   "dependencies": {
     "long": "^5.2.3",
-    "protobufjs": "^7.2.5"
+    "protobufjs": "^7.6.5"
   },
   "peerDependencies": {
     "@grpc/grpc-js": "^1.10.0"
+  },
+  "allowScripts": {
+    "protobufjs@7.6.5": true
   },
   "devDependencies": {
     "@grpc/grpc-js": "^1.10.0",

@@ -42,7 +42,8 @@ uv pip install aurigin-protos
 aurigin-protos/
 ├── proto/                    # .proto sources, mirrored by package path:
 │   ├── aurigin/deepfake_detection/v1/deepfake_detection.proto
-│   └── twilio/tme/extensions/common/v1/audio_buffer.proto  # vendored Twilio Media Extensions type
+│   ├── aurigin/media/v1/audio_frame.proto                  # AudioFrame + AudioCodec enum (new in 0.3.0)
+│   └── twilio/tme/extensions/common/v1/audio_buffer.proto  # vendored Twilio Media Extensions type (deprecated as of 0.3.0)
 ├── gen/
 │   ├── ts/                   # TypeScript package (ts-proto + @grpc/grpc-js)
 │   │   ├── package.json
@@ -64,12 +65,14 @@ aurigin-protos/
 │   │   ├── happy/                # canonical bonafide/spoofed/curve flows
 │   │   ├── edge/                 # oscillating, tail-strategy, silence-gate, etc.
 │   │   └── failure/              # event-level ERROR, gRPC UNAVAILABLE, DEADLINE_EXCEEDED
-│   ├── python/               # uv-managed: `uv run server|client|phone-call|phone-call-burst`
-│   │   ├── common/           # shared helpers: wav_reader / result_csv / tls / shutdown
-│   │   └── sim/              # scenario-driven simulator (loader + curves + runner)
-│   └── typescript/           # npm-managed: `npm run server|client|phone-call|phone-call-burst`
-│       ├── common/           # mirror of python/common/
-│       └── sim/              # mirror of python/sim/
+│   ├── python/               # client examples: `uv run client|phone-call|phone-call-burst`
+│   │   └── common/           # shared helpers: wav_reader / result_csv / tls / shutdown
+│   ├── typescript/           # client examples: `npm run client|phone-call|phone-call-burst`
+│   │   └── common/           # mirror of python/common/
+│   └── simulator/            # scenario-driven simulator services (one dir per RPC)
+│       └── deepfake/         # aurigin-deepfake-simulator-service (Python package,
+│                             #   Docker image, docker-compose). Drives both Python
+│                             #   and TypeScript client smoke tests.
 ├── infra/                    # AWS + public-registry runbooks (no IaC, just docs)
 │   ├── aws/                  # OIDC + publisher role + CodeArtifact setup
 │   └── public/               # PyPI / npm Trusted Publishers + visibility checklist
@@ -90,8 +93,17 @@ aurigin-protos/
 For maintainers (publishing):
 
 - `buf` — `brew install bufbuild/buf/buf`
-- Node 22+ — used to run `ts-proto` and build the TS package
-- Python 3.10+ with `build` (only — the publish workflows run `twine` themselves)
+- **Node 24** across every workflow (`ci.yml`, `publish-codeartifact.yml`,
+  `publish-npm.yml`), all via `actions/setup-node@v6`. Node 24 is
+  required because public npm publishing uses Trusted Publishing (OIDC
+  → npmjs.com) which needs npm ≥ 11.5.1, and that npm version ships
+  bundled with Node 24 + setup-node@v6. Local dev on Node 22 mostly
+  works but a fresh `npm publish` locally would fail the trusted-
+  publishing handshake.
+- **Python 3.11** for every workflow (`ci.yml`, `publish-pypi.yml`,
+  `publish-codeartifact.yml` all pin 3.11). Consumer minimum is 3.10 —
+  what `gen/py/pyproject.toml` declares. Any 3.11+ with `build` on it
+  works for local dry-runs.
 - AWS CLI v2 with credentials for the shared account, for local dry-runs of the CodeArtifact path. Not required for public publishing — `publish-pypi.yml` and `publish-npm.yml` run purely on OIDC tokens from GitHub.
 - `gh` CLI authenticated against the `Aurigin-ai` org — required to cut a release (`gh workflow run release.yml -f version=X.Y.Z`, which dispatches all three publish workflows for you). Direct dispatch of `publish-codeartifact.yml` / `publish-pypi.yml` / `publish-npm.yml` is available for re-runs and recoveries.
 
@@ -165,6 +177,10 @@ npm install @aurigin/protos @grpc/grpc-js
 ```ts
 import { credentials } from "@grpc/grpc-js";
 import { DeepfakeDetectionClient } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+// New in 0.3.0 — self-describing audio frame (codec / sample_rate_hz /
+// channels on the message). Preferred over the deprecated Twilio-vendored
+// AudioBuffer for all new integrations.
+import { AudioFrame, AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
 
 const client = new DeepfakeDetectionClient(
   "localhost:50051",
@@ -172,7 +188,8 @@ const client = new DeepfakeDetectionClient(
 );
 ```
 
-Full server + client snippets: [examples/typescript/](examples/typescript/).
+Full client snippets: [examples/typescript/](examples/typescript/).
+Simulator server: [examples/simulator/deepfake/](examples/simulator/deepfake/).
 
 > *Aurigin engineers who need to install from the internal CodeArtifact channel (e.g. to pick up a tagged version before it has been promoted to public npm): see [`infra/aws/`](infra/aws/) for the connection details.*
 
@@ -184,10 +201,17 @@ uv pip install aurigin-protos
 
 ```python
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2, deepfake_detection_pb2_grpc
-from twilio.tme.extensions.common.v1 import audio_buffer_pb2
+# New in 0.3.0 — self-describing audio frame (codec / sample_rate_hz /
+# channels on the message). Preferred over the deprecated Twilio-vendored
+# AudioBuffer for all new integrations.
+from aurigin.media.v1 import audio_frame_pb2
+# Deprecated — kept importable so 0.2.x consumers keep working. Scheduled
+# for removal in 0.4.0.
+from twilio.tme.extensions.common.v1 import audio_buffer_pb2  # noqa: F401
 ```
 
-Full server + client snippets: [examples/python/](examples/python/).
+Full client snippets: [examples/python/](examples/python/).
+Simulator server: [examples/simulator/deepfake/](examples/simulator/deepfake/).
 
 > *Aurigin engineers who need to install from the internal CodeArtifact channel (e.g. to pick up a tagged version before it has been promoted to public PyPI, or to keep build inputs inside the AWS perimeter): see [`infra/aws/`](infra/aws/) for the connection details.*
 
@@ -207,8 +231,8 @@ A few conventions enforced at the repo level — worth knowing before opening a 
 1. Create `proto/<package-path>/<service>.proto` (file path must mirror the proto `package`).
 2. `make lint` — fail fast on naming, package, version-suffix and other STANDARD-rule violations before generating anything.
 3. `make generate` — produce Python and TypeScript stubs.
-4. Wire the new RPC into the example server and at least one example client in **both** languages (`examples/python/` and `examples/typescript/`). The Python server is a config-driven simulator (`examples/python/sim/`) — for a new RPC, extend `sim/runner.py` to handle its message types, and add one or more YAML scenarios under `examples/scenarios/` so consumers can exercise the new service end-to-end. The TypeScript server stays a thin stub. **Stub / scenario logic only — no real ML in this repo.**
-5. Add an end-to-end smoke test for the new RPC in **both** test suites (`examples/python/tests/test_smoke.py`, `examples/typescript/tests/smoke.test.ts`). The existing `DetectDeepfake` test is the template.
+4. Wire the new RPC into at least one example client in **both** languages (`examples/python/` and `examples/typescript/`). For the simulator side, either extend the existing `examples/simulator/deepfake/` service (if the new RPC belongs to the same detection surface) or add a sibling `examples/simulator/<service>/` package following the same layout (`pyproject.toml`, `Dockerfile`, `docker-compose.yml`, `src/<service>_simulator_service/`). Add one or more YAML scenarios under `examples/scenarios/` so consumers can exercise the new service end-to-end. **Stub / scenario logic only — no real ML in this repo.**
+5. Add an end-to-end smoke test for the new RPC in **both** test suites (`examples/python/tests/test_smoke.py`, `examples/typescript/tests/smoke.test.ts`). Both suites spawn the Python simulator as a subprocess; the existing `DetectDeepfake` test is the template.
 6. Run everything locally before pushing:
    ```bash
    make lint && make generate && \

@@ -1,12 +1,18 @@
-// End-to-end smoke test for the TS example.
+// End-to-end smoke test for the TS example clients.
 //
-// Spawns examples/typescript/server.ts and runs examples/typescript/client.ts
-// against it on a non-default port. The client falls back to streaming 3 s
-// of silence when examples/audio/ is empty (always the case in CI), so this
-// test exercises the full proto + gRPC wire path without needing fixtures.
+// Spawns the Python deepfake-simulator-service (canonical location:
+// examples/simulator/deepfake/) and runs the TypeScript client examples
+// against it on a non-default port. The client falls back to streaming
+// 3 s of silence when examples/audio/ is empty (always the case in CI),
+// so this test exercises the full proto + gRPC wire path without needing
+// fixtures.
 //
 // Catches anything that breaks the example: proto field renames, message
-// removals, RPC name changes, ts-proto API shifts, server impl bugs.
+// removals, RPC name changes, ts-proto API shifts, simulator impl bugs.
+//
+// Requires `python3` and the aurigin-deepfake-simulator-service package
+// importable on PYTHONPATH (or `uv sync`-ed at that location). CI does the
+// same via a small pre-test shell block.
 //
 // Run with: node --import tsx --test tests/smoke.test.ts
 
@@ -20,6 +26,9 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXAMPLES_DIR = path.resolve(__dirname, "..");
+const REPO_ROOT = path.resolve(EXAMPLES_DIR, "..", "..");
+const SIMULATOR_SRC = path.join(REPO_ROOT, "examples", "simulator", "deepfake", "src");
+const GEN_PY = path.join(REPO_ROOT, "gen", "py");
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -53,10 +62,30 @@ async function waitForPort(port: number, timeoutMs = 15_000): Promise<boolean> {
 }
 
 function startServer(port: number): ChildProcess {
-  return spawn("npx", ["tsx", path.join(EXAMPLES_DIR, "server.ts")], {
-    env: { ...process.env, PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // Spawn the canonical Python simulator via `uv run --with …` so its
+  // runtime deps (grpcio/protobuf/pyyaml/jsonschema) resolve in an
+  // ephemeral env without needing a pre-install step. PYTHONPATH still
+  // covers the generated protobuf stubs + the simulator package src/.
+  // Mirrors the smoke-py Makefile target so both language jobs use the
+  // same "no persistent Python env" invocation, PEP 668-safe on macOS
+  // Homebrew Python 3.14 and clean on CI Ubuntu alike.
+  return spawn(
+    "uv",
+    [
+      "run", "--no-project", "--python", "3.11",
+      "--with", "grpcio", "--with", "protobuf",
+      "--with", "pyyaml", "--with", "jsonschema",
+      "python", "-m", "deepfake_simulator_service",
+    ],
+    {
+      env: {
+        ...process.env,
+        PORT: String(port),
+        PYTHONPATH: [GEN_PY, SIMULATOR_SRC, process.env.PYTHONPATH ?? ""].join(path.delimiter),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
 }
 
 function runProc(scriptPath: string, args: string[] = []): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -132,6 +161,23 @@ const phoneCallFixtures: { name: string; file: string; header: RegExp }[] = [
   // backend_simulation tests below); default-scenario roundtrip coverage
   // here, separate from the tail-strategy assertions there.
   { name: "S16LE 16 kHz mono (10s tail)", file: "test_call_10s_tail.wav", header: /16000Hz\/1ch S16LE/ },
+  // G.711 μ-law 8 kHz mono — exercises the new-in-0.3.0 PCMU codec
+  // branch (both the WAV reader's format-tag dispatch AND
+  // AudioFrame.codec=AUDIO_CODEC_PCMU on the wire).
+  { name: "PCMU 8 kHz mono", file: "test_call_mulaw.wav", header: /8000Hz\/1ch PCMU/ },
+  // G.711 A-law 8 kHz mono — same as above for the PCMA branch.
+  { name: "PCMA 8 kHz mono", file: "test_call_alaw.wav", header: /8000Hz\/1ch PCMA/ },
+  // 24-bit signed linear PCM 8 kHz mono — exercises AUDIO_CODEC_S24LE
+  // + doubles as coverage for the WAVE_FORMAT_EXTENSIBLE (0xfffe)
+  // unwrap path, since ffmpeg emits >16-bit PCM under the EXTENSIBLE
+  // envelope by default (SubFormat GUID = KSDATAFORMAT_SUBTYPE_PCM).
+  { name: "S24LE 8 kHz mono", file: "test_call_s24le.wav", header: /8000Hz\/1ch S24LE/ },
+  // 32-bit signed linear PCM 8 kHz mono — AUDIO_CODEC_S32LE path,
+  // also under an EXTENSIBLE envelope.
+  { name: "S32LE 8 kHz mono", file: "test_call_s32le.wav", header: /8000Hz\/1ch S32LE/ },
+  // WebRTC-shape S16LE 48 kHz mono — exercises the 48 kHz rate that
+  // native WebRTC audio graphs (browsers, aurigin client SDKs) emit.
+  { name: "WebRTC S16LE 48 kHz mono", file: "test_call_webrtc_48k.wav", header: /48000Hz\/1ch S16LE/ },
 ];
 
 for (const { name, file, header } of phoneCallFixtures) {

@@ -16,6 +16,7 @@ import {
   type DetectDeepfakeRequest,
   type DetectDeepfakeResponse,
 } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+import { AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
 import {
   type ChunkRow, ResultCSV, type WavData,
   channelCredentials, readWav, transportLabel,
@@ -36,15 +37,16 @@ function* silentChunks(): Generator<DetectDeepfakeRequest> {
   for (let i = 0; i < SILENCE_CHUNKS; i++) {
     const samples = Math.floor((DEFAULT_RATE * CHUNK_MS) / 1000);
     const chunk = Buffer.alloc(samples * CHANNELS * 2);
-    const durationNs = BigInt(CHUNK_MS) * 1_000_000n;
     yield {
-      audio: {
-        type: "audio/x-raw", format: "S16LE",
-        channels: CHANNELS, rate: DEFAULT_RATE,
-        durationNs, ptsNs, size: BigInt(chunk.length), buffer: chunk,
+      audioFrame: {
+        codec: AudioCodec.AUDIO_CODEC_S16LE,
+        sampleRateHz: DEFAULT_RATE,
+        channels: CHANNELS,
+        payload: chunk,
+        ptsNs,
       },
     };
-    ptsNs += durationNs;
+    ptsNs += BigInt(CHUNK_MS) * 1_000_000n;
   }
 }
 
@@ -57,15 +59,16 @@ function* wavChunks(wav: WavData): Generator<DetectDeepfakeRequest> {
   for (let i = 0; i < wav.samples.length; i += bytesPerChunk) {
     const chunk = wav.samples.subarray(i, Math.min(i + bytesPerChunk, wav.samples.length));
     const actualFrames = chunk.length / bytesPerFrame;
-    const durationNs = BigInt(Math.round((actualFrames / wav.rate) * 1e9));
     yield {
-      audio: {
-        type: "audio/x-raw", format: wav.wireFormat,
-        channels: wav.channels, rate: wav.rate,
-        durationNs, ptsNs, size: BigInt(chunk.length), buffer: chunk,
+      audioFrame: {
+        codec: wav.audioCodec,
+        sampleRateHz: wav.rate,
+        channels: wav.channels,
+        payload: chunk,
+        ptsNs,
       },
     };
-    ptsNs += durationNs;
+    ptsNs += BigInt(Math.round((actualFrames / wav.rate) * 1e9));
   }
 }
 
@@ -143,7 +146,7 @@ async function main() {
     ? fs.readdirSync(audioDir).filter((f) => f.endsWith(".wav")).sort().map((f) => path.join(audioDir, f))
     : [];
 
-  console.error(`# transport=${transportLabel("client")}`);
+  console.error(`# transport=${transportLabel()}`);
 
   let csv: ResultCSV | null = null;
   if (csvPath) {

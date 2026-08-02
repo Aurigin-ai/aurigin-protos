@@ -50,9 +50,16 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
+
+      # `uv` is needed by the TS smoke test — tests/smoke.test.ts spawns
+      # the Python simulator via `uv run --with …` so its runtime deps
+      # (grpcio/protobuf/pyyaml/jsonschema) resolve in an ephemeral env
+      # without a pre-install step. Same interpreter pin as the smoke-py
+      # target (Python 3.11).
+      - uses: astral-sh/setup-uv@v7
 
       - name: Generate stubs
         run: make generate
@@ -66,12 +73,17 @@ jobs:
         run: npm pack
 
       - name: tsc strict check on examples
+        # The example ships with `@aurigin/protos: ^0.2.0` in package.json
+        # (matches the last publicly-published version). Override with the
+        # locally-built tarball via `--no-save` so tsc checks against the
+        # current proto surface (AudioFrame, AudioCodec) without needing
+        # the new version published yet.
         working-directory: examples/typescript
         run: |
           npm install --no-save ../../gen/ts/aurigin-protos-*.tgz tsx typescript @grpc/grpc-js
           npx tsc --noEmit
 
-      - name: Example end-to-end smoke test (server + client roundtrip)
+      - name: Example end-to-end smoke test (client → Python simulator roundtrip)
         working-directory: examples/typescript
         run: npm test
 
@@ -85,17 +97,21 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: '24'
 
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
       - name: Install Python build deps
-        # pyyaml + jsonschema are needed by examples/python/sim/loader.py at
-        # server startup (scenario YAML + schema validation).
+        # pyyaml + jsonschema are runtime deps of the deepfake simulator
+        # service (examples/simulator/deepfake/) — the sim/loader.py inside
+        # loads scenario YAML and validates against scenario.schema.json at
+        # startup. Kept on the system Python so both the Python and
+        # TypeScript smoke tests (both spawn the simulator as a subprocess)
+        # can import them without a per-language `uv sync`.
         run: pip install --upgrade build grpcio protobuf pytest pyyaml jsonschema
 
       - name: Generate stubs
@@ -122,7 +138,11 @@ jobs:
           print('OK')
           "
 
-      - name: Example end-to-end smoke test (server + client roundtrip)
+      - name: Example end-to-end smoke test (client → Python simulator roundtrip)
+        # The test spawns the deepfake-simulator-service (examples/simulator/
+        # deepfake/) as a subprocess and manages PYTHONPATH for that child
+        # inside the test itself; this parent-process PYTHONPATH is only for
+        # pytest's own imports (the examples/python/common package).
         env:
           PYTHONPATH: ${{ github.workspace }}/gen/py:${{ github.workspace }}/examples/python
         run: pytest examples/python/tests/ -v

@@ -23,7 +23,7 @@
 //
 // CLI:
 //   tsx phone_call_burst.ts [--audio FILE] [--target localhost:50051]
-//                           [--chunk-ms 100] [--duration 30]
+//                           [--chunk-ms 20] [--duration 30]
 //                           [-c|--concurrency 5] [--stagger-ms 500]
 //                           [--scenario-id ID] [--csv PATH]
 
@@ -47,7 +47,7 @@ import {
 // relationship explicit and prevents drift between the two files' loops.
 import { type Call, type ResponseSink, recvCall, sendCall } from "./phone_call.js";
 
-const DEFAULT_CHUNK_MS = 100;
+const DEFAULT_CHUNK_MS = 20;   // RTP wire default (see phone_call.ts rationale)
 const DEFAULT_DURATION_S = 30;
 const DEFAULT_CONCURRENCY = 1;
 
@@ -197,7 +197,7 @@ async function main() {
       `(${wavDurationS(wav).toFixed(2)}s @ ${wav.rate}Hz/${wav.channels}ch ${wav.wireFormat}) ` +
       `| duration=${args.duration.toFixed(1)}s | frame=${args.chunkMs}ms | ` +
       `concurrency=${args.concurrency}${staggerSuffix}${scenarioSuffix} ` +
-      `| transport=${transportLabel("client")}`,
+      `| transport=${transportLabel()}`,
   );
   console.log("─".repeat(70));
 

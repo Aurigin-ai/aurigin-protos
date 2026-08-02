@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package aurigin.deepfake_detection.v1;
 
+import "aurigin/media/v1/audio_frame.proto";
 import "twilio/tme/extensions/common/v1/audio_buffer.proto";
 
 // Deepfake Detection Service.
@@ -33,7 +34,15 @@ message CreateSessionRequest {
 message DetectDeepfakeRequest {
   oneof request {
     CreateSessionRequest create_session_request = 1;
-    twilio.tme.extensions.common.v1.AudioBuffer audio = 2;
+    // DEPRECATED as of 0.3.0 — use `audio_frame` instead. Kept so
+    // existing consumers of aurigin-protos 0.2.x continue to work
+    // during the migration window. Scheduled for removal in 0.4.0
+    twilio.tme.extensions.common.v1.AudioBuffer audio = 2 [deprecated = true];
+    // Aurigin-native self-describing audio frame — codec + sample rate
+    // + channels ride on the message so no session-open coordination
+    // is needed. New clients should populate this field; the deepfake
+    // service accepts either shape.
+    aurigin.media.v1.AudioFrame audio_frame = 3;
   }
 }
 
@@ -59,7 +68,7 @@ message CreateSessionResponse {
 // ============================================================================
 
 message DetectionConfig {
-  // How many seconds of audio to accumulate before running analysis (default: 3.0).
+  // How many seconds of audio to accumulate before running analysis (default: 5.0).
   optional float analysis_interval_s = 1;
   // Model version to use, e.g. "stable" or "dev-v4" (default: server default).
   optional string model_version = 2;

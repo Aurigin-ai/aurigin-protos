@@ -15,7 +15,7 @@
 //
 // CLI:
 //   tsx phone_call.ts [--audio FILE] [--target localhost:50051]
-//                     [--chunk-ms 100] [--duration 30]
+//                     [--chunk-ms 20] [--duration 30]
 //                     [--scenario-id ID]
 //
 // Defaults:
@@ -34,6 +34,7 @@ import {
   type DetectDeepfakeRequest,
   type DetectDeepfakeResponse,
 } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+import { AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
 
 import {
   type ChunkRow,
@@ -45,7 +46,11 @@ import {
   transportLabel,
 } from "./common/index.js";
 
-const DEFAULT_CHUNK_MS = 100;
+// 20 ms matches RTP wire packetization (RFC 3551 ptime=20 for PCMU/PCMA)
+// and every real ingress we care about — Twilio Media Streams, Genesys
+// AudioHook, NICE VoiceStream, FreeSWITCH mod_audio_fork default, Teams
+// Media Bot. Overridable via --chunk-ms for perf experiments.
+const DEFAULT_CHUNK_MS = 20;
 const DEFAULT_DURATION_S = 30;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -80,7 +85,7 @@ function resolveAudio(arg: string | null): string {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// Stream `wav` in real-time-paced AudioBuffer chunks until `durationS` is up.
+// Stream `wav` in real-time-paced AudioFrame chunks until `durationS` is up.
 //
 // Also imported by phone_call_burst.ts — same loop, just instantiated N times.
 //
@@ -112,10 +117,12 @@ export async function sendCall(
     const durationNs = BigInt(Math.round((actualFrames / wav.rate) * 1e9));
 
     call.write({
-      audio: {
-        type: "audio/x-raw", format: wav.wireFormat,
-        channels: wav.channels, rate: wav.rate,
-        durationNs, ptsNs, size: BigInt(chunk.length), buffer: chunk,
+      audioFrame: {
+        codec: wav.audioCodec,
+        sampleRateHz: wav.rate,
+        channels: wav.channels,
+        payload: chunk,
+        ptsNs,
       },
     });
     ptsNs += durationNs;
@@ -238,7 +245,7 @@ async function main() {
     `📞 Calling ${args.target} | source=${path.basename(audioPath)} ` +
       `(${wavDurationS(wav).toFixed(2)}s @ ${wav.rate}Hz/${wav.channels}ch ${wav.wireFormat}) ` +
       `| duration=${args.duration.toFixed(1)}s | frame=${args.chunkMs}ms` +
-      `${scenarioSuffix} | transport=${transportLabel("client")}`,
+      `${scenarioSuffix} | transport=${transportLabel()}`,
   );
   console.log("─".repeat(70));
 

@@ -10,7 +10,19 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 
-SCHEMA_PATH = Path(__file__).resolve().parent.parent.parent / "scenarios" / "scenario.schema.json"
+# Walk from this file to examples/scenarios/scenario.schema.json:
+#   sim/loader.py
+#     → parents[0] = sim/
+#     → parents[1] = deepfake_simulator_service/
+#     → parents[2] = src/
+#     → parents[3] = deepfake/
+#     → parents[4] = simulator/
+#     → parents[5] = examples/
+# The schema lives with the shared example scenarios so both this loader
+# and any other consumer (docs, tooling, CI) reference a single source of
+# truth. Docker builds bake the whole scenarios/ tree into the image, so
+# the same relative resolution keeps working inside the container.
+SCHEMA_PATH = Path(__file__).resolve().parents[5] / "scenarios" / "scenario.schema.json"
 
 
 @dataclass(frozen=True)

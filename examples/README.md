@@ -2,6 +2,17 @@
 
 Reference snippets showing how to consume the generated packages.
 
+> **Note**: the scenario-driven simulator server used to live at
+> `python/server.py` + `typescript/server.ts`. It's been extracted to a
+> single canonical Python implementation at
+> [`simulator/deepfake/`](simulator/deepfake/), packaged as
+> `aurigin-deepfake-simulator-service` with a Dockerfile and
+> docker-compose. The `python/` and `typescript/` trees under here are
+> now **client-only** — the smoke tests in both languages spawn the
+> Python simulator as a subprocess. Wherever this README says "run the
+> server", read: `cd examples/simulator/deepfake && uv run
+> deepfake-simulator-service` (or `docker compose up`).
+
 ## Python (with `uv`)
 
 [`uv`](https://github.com/astral-sh/uv) is the recommended Python package manager for this repo's consumers — it's a drop-in pip replacement that's ~10–100× faster and handles project venvs automatically.
@@ -14,21 +25,26 @@ Install once: `brew install uv`.
 uv venv                                   # create .venv/
 uv pip install aurigin-protos grpcio
 
-uv run python examples/python/server.py   # in one terminal
-uv run python examples/python/client.py   # in another
+uv run python -m deepfake_simulator_service                # in one terminal (see simulator/deepfake/)
+uv run python examples/python/client.py                    # in another
 ```
 
 ### Self-contained uv project
 
-The `examples/python/` directory ships a `pyproject.toml` so you can run it as a self-contained uv project. `[project.scripts]` defines `server`, `client`, `phone-call`, and `phone-call-burst` entry points, mirroring the TypeScript example's `npm run server` / `npm run client` / etc.:
+The `examples/python/` directory ships a `pyproject.toml` so you can run it as a self-contained uv project. `[project.scripts]` defines `client`, `phone-call`, and `phone-call-burst` entry points, mirroring the TypeScript example's `npm run client` / etc. The scenario-driven simulator server lives in `examples/simulator/deepfake/` — see that directory for `uv run deepfake-simulator-service`.
 
 ```bash
+# Terminal 1 — start the simulator
+cd examples/simulator/deepfake
+uv sync
+uv run deepfake-simulator-service          # scenario-driven simulator on :50051
+
+# Terminal 2 — run a client
 cd examples/python
-uv sync                                   # creates .venv/, installs deps
-uv run server                             # scenario-driven simulator on :50051
-uv run client                             # batch client → localhost:50051
-uv run phone-call                         # single live call (the integration pattern)
-uv run phone-call-burst -c 5              # N concurrent calls (load test / multi-call architecture)
+uv sync                                    # creates .venv/, installs deps
+uv run client                              # batch client → localhost:50051
+uv run phone-call                          # single live call (the integration pattern)
+uv run phone-call-burst -c 5               # N concurrent calls (load test / multi-call architecture)
 ```
 
 Shared helpers (WAV reader, CSV writer, TLS auto-detect, signal-handler) live under `examples/python/common/` and re-export through `from common import …` — the three CLI scripts above stay focused on what they're demonstrating, not on infra glue.
@@ -41,10 +57,13 @@ Shared helpers (WAV reader, CSV writer, TLS auto-detect, signal-handler) live un
 cd examples/python
 
 just sync                                 # uv sync
-just server                               # scenario-driven simulator on :50051
+# The `just server` recipe is gone — the simulator lives in
+# examples/simulator/deepfake/ and is run from there. See that
+# directory's README for `uv run deepfake-simulator-service`
+# or `docker compose up`.
 just client                               # client → localhost:50051
 just client 127.0.0.1:50051               # client → aurigin-router backend-simulator
-just smoke                                # end-to-end pytest
+just smoke                                # end-to-end pytest (spawns the simulator as a subprocess)
 ```
 
 ### For a downstream service
@@ -64,7 +83,7 @@ dependencies = [
 
 > **Aurigin engineers** consuming a pre-promotion version from the internal AWS CodeArtifact mirror: see [`infra/aws/`](../infra/aws/) for the index URL and the `uv` configuration pattern.
 
-Expected client output (against `examples/python/server.py` running the `default` scenario, with no WAVs in `audio/`):
+Expected client output (against `deepfake-simulator-service` from `examples/simulator/deepfake/` running the `default` scenario, with no WAVs in `audio/`):
 
 ```
 === silence (3 s @ 16 kHz) ===
@@ -77,10 +96,10 @@ FINAL    | total=3000ms   | score=0.050 | label=bonafide
 
 The session id is generated per session (`sim-<8 hex>`) and the cadence comes from the loaded scenario (1 s by default). Pass `--scenario-id <id>` to `phone-call` to load a different scenario from `examples/scenarios/`.
 
-To run against real audio (real ML server required, e.g. backend-app's gRPC service), drop one or more `.wav` files into `examples/audio/` and re-run the client. Both 16-bit PCM (`S16LE`) and 32-bit IEEE-float (`F32LE`) WAVs are accepted, at any sample rate and channel count — the client reads the format tag from the RIFF header and tags the outgoing `AudioBuffer.format` accordingly. It opens one session per file. The `audio/` dir is gitignored.
+To run against real audio (real ML server required, e.g. backend-app's gRPC service), drop one or more `.wav` files into `examples/audio/` and re-run the client. Both 16-bit PCM (`S16LE`) and 32-bit IEEE-float (`F32LE`) WAVs are accepted, at any sample rate and channel count — the client reads the format tag from the RIFF header and stamps the outgoing message's codec accordingly (`AudioFrame.codec` on the new 0.3.0 wire, or legacy `AudioBuffer.format` on the deprecated 0.2.x path — see [Wire messages](#wire-messages--audioframe-new-in-030-and-audiobuffer-deprecated) below). It opens one session per file. The `audio/` dir is gitignored.
 
 Files:
-- `python/server.py` — scenario-driven simulator: loads YAML scenarios from `examples/scenarios/` at startup, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Listens on `[::]:50051`. Env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`.
+- `simulator/deepfake/` — **canonical scenario-driven simulator**, extracted here so both Python and TypeScript clients drive the same reference implementation. Packaged as `aurigin-deepfake-simulator-service` with a Dockerfile + docker-compose. Loads YAML scenarios from `examples/scenarios/` at startup, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Listens on `[::]:50051`. Env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`. See its own README for `uv run deepfake-simulator-service` and `docker compose up --build`.
 - `python/client.py` — streams every `.wav` in `examples/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` to point at a non-default server (default `localhost:50051`). Pass `--csv PATH` to additionally write per-chunk results to a CSV — see [CSV export](#csv-export) below.
 - `python/phone_call.py` — **minimal worked example** of the FreeSWITCH-fork integration pattern. Single live call: open bidi → real-time-paced sender + concurrent receiver → close. Heavily commented at the send loop because that's exactly the line that becomes `for await frame in fork_socket: ...` in a real `mod_audio_fork` / Twilio Media Stream / SIPREC integration.
 - `python/phone_call_burst.py` — the **recommended multi-call architecture**: one long-lived gRPC channel multiplexing N concurrent bidi streams (vs N separate channels). Same per-call building blocks (imported from `phone_call.py`), plus `--concurrency N` / `--stagger-ms` / per-stream `call-NN` labels / graceful shutdown across all streams / summary aggregation. Use it to find the connection-count knee on a real backend or to capture per-chunk results across many concurrent sessions (`--csv PATH`).
@@ -110,7 +129,7 @@ Requires `ffmpeg` on `$PATH`. The output `.wav` is gitignored along with all oth
 
 ```bash
 # Against backend-app's gRPC server (assumes a real ML server on :50051)
-uv run phone-call --duration 30 --chunk-ms 100 --audio audio/your_call.wav
+uv run phone-call --duration 30 --chunk-ms 20 --audio audio/your_call.wav
 
 # Or pick the first .wav in examples/audio/ automatically
 uv run phone-call --duration 30
@@ -206,27 +225,34 @@ Both implementations share the column list — the column constant lives in [`ex
 The `examples/typescript/` directory has its own `package.json` so you can install and run directly — `@aurigin/protos` resolves from public npmjs.com, no auth:
 
 ```bash
+# Terminal 1 — start the simulator (Python; see examples/simulator/deepfake/)
+cd examples/simulator/deepfake && uv run deepfake-simulator-service
+# or: docker compose up --build
+
+# Terminal 2 — TypeScript client
 cd examples/typescript
 npm install
 
-npm run server                         # scenario-driven simulator on :50051
 npm run client                         # client → localhost:50051
 npm run phone-call                     # paced WAV streamer → localhost:50051
-npm run scenarios                      # list available scenarios
 npm run call -- fake_detected_rising_curve       # 10 s call against that scenario
 npm run call -- fake_detected_rising_curve --duration 30   # override duration
 npm run burst -- --concurrency 5 --scenario-id fake_detected_rising_curve              # 5 simultaneous calls
 npm run burst -- --concurrency 5 --scenario-id fake_detected_rising_curve --stagger-ms 500   # 5, 500ms apart
 npm run tls                            # regenerate the committed self-signed certs (server + client)
-MTLS=1 npm run server                  # same server, demands a client cert (see TLS section)
 MTLS=1 npm run call -- default         # client presents its cert, transport=mTLS
-npm test                               # end-to-end smoke test
+npm test                               # end-to-end smoke test (spawns the Python simulator as a subprocess)
 ```
+
+> The `server` and `scenarios` npm scripts (and their `mtls-server`
+> variant) are gone — the scenario-driven simulator lives in
+> `examples/simulator/deepfake/` now. Run it from there or via
+> `docker compose up --build`.
 
 > **Aurigin engineers** consuming a pre-promotion version from the internal AWS CodeArtifact mirror: see [`infra/aws/`](../infra/aws/) for the npm registry config.
 
 Files:
-- `typescript/server.ts` — TS twin of `python/server.py`: scenario-driven simulator that loads YAML scenarios from `examples/scenarios/`, picks one per session via the `x-scenario-id` request-metadata header, emits AnalysisResults from the scenario's confidence curve + events, optionally injects gRPC-level faults. Same env vars: `PORT`, `SCENARIOS_DIR`, `SCENARIO_DEFAULT`. Sim logic in `typescript/sim/{curves,loader,runner}.ts` mirrors `python/sim/`.
+- `simulator/deepfake/` — the same canonical simulator both language clients target (see the Python section above for the full description). No TS twin: the previous `typescript/server.ts` and `typescript/sim/` were deleted when the simulator was extracted.
 - `typescript/client.ts` — streams every `.wav` in `examples/audio/` (one session per file) using `DeepfakeDetectionClient.detectDeepfake()`; falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` (e.g. `npm run client -- --target localhost:50051`) to point at a non-default server. Pass `--csv PATH` to additionally write per-chunk results to a CSV — see [CSV export](#csv-export) below.
 - `typescript/phone_call.ts` — TS twin of `python/phone_call.py`: single live call, the FreeSWITCH-fork integration pattern. Run with `npm run phone-call -- --audio ../audio/your.wav`.
 - `typescript/phone_call_burst.ts` — TS twin of `python/phone_call_burst.py`: N concurrent calls (recommended multi-call architecture). Run with `npm run phone-call-burst -- -c 5`. Supports `--csv PATH`.
@@ -242,6 +268,127 @@ Files:
 | `oneof response { ... }` | discriminated optional fields on the message (e.g. `response.analysisResult`) |
 
 Deep imports use the proto path: `@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection`.
+
+## Wire messages — `AudioFrame` (new in 0.3.0) and `AudioBuffer` (deprecated)
+
+`DetectDeepfakeRequest.oneof request` accepts three alternatives — one
+for session setup and **two shapes for audio frames**:
+
+```proto
+message DetectDeepfakeRequest {
+  oneof request {
+    CreateSessionRequest              create_session_request = 1;
+    twilio.tme.extensions.common.v1.AudioBuffer  audio       = 2 [deprecated = true];  // legacy 0.2.x shape
+    aurigin.media.v1.AudioFrame                  audio_frame = 3;                       // new in 0.3.0 — preferred
+  }
+}
+```
+
+### `AudioFrame` — the recommended shape
+
+Self-describing: `codec` + `sample_rate_hz` + `channels` ride on every
+message, so no session-open coordination or free-form format string is
+needed. The codec may even change mid-stream (e.g. Teams SDP renegotiation)
+without a wire break.
+
+```proto
+message AudioFrame {
+  AudioCodec codec        = 1;
+  uint32     sample_rate_hz = 2;   // 8000 / 16000 / 48000
+  uint32     channels      = 3;   // 1 at Aurigin edge today; kept for headroom
+  bytes      payload       = 4;   // the audio bytes
+
+  optional uint64 pts_ns   = 5;   // presentation timestamp, advisory
+  optional uint64 sequence = 6;   // monotonic per-stream, gap detection
+}
+```
+
+### `AudioCodec` — the enum
+
+| Value | Notes |
+|---|---|
+| `AUDIO_CODEC_UNSPECIFIED = 0` | **Reject sentinel.** proto3 injects 0 when the client forgets to set the field; the simulator (and every real deepfake receiver) returns `INVALID_ARGUMENT` on receipt so the bug surfaces on frame 1. Never a valid runtime codec. |
+| `AUDIO_CODEC_S16LE = 1` | 16-bit signed linear PCM, little-endian. What Teams' Media Bot host, FreeSWITCH `mod_audio_fork`, and most SDKs emit after their own decode. 2 bytes/sample. |
+| `AUDIO_CODEC_S16BE = 2` | 16-bit signed linear PCM, **big-endian**. Wire-compatible with IETF L16 (RFC 3551, `audio/L16`) — Genesys AudioHook's high-fidelity option. 2 bytes/sample. |
+| `AUDIO_CODEC_S24LE = 3` | 24-bit signed linear PCM, little-endian, packed 3-bytes-per-sample. Common in pro-audio and broadcast WAVs. Deepfake decodes via a vectorised numpy pad-to-int32 + astype-to-float32 pass. 3 bytes/sample. |
+| `AUDIO_CODEC_S32LE = 4` | 32-bit signed linear PCM, little-endian. Same wire width as F32LE but different interpretation (integer, not float). Deepfake decodes via a single vectorised numpy int32→float32 pass. 4 bytes/sample. |
+| `AUDIO_CODEC_F32LE = 5` | 32-bit IEEE-float PCM, little-endian, samples in `[-1, +1]`. What `soundfile` / librosa export for high-precision recordings. 4 bytes/sample. |
+| `AUDIO_CODEC_PCMU = 6`  | G.711 μ-law, 8-bit — telco default (NICE VoiceStream, Genesys AudioHook default, SIPREC PT=0). 1 byte/sample. |
+| `AUDIO_CODEC_PCMA = 7`  | G.711 A-law, 8-bit — European PSTN trunks and SIPREC PT=8. 1 byte/sample. |
+| `AUDIO_CODEC_OPUS = 8`  | Opus (RFC 6716). **Reserved from 0.3.0** so the enum value is stable for future clients; the decoder is not shipped in this wave. Receivers reject with `UNIMPLEMENTED`. |
+
+### `AudioBuffer` — deprecated
+
+The Twilio-vendored `AudioBuffer` message still works — 0.2.x consumers
+don't have to change anything to keep talking to a 0.3.0+ server. It's
+marked `[deprecated = true]` and scheduled for removal in **0.4.0**.
+Its free-form `format` string field carries codec identity in the old
+shape (`"S16LE"` / `"F32LE"` only — telco codecs were never accepted
+through this path).
+
+### Building an `AudioFrame` — Python
+
+```python
+from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
+from aurigin.media.v1 import audio_frame_pb2 as af
+
+req = pb.DetectDeepfakeRequest(
+    audio_frame=af.AudioFrame(
+        codec=af.AUDIO_CODEC_PCMU,       # G.711 μ-law
+        sample_rate_hz=8000,
+        channels=1,
+        payload=ulaw_bytes,              # raw wire bytes — no client-side decode
+        # pts_ns / sequence optional
+    ),
+)
+```
+
+The `examples/python/common/wav_reader.py` `WavData` helper exposes an
+`audio_codec` property that returns the matching `AudioCodec` value
+(S16LE or F32LE) so client code doesn't have to repeat the
+format→enum mapping.
+
+### Building an `AudioFrame` — TypeScript
+
+```ts
+import { DetectDeepfakeRequest } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+import { AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
+
+const req: DetectDeepfakeRequest = {
+  request: {
+    $case: "audioFrame",
+    audioFrame: {
+      codec: AudioCodec.AUDIO_CODEC_PCMU,
+      sampleRateHz: 8000,
+      channels: 1,
+      payload: ulawBytes,
+    },
+  },
+};
+```
+
+### Migration guidance
+
+- **New integrations**: use `audio_frame`. Full stop.
+- **Existing 0.2.x consumers**: keep working with `audio` (AudioBuffer)
+  until you're ready to migrate. Field-for-field mapping:
+
+  | AudioBuffer field | AudioFrame equivalent |
+  |---|---|
+  | `format = "S16LE"` string | `codec = AUDIO_CODEC_S16LE` enum |
+  | `format = "F32LE"` string | `codec = AUDIO_CODEC_F32LE` enum |
+  | `rate` | `sample_rate_hz` |
+  | `channels` | `channels` |
+  | `buffer` | `payload` |
+  | `pts_ns` | `pts_ns` (unchanged) |
+  | `duration_ns` | *derived by the receiver* from `len(payload) / bytes_per_sample / channels / sample_rate_hz` |
+  | `type = "audio/x-raw"` | *dropped* (was always the same constant) |
+  | `size` | *dropped* (redundant with `len(payload)`) |
+
+- **Simulator behaviour**: `examples/simulator/deepfake/` accepts both
+  wire shapes on the same server, so a mixed-consumer environment
+  (some clients on 0.2.x, others on 0.3.0) works without a coordinated
+  cut-over.
 
 ## TLS (on by default) and mTLS (opt-in)
 
@@ -268,15 +415,19 @@ DeepfakeDetection simulator listening on :50051 | ... | transport=mTLS (self-sig
 
 ### Plain TLS (default)
 
-Nothing to set. Start the server and client; the cert auto-detect kicks in.
+Nothing to set. Start the simulator and client; the cert auto-detect kicks in.
 
 ```bash
-# Python
-just server                            # transport=TLS
+# Simulator (Python — canonical, drives both language clients)
+cd examples/simulator/deepfake
+uv run deepfake-simulator-service      # transport=TLS
+
+# Python client
+cd examples/python
 just call default                      # transport=TLS
 
-# TypeScript
-npm run server                         # transport=TLS
+# TypeScript client
+cd examples/typescript
 npm run call -- default                # transport=TLS
 ```
 
@@ -292,13 +443,17 @@ Set `MTLS=1` on the **server** and the **client** process. Asymmetric configurat
 | **1** | **1** | mTLS — both sides verify each other |
 
 ```bash
-# Python
-MTLS=1 just server                     # transport=mTLS
+# Simulator (Python — canonical)
+cd examples/simulator/deepfake
+MTLS=1 uv run deepfake-simulator-service   # transport=mTLS
+
+# Python client
+cd examples/python
 MTLS=1 just call default               # transport=mTLS
 MTLS=1 just burst 5 default            # 5 mTLS streams, all over the same channel
 
-# TypeScript
-MTLS=1 npm run server                  # transport=mTLS
+# TypeScript client
+cd examples/typescript
 MTLS=1 npm run call -- default         # transport=mTLS
 ```
 
@@ -324,8 +479,13 @@ Useful for benchmarking or for pointing the client at a server that's behind a T
 
 ```bash
 rm examples/certs/server.{crt,key}                       # permanent — remove the cert from the tree
-TLS_CERT=/dev/null TLS_KEY=/dev/null just server         # one-shot override (server)
-TLS_CA=/dev/null just client                             # one-shot override (client / phone-call)
+
+# One-shot override (simulator)
+cd examples/simulator/deepfake
+TLS_CERT=/dev/null TLS_KEY=/dev/null uv run deepfake-simulator-service
+
+# One-shot override (client / phone-call — Python or TypeScript)
+TLS_CA=/dev/null just client
 ```
 
 The server side reads `TLS_CERT` + `TLS_KEY` (TLS) and `TLS_CLIENT_CA` (mTLS). The client side reads `TLS_CA` (TLS) and `TLS_CLIENT_CERT` / `TLS_CLIENT_KEY` (mTLS). Pointing any of them at a non-existent path takes the insecure branch.
@@ -334,9 +494,13 @@ The server side reads `TLS_CERT` + `TLS_KEY` (TLS) and `TLS_CLIENT_CA` (mTLS). T
 
 Drop your own `server.crt` and `server.key` (and `client.{crt,key}` if you want mTLS) into `examples/certs/`, overwriting the committed examples, and restart. The auto-detect logic doesn't care who signed them. For Let's Encrypt or internal CAs, see the trust-model breakdown in [`certs/README.md`](certs/README.md).
 
-## Configuring the server
+## Configuring the simulator
 
-Both `python/server.py` and `typescript/server.ts` are the same scenario-driven simulator — same env vars, same `x-scenario-id` metadata selector, same YAML scenario format. Everything below applies to either implementation.
+The simulator lives in [`simulator/deepfake/`](simulator/deepfake/) and
+is packaged as `aurigin-deepfake-simulator-service`. Both the Python and
+TypeScript client examples target it — the previous per-language server
+implementations were retired. Everything below applies to that one
+canonical service.
 
 ### Env vars
 
@@ -346,11 +510,15 @@ Both `python/server.py` and `typescript/server.ts` are the same scenario-driven 
 | `SCENARIOS_DIR` | `<repo>/examples/scenarios` | Directory the server walks at startup. Every `*.yaml` under it (recursive) is loaded and validated against `scenario.schema.json`. Duplicate `scenario.id` is a startup error. |
 | `SCENARIO_DEFAULT` | `default` | Scenario id used when the client doesn't send `x-scenario-id` or sends an unknown id. Must match one of the loaded scenarios or the server exits at startup. |
 
-Example — point both servers at a custom directory on a non-default port:
+Example — point the simulator at a custom directory on a non-default port:
 
 ```bash
-PORT=50061 SCENARIOS_DIR=$HOME/my-scenarios uv run server                 # Python
-PORT=50061 SCENARIOS_DIR=$HOME/my-scenarios npm run server                # TypeScript
+cd examples/simulator/deepfake
+PORT=50061 SCENARIOS_DIR=$HOME/my-scenarios uv run deepfake-simulator-service
+
+# Or via docker-compose (same env vars work — either export them or
+# add them to the `environment:` block in docker-compose.yml):
+PORT=50061 SCENARIOS_DIR=/scenarios docker compose up --build
 ```
 
 ### Selecting a scenario per session
