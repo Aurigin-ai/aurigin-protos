@@ -113,9 +113,9 @@ message FingerprintConfig {
 // default (TAIL_STRATEGY, typically DROP).
 enum TailStrategy {
   TAIL_STRATEGY_UNSPECIFIED = 0;
-  TAIL_STRATEGY_DROP        = 1;
-  TAIL_STRATEGY_EXTEND      = 2;
-  TAIL_STRATEGY_RECOMPUTE   = 3;
+  TAIL_STRATEGY_DROP = 1;
+  TAIL_STRATEGY_EXTEND = 2;
+  TAIL_STRATEGY_RECOMPUTE = 3;
 }
 
 // ============================================================================
