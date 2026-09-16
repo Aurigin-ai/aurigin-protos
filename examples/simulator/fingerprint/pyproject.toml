@@ -1,0 +1,37 @@
+[project]
+name = "aurigin-fingerprint-simulator-service"
+version = "0.0.0"
+description = "Minimal deterministic gRPC simulator for aurigin Fingerprint.ExtractFingerprint."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    # Consumed by the generated stubs the server responds with. Aligned with
+    # the aurigin-protos version this repo publishes; bump in lockstep on
+    # each aurigin-protos release. The pin uses the public PyPI package;
+    # dev runs use the locally-generated gen/py/ tree via PYTHONPATH so this
+    # pin doesn't actually gate local iteration.
+    "aurigin-protos>=0.3.1",
+    "grpcio>=1.62",
+    # No pyyaml / jsonschema — fingerprint simulator is deliberately
+    # scenario-less. Embeddings are derived deterministically from the
+    # audio payload so the same input always produces the same 768-d
+    # unit vector on any machine (useful for smoke tests + fixture
+    # diffs). Add a scenario system if/when embedding-behaviour tests
+    # need it.
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+# `uv run fingerprint-simulator-service` and the Docker ENTRYPOINT both land here.
+fingerprint-simulator-service = "fingerprint_simulator_service.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fingerprint_simulator_service"]

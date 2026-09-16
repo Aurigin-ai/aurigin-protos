@@ -252,3 +252,107 @@ for (const { scenarioId, durationS, expectedAnalyses, extraSubstrings } of backe
     });
   });
 }
+
+// ─── fingerprint simulator + client ────────────────────────────────────
+//
+// Same pattern as the deepfake tests above, but points at the fingerprint
+// simulator (deterministic sha256-seeded synthetic embeddings — no
+// scenarios, no YAML). Two tests:
+//
+//   1. Silence roundtrip — proto/wire smoke on the fallback path.
+//   2. Determinism — the sim's core invariant is "same input → same
+//      embedding". Run the silence client twice, assert the same
+//      fingerprint_code both times. Catches non-deterministic drift in
+//      _synthetic_embedding() (seed source, PRNG constants, normalisation
+//      order) before it leaks into consumer test suites that rely on
+//      stable codes.
+//
+// No fingerprint-specific WAV fixture matrix — the "same input → same
+// code" pattern is already covered by the determinism test; adding the
+// deepfake fixture matrix here would triple test runtime for zero extra
+// fingerprint-side signal.
+
+const FINGERPRINT_SIMULATOR_SRC = path.join(REPO_ROOT, "examples", "simulator", "fingerprint", "src");
+
+function startFingerprintServer(port: number): ChildProcess {
+  return spawn(
+    "uv",
+    [
+      "run", "--no-project", "--python", "3.11",
+      "--with", "grpcio", "--with", "protobuf",
+      "python", "-m", "fingerprint_simulator_service",
+    ],
+    {
+      env: {
+        ...process.env,
+        PORT: String(port),
+        PYTHONPATH: [GEN_PY, FINGERPRINT_SIMULATOR_SRC, process.env.PYTHONPATH ?? ""].join(path.delimiter),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+}
+
+async function withFingerprintServer<T>(fn: (port: number) => Promise<T>): Promise<T> {
+  const port = await freePort();
+  const server = startFingerprintServer(port);
+  let serverOutput = "";
+  server.stdout?.on("data", (d: Buffer) => { serverOutput += d.toString(); });
+  server.stderr?.on("data", (d: Buffer) => { serverOutput += d.toString(); });
+  try {
+    const reachable = await waitForPort(port);
+    assert.ok(reachable, `Fingerprint server didn't bind on :${port} within 15 s.\n${serverOutput}`);
+    return await fn(port);
+  } finally {
+    await killAndWait(server);
+  }
+}
+
+test("fingerprint_client streams silence and roundtrips one EmbeddingResult", async () => {
+  await withFingerprintServer(async (port) => {
+    const { code, stdout, stderr } = await runProc(
+      path.join(EXAMPLES_DIR, "fingerprint_client.ts"),
+      ["--target", `localhost:${port}`],
+    );
+    assert.equal(code, 0, `fingerprint_client failed: stderr=${stderr}`);
+    assert.match(stdout, /Session: /, `missing session line in:\n${stdout}`);
+    assert.match(stdout, /sim-/, `missing simulator session id prefix in:\n${stdout}`);
+    // 10 × 500 ms silence chunks fills one 5000 ms window exactly → one EmbeddingResult.
+    assert.match(
+      stdout,
+      /Embedding \| offset=0ms \| duration=5000ms \| code=[0-9a-f]{16} \| dim=768 \| head=[0-9a-f]{16}/,
+      `missing / malformed Embedding line in:\n${stdout}`,
+    );
+    assert.match(
+      stdout,
+      /FINAL\s+\| total=5000ms \| embeddings=1/,
+      `missing / malformed FINAL line in:\n${stdout}`,
+    );
+  });
+});
+
+test("fingerprint sim produces identical embeddings for identical input across runs", async () => {
+  // The sim's determinism invariant: sha256(payload[:64]) → seeded PRNG →
+  // L2-normalise. Same silence payload → same code. Both codes must match.
+  const codeRe = /Embedding \| .*? code=([0-9a-f]{16})/;
+  await withFingerprintServer(async (port) => {
+    const codes: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const { code, stdout, stderr } = await runProc(
+        path.join(EXAMPLES_DIR, "fingerprint_client.ts"),
+        ["--target", `localhost:${port}`],
+      );
+      assert.equal(code, 0, `fingerprint_client failed: stderr=${stderr}`);
+      const match = stdout.match(codeRe);
+      assert.ok(match, `missing Embedding line in:\n${stdout}`);
+      codes.push(match[1]);
+    }
+    assert.equal(
+      codes[0], codes[1],
+      `fingerprint_code drifted across runs: ${codes[0]} != ${codes[1]}. ` +
+      "This breaks the sim's determinism invariant — check server.py's " +
+      "_synthetic_embedding() for non-deterministic changes (seed source, " +
+      "PRNG constants, normalisation order).",
+    );
+  });
+});

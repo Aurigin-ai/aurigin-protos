@@ -42,6 +42,7 @@ uv pip install aurigin-protos
 aurigin-protos/
 ├── proto/                    # .proto sources, mirrored by package path:
 │   ├── aurigin/deepfake_detection/v1/deepfake_detection.proto
+│   ├── aurigin/fingerprint/v1/fingerprint.proto            # WavLM content-fingerprint consumer contract (new in 0.3.1)
 │   ├── aurigin/media/v1/audio_frame.proto                  # AudioFrame + AudioCodec enum (new in 0.3.0)
 │   └── twilio/tme/extensions/common/v1/audio_buffer.proto  # vendored Twilio Media Extensions type (deprecated as of 0.3.0)
 ├── gen/
@@ -69,10 +70,14 @@ aurigin-protos/
 │   │   └── common/           # shared helpers: wav_reader / result_csv / tls / shutdown
 │   ├── typescript/           # client examples: `npm run client|phone-call|phone-call-burst`
 │   │   └── common/           # mirror of python/common/
-│   └── simulator/            # scenario-driven simulator services (one dir per RPC)
-│       └── deepfake/         # aurigin-deepfake-simulator-service (Python package,
-│                             #   Docker image, docker-compose). Drives both Python
-│                             #   and TypeScript client smoke tests.
+│   └── simulator/            # simulator services (one dir per RPC)
+│       ├── deepfake/         # aurigin-deepfake-simulator-service (Python package,
+│       │                     #   Docker image, docker-compose). Scenario-driven.
+│       │                     #   Drives both Python and TypeScript client smoke tests.
+│       └── fingerprint/      # aurigin-fingerprint-simulator-service (Python package,
+│                             #   Docker image, docker-compose). Deterministic
+│                             #   sha256-seeded synthetic embeddings — no scenarios,
+│                             #   no YAML (a vector, not a classification decision).
 ├── infra/                    # AWS + public-registry runbooks (no IaC, just docs)
 │   ├── aws/                  # OIDC + publisher role + CodeArtifact setup
 │   └── public/               # PyPI / npm Trusted Publishers + visibility checklist
@@ -177,6 +182,10 @@ npm install @aurigin/protos @grpc/grpc-js
 ```ts
 import { credentials } from "@grpc/grpc-js";
 import { DeepfakeDetectionClient } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
+// New in 0.3.1 — WavLM content-fingerprint consumer contract. Same bidi
+// shape as deepfake; per-window EmbeddingResult (768-d L2-normalised
+// float32 bytes) instead of AnalysisResult.
+import { FingerprintClient } from "@aurigin/protos/aurigin/fingerprint/v1/fingerprint";
 // New in 0.3.0 — self-describing audio frame (codec / sample_rate_hz /
 // channels on the message). Preferred over the deprecated Twilio-vendored
 // AudioBuffer for all new integrations.
@@ -186,10 +195,14 @@ const client = new DeepfakeDetectionClient(
   "localhost:50051",
   credentials.createInsecure(),
 );
+const fingerprintClient = new FingerprintClient(
+  "localhost:50052",   // typically a separate service; see simulator/fingerprint/
+  credentials.createInsecure(),
+);
 ```
 
 Full client snippets: [examples/typescript/](examples/typescript/).
-Simulator server: [examples/simulator/deepfake/](examples/simulator/deepfake/).
+Simulator servers: [examples/simulator/deepfake/](examples/simulator/deepfake/), [examples/simulator/fingerprint/](examples/simulator/fingerprint/).
 
 > *Aurigin engineers who need to install from the internal CodeArtifact channel (e.g. to pick up a tagged version before it has been promoted to public npm): see [`infra/aws/`](infra/aws/) for the connection details.*
 
@@ -201,6 +214,10 @@ uv pip install aurigin-protos
 
 ```python
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2, deepfake_detection_pb2_grpc
+# New in 0.3.1 — WavLM content-fingerprint consumer contract. Same bidi
+# shape as deepfake; per-window EmbeddingResult (768-d L2-normalised
+# float32 bytes) instead of AnalysisResult.
+from aurigin.fingerprint.v1 import fingerprint_pb2, fingerprint_pb2_grpc  # noqa: F401
 # New in 0.3.0 — self-describing audio frame (codec / sample_rate_hz /
 # channels on the message). Preferred over the deprecated Twilio-vendored
 # AudioBuffer for all new integrations.
@@ -211,7 +228,7 @@ from twilio.tme.extensions.common.v1 import audio_buffer_pb2  # noqa: F401
 ```
 
 Full client snippets: [examples/python/](examples/python/).
-Simulator server: [examples/simulator/deepfake/](examples/simulator/deepfake/).
+Simulator servers: [examples/simulator/deepfake/](examples/simulator/deepfake/), [examples/simulator/fingerprint/](examples/simulator/fingerprint/).
 
 > *Aurigin engineers who need to install from the internal CodeArtifact channel (e.g. to pick up a tagged version before it has been promoted to public PyPI, or to keep build inputs inside the AWS perimeter): see [`infra/aws/`](infra/aws/) for the connection details.*
 

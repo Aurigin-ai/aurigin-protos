@@ -1,0 +1,164 @@
+syntax = "proto3";
+
+package aurigin.fingerprint.v1;
+
+import "aurigin/media/v1/audio_frame.proto";
+
+// Fingerprint Service.
+//
+// Extracts per-window content fingerprints (fine-tuned WavLM embeddings)
+// from a continuous audio stream. Each fixed-size window (5 s by default,
+// server-configured, matching the training config) produces one 768-d
+// L2-normalised float32 embedding.
+//
+// The service is a pure compute step in the orchestrator's consumer
+// topology (same pattern as `aurigin.deepfake_detection.v1`): audio in →
+// embeddings out. Any downstream composition — cosine similarity vs a
+// reference, Qdrant lookup, registration centroids, verify verdicts —
+// lives in the caller (orchestrator / call-auth-service), not here.
+//
+// Session lifecycle:
+//   1. Client sends CreateSessionRequest with optional configuration.
+//   2. Server responds with CreateSessionResponse containing session_id.
+//   3. Client streams AudioFrame messages continuously.
+//   4. Server emits EmbeddingResult events as each window is analysed.
+//   5. On stream end, server emits a FinalResult with session accounting
+//      (total_audio_ms, embedding_count). Deliberately NOT an aggregated
+//      embedding or similarity — those are caller policy.
+//
+service Fingerprint {
+  // Bidirectional streaming RPC for real-time content fingerprinting.
+  rpc ExtractFingerprint(stream ExtractFingerprintRequest) returns (stream ExtractFingerprintResponse);
+}
+
+// ============================================================================
+// Request (Client -> Server)
+// ============================================================================
+
+message CreateSessionRequest {
+  // Optional session configuration; server applies defaults for unset fields.
+  optional FingerprintConfig config = 1;
+}
+
+message ExtractFingerprintRequest {
+  oneof request {
+    CreateSessionRequest create_session_request = 1;
+    // Aurigin-native self-describing audio frame — codec + sample rate
+    // + channels ride on the message so no session-open coordination
+    // is needed. This service accepts AudioFrame only (no legacy
+    // twilio.AudioBuffer fork — this is a new surface, no back-compat
+    // window to carry).
+    aurigin.media.v1.AudioFrame audio_frame = 2;
+  }
+}
+
+// ============================================================================
+// Response (Server -> Client)
+// ============================================================================
+
+message ExtractFingerprintResponse {
+  oneof response {
+    CreateSessionResponse create_session_response = 1;
+    EmbeddingResult embedding_result = 2;
+    FinalResult final_result = 3;
+  }
+}
+
+message CreateSessionResponse {
+  // Unique identifier for this session.
+  string session_id = 1;
+}
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+message FingerprintConfig {
+  // Per-session policy for the sub-window residual at stream end.
+  // Unspecified = follow server env default (TAIL_STRATEGY, typically DROP).
+  //   DROP     — residual silently skipped. Recommended for offline file
+  //              scans — a short partial window produces a noisier
+  //              embedding that hurts cosine similarity precision.
+  //   EXTEND   — fold residual into the prior window (its duration_ms
+  //              grows). Coverage-first, no extra inference. Recommended
+  //              for live calls where every second matters.
+  //   RECOMPUTE — slide last window back to end-of-stream so it stays
+  //              exactly window_seconds long. Extra inference per session.
+  optional TailStrategy tail_strategy = 1;
+  // Per-session floor on residual duration eligible for its own
+  // inference, in seconds. Interacts with tail_strategy: residuals
+  // shorter than this are handled per-strategy rather than embedded
+  // directly. Unspecified = follow server env default
+  // (MIN_ANALYSIS_DURATION_S, typically 1.0). The WavLM backbone's
+  // feature extractor needs enough audio to produce stable pooled
+  // features; setting this lower can degrade embedding quality on
+  // short residuals.
+  optional float min_analysis_duration_s = 2;
+
+  // Deliberately NOT exposed:
+  //   - window_seconds — WavLM was trained at exactly MODEL_WINDOW_SECONDS
+  //     on the server; overriding silently degrades embedding quality.
+  //     Roll out via the server's MODEL_HUB_REVISION, not per-session.
+  //   - VAD gating — fingerprint runs unconditionally (cosine similarity
+  //     naturally filters silence on the caller side). If a caller
+  //     needs silence gating (e.g. registration to avoid poisoning
+  //     Qdrant with silent embeddings), gate on the caller side before
+  //     invoking this RPC.
+  //   - model_version — rollout is by MODEL_HUB_REVISION on the server,
+  //     not by client-selectable string.
+}
+
+// Per-session tail strategy. Mirrors deepfake-service's TailStrategy so
+// operators learn one enum. UNSPECIFIED = follow the server's env-driven
+// default (TAIL_STRATEGY, typically DROP).
+enum TailStrategy {
+  TAIL_STRATEGY_UNSPECIFIED = 0;
+  TAIL_STRATEGY_DROP = 1;
+  TAIL_STRATEGY_EXTEND = 2;
+  TAIL_STRATEGY_RECOMPUTE = 3;
+}
+
+// ============================================================================
+// Analysis events
+// ============================================================================
+
+// Emitted each time a window of audio has been fingerprinted.
+message EmbeddingResult {
+  // Audio offset from stream start (ms) — start of the analysed segment.
+  int64 audio_offset_ms = 1;
+  // Duration of the analysed segment (ms). Normally equals the server's
+  // MODEL_WINDOW_SECONDS * 1000; may differ for the last window under
+  // tail_strategy = EXTEND or = RECOMPUTE.
+  int64 duration_ms = 2;
+  // Raw float32 little-endian embedding bytes. 768 * 4 = 3072 bytes for
+  // the WavLM-base-plus backbone; a future backbone swap could change
+  // the length — clients should read the `dim` field rather than
+  // hardcoding. Canonical binary form: callers can base64 / hash /
+  // Qdrant-insert directly. L2-normalised on the server so a dot product
+  // is a cosine similarity.
+  bytes embedding = 3;
+  // sha256(embedding)[:16] hex. Matches backend-app's `fingerprint_code`
+  // shape one-for-one so migration is straight-across. Short human-
+  // friendly ID for log grep, Qdrant point IDs when the caller doesn't
+  // want to compute its own hash. Purely a derived convenience — the
+  // canonical value is `embedding`.
+  string fingerprint_code = 4;
+  // Embedding dimension (768 for WavLM-base-plus). Lets clients validate
+  // without hardcoding, and survives a future backbone swap without a
+  // silent length mismatch.
+  int32 dim = 5;
+}
+
+// Emitted once when the client closes the stream. Purely observability:
+// "here's what the server actually computed" so orchestrator + audit +
+// dashboards can reason about drop-strategy skips without inferring
+// server-side windowing. No aggregated embedding, no similarity, no
+// verdict — those are caller-side composition.
+message FinalResult {
+  // Total audio received on this stream (ms).
+  int64 total_audio_ms = 1;
+  // Number of EmbeddingResult events emitted. May be less than
+  // (total_audio_ms / window_ms) when residual windows were skipped
+  // per tail_strategy or fell below min_analysis_duration_s.
+  int32 embedding_count = 2;
+}

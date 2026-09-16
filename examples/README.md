@@ -45,6 +45,7 @@ uv sync                                    # creates .venv/, installs deps
 uv run client                              # batch client → localhost:50051
 uv run phone-call                          # single live call (the integration pattern)
 uv run phone-call-burst -c 5               # N concurrent calls (load test / multi-call architecture)
+uv run scan-file --file long.wav           # offline parallel scan of one long file (throughput mode)
 ```
 
 Shared helpers (WAV reader, CSV writer, TLS auto-detect, signal-handler) live under `examples/python/common/` and re-export through `from common import …` — the three CLI scripts above stay focused on what they're demonstrating, not on infra glue.
@@ -63,6 +64,9 @@ just sync                                 # uv sync
 # or `docker compose up`.
 just client                               # client → localhost:50051
 just client 127.0.0.1:50051               # client → aurigin-router backend-simulator
+just scan-file --file long.wav            # offline batch scan (parallel slices, no pacing)
+just scan-file-extreme --file long.wav    # 90 × 40 s slices — saturates dfs GPU on batched inference
+just scan-file-bench-no-vad --file long.wav   # extreme + per-session VAD off (GPU-only bench floor)
 just smoke                                # end-to-end pytest (spawns the simulator as a subprocess)
 ```
 
@@ -103,7 +107,8 @@ Files:
 - `python/client.py` — streams every `.wav` in `examples/audio/` (one session per file). Falls back to 6 × 500 ms of silence when the dir is empty. Pass `--target HOST:PORT` to point at a non-default server (default `localhost:50051`). Pass `--csv PATH` to additionally write per-chunk results to a CSV — see [CSV export](#csv-export) below.
 - `python/phone_call.py` — **minimal worked example** of the FreeSWITCH-fork integration pattern. Single live call: open bidi → real-time-paced sender + concurrent receiver → close. Heavily commented at the send loop because that's exactly the line that becomes `for await frame in fork_socket: ...` in a real `mod_audio_fork` / Twilio Media Stream / SIPREC integration.
 - `python/phone_call_burst.py` — the **recommended multi-call architecture**: one long-lived gRPC channel multiplexing N concurrent bidi streams (vs N separate channels). Same per-call building blocks (imported from `phone_call.py`), plus `--concurrency N` / `--stagger-ms` / per-stream `call-NN` labels / graceful shutdown across all streams / summary aggregation. Use it to find the connection-count knee on a real backend or to capture per-chunk results across many concurrent sessions (`--csv PATH`).
-- `python/common/` — shared helpers (`wav_reader`, `result_csv`, `tls`, `shutdown`). The three CLI scripts above import from here so the files themselves stay focused on what they're demonstrating.
+- `python/scan_file.py` — **offline batch scan** of one long file. Splits the file into N contiguous 5-s-aligned slices and streams them as N concurrent sessions on one warm gRPC channel, no real-time pacing. Explicitly NOT a live-call simulator: the goal is minimum wall time on a long recording, not fidelity to a real phone-call cadence. Includes `--extreme` preset (90 × 40 s slices) sized so every stream fills one server-side `BATCH_SIZE=8` batch, plus per-session `--vad-mode` / `--vad-threshold` overrides (aurigin-protos ≥ 0.4) so you can benchmark the GPU-only inference floor without editing dfs env vars. Reports per-slice timing percentiles (send→open / open→first / first→last / last→final) computed from `time.perf_counter_ns()` timestamps so successive runs are honestly comparable.
+- `python/common/` — shared helpers (`wav_reader`, `result_csv`, `tls`, `shutdown`). The four CLI scripts above import from here so the files themselves stay focused on what they're demonstrating.
 
 ### Audio fixtures
 
@@ -165,6 +170,12 @@ uv run phone-call-burst -c 5 --stagger-ms 200 --duration 30 --scenario-id fake_d
 # Capture per-chunk results across all 10 streams into one CSV — for load
 # tuning / cross-revision regression comparison
 uv run phone-call-burst -c 10 --duration 60 --target real-backend:50051 --csv /tmp/burst.csv
+
+# Cap wall time per call so a slow-pacing client can't drag sessions past
+# the target duration. Also enables the pacing-quality summary at the end,
+# which flags whether the client actually produced a realtime workload
+# (see "Interpreting the pacing summary" below).
+uv run phone-call-burst -c 128 --duration 120 --max-wall-s 150 --target real-backend:50051 --csv /tmp/burst.csv
 ```
 
 Sample output (3 concurrent calls):
@@ -184,7 +195,144 @@ Sample output (3 concurrent calls):
 [call-03] ☎️  Call ended | total=10.01s | score=0.899 | label=spoofed | analyses=2
 ──────────────────────────────────────────────────────────────────────
 Summary: 3/3 streams OK, 0 failed
+Pacing: audio_per_wall p50=1.00 p05=0.99 (1.00 = perfect realtime; <0.95 = client too slow) — under-paced sessions: 0/3, wall-capped: 0/3
 ```
+
+#### Interpreting the pacing summary
+
+The `Pacing:` line answers **"did the client actually produce the workload we intended?"** A real telco call delivers one 20 ms frame every 20 ms wall-clock, forever. A load-generator that drifts (single asyncio/event-loop starving under too many concurrent streams, GC pauses, network hiccups) will burst frames or fall behind — neither faithful to a real call.
+
+- **`audio_per_wall`** — ratio of audio-time-sent to wall-time-elapsed per session. `1.00` = perfect realtime, `<0.95` = client too slow. Matches the deepfake service's server-side `rtf` field on `session ended`, so you can cross-check.
+- **`under-paced sessions: N/M`** — count of sessions where `audio_per_wall < 0.95`. Any non-zero count means those sessions' server-side measurements aren't representative of a real call — treat them as invalid data points for capacity claims.
+- **`wall-capped: N/M`** — count of sessions that hit `--max-wall-s` before naturally finishing. Under-paced sessions typically also get wall-capped when the flag is set.
+
+**When you see `⚠ Client-side pacing degraded` after the summary**, the load-generator is the bottleneck, not the server. Shard the run across multiple processes at a lower `--concurrency` per process:
+
+```bash
+# 4 processes × 32 concurrent = 128 total, each process well within its
+# single-event-loop pacing budget. Concat CSVs afterward.
+for i in 0 1 2 3; do
+    uv run phone-call-burst -c 32 --duration 120 --max-wall-s 150 \
+        --stagger-ms 40 --target real-backend:50051 --csv /tmp/burst-shard-$i.csv &
+done
+wait
+awk 'NR==1 || !/^file_name,/' /tmp/burst-shard-*.csv > /tmp/burst-total.csv
+```
+
+Rule of thumb: one Python asyncio loop or one Node event loop reliably sustains ~1500-2000 gRPC sends/sec (≈ 30-40 concurrent 20 ms streams). Past that, you'll start seeing `audio_per_wall < 1.0` and need to shard.
+
+### Scan-file: parallel offline batch scanning (long-file throughput)
+
+`scan_file.py` is the offline counterpart to `phone_call.py` /
+`phone_call_burst.py`. Instead of simulating live-call pacing, it splits
+one long recording into N contiguous slices and streams them as N
+concurrent sessions on ONE warm gRPC channel, each at full speed
+(no `asyncio.sleep`). This lets the server-side batcher fill batches
+across slices — a single-session `client.py` run only gets batch=1 on
+every window because windows from one stream arrive every 5 s (way
+longer than the 10 ms batch flush interval).
+
+**Slice alignment.** Every slice length is rounded DOWN to a multiple of
+the server's `ANALYSIS_INTERVAL_S` (5 s by default); the last slice
+absorbs the residual so no audio is dropped. This eliminates the
+tail-window artifact where a 1–2 s partial window gets scored by a
+5-s-trained model and produces spurious high spoof scores.
+
+**Throughput presets.**
+
+```bash
+# Conservative default — 8 slices, 100ms frames. Safe on any dfs.
+uv run scan-file --file audio/long.wav
+
+# --extreme preset — 90 slices × 40 s per AudioFrame. Every stream
+# fills exactly one BATCH_SIZE=8 server-side batch. 90 concurrent
+# windows arrive within the batcher's flush interval → GPU saturates
+# on batched inference. Use with ≥60 min files.
+uv run scan-file --file audio/long.wav --extreme
+
+# Same preset, but tune concurrency past 90 to sweep the curve on
+# beefier GPUs (server MAX_CONCURRENT_STREAMS must be raised too).
+uv run scan-file --file audio/long.wav --extreme --concurrency 128
+```
+
+**Per-session `DetectionConfig` overrides (aurigin-protos ≥ 0.4).**
+`CreateSessionRequest.config` lets the client override server-side
+knobs without touching env vars. `scan-file` surfaces the two most
+useful ones as CLI flags:
+
+```bash
+# Force VAD off per-session — measures the GPU-only inference floor
+# (no CPU-side silence gating). Useful on speech-heavy audio where
+# VAD's per-window cost outweighs its silence-skip savings, and for
+# benchmark runs that need a stable model-only inference number.
+uv run scan-file --file audio/long.wav --extreme --vad-mode off
+
+# Tune the silence-skip percentage per-session (0-100). Unset =
+# server env default (SILENCE_THRESHOLD_PCT, typically 80).
+uv run scan-file --file audio/long.wav --extreme --vad-threshold 90
+```
+
+The server logs `vad_source=per-session` and the effective values on
+the session-start log line for every slice, so you can grep the dfs
+logs to confirm the override landed.
+
+**Precision timing report.** Every slice's send-start, session-open,
+first-result, last-result, and final-result timestamps are captured via
+`time.perf_counter_ns()`. The scan-complete summary reports min / p50 /
+p95 / max for each phase, so back-to-back runs against the same file are
+honestly comparable:
+
+```
+═══ Scan complete ═══
+  wall_time:  24.45 s
+  audio:      3700.00 s
+  RTF:        151.31× (90-slice parallel · vs single-session baseline)
+  slices:     90 (all completed)
+  analyses:   740 windows across all slices
+  ...
+  ── per-slice timing (n=90/90) ──
+  channel_ready              78.3  (one-shot, TLS handshake shared)
+  send_start→open        min=   12.0  p50=   18.5  p95=   34.2  max=   47.1   (ms)
+  open→first_result      min=  510.4  p50=  620.8  p95=  735.9  max=  801.2   (ms)
+  first→last_result      min=15200.1  p50=17840.6  p95=19120.4  max=21055.9   (ms)
+  last→final_result      min=   45.2  p50=   61.7  p95=   88.3  max=  110.5   (ms)
+  send_start→final       min=16300.5  p50=18821.6  p95=20155.9  max=22014.7   (ms)
+```
+
+Interpretation:
+
+  - `channel_ready` — TLS/mTLS handshake amortised across all N slices
+    (one warm channel, not N cold ones).
+  - `send_start→open` — server-side session accept + register. Rises
+    with dfs contention; a p95 blowing past 100 ms means the server is
+    overloaded before the first frame lands.
+  - `open→first_result` — time to first analysis window (audio buffered
+    → VAD → model → wire). Rises with GPU queue depth.
+  - `first→last_result` — bulk of the work; roughly proportional to
+    slice length × per-window inference cost.
+  - `last→final_result` — tail flush + finalise. Should be small (tens
+    of ms); a large tail hints at slow session-close on the server.
+
+**Boundary loss.** Slices are contiguous, no overlap. At each N-1 slice
+boundaries up to one analysis window may be lost to alignment. For a
+60-minute file with `--concurrency 8` that's ~35 s out of 3600 s
+(~1 %); with `--concurrency 90` and 40 s slices it's ~7 min (~12 %) —
+noticeable. Use fewer, longer slices when coverage matters more than
+raw throughput.
+
+**Requirements for `--extreme`.**
+
+  - dfs has GPU headroom (`nvidia-smi` idle before the run).
+  - HTTP/2 `MAX_CONCURRENT_STREAMS` on the server ≥ 90 (default: 100).
+  - gRPC max message size ≥ frame_seconds × rate × 2 bytes. `scan-file`
+    bumps its channel-side limit to 16 MB automatically; the server
+    may need matching `grpc.max_receive_message_length` (dfs default
+    is 16 MB, matches).
+
+CSV export works the same as `client.py` / `phone_call_burst.py` —
+pass `--csv PATH` and every per-window `AnalysisResult` is written
+with its absolute-timeline `chunk_offset` (the client adds each
+slice's offset to the server-reported per-slice offset).
 
 ### CSV export
 
@@ -268,6 +416,98 @@ Files:
 | `oneof response { ... }` | discriminated optional fields on the message (e.g. `response.analysisResult`) |
 
 Deep imports use the proto path: `@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection`.
+
+## Fingerprint client + simulator
+
+New in 0.3.1: `aurigin.fingerprint.v1.Fingerprint.ExtractFingerprint` —
+the consumer contract for `aurigin-fingerprint`, a GPU-only WavLM
+feature extractor. Same bidi shape as deepfake (`stream AudioFrame` in,
+`stream EmbeddingResult` out plus a terminal `FinalResult`); different
+response payload (768-d L2-normalised float32 embedding per window, no
+label / score / verdict — that's caller-side composition).
+
+### Simulator
+
+Minimal Python simulator at
+[`simulator/fingerprint/`](simulator/fingerprint/) — packaged as
+`aurigin-fingerprint-simulator-service` with a Dockerfile + docker-
+compose. Deterministic embeddings from `sha256(payload[:64])` so the
+same input produces the same 768-d unit vector on any machine
+(smoke-test-friendly). No scenarios, no fault injection — see that
+directory's README for the rationale and env-var reference
+(`PORT`, `WINDOW_MS`, `EMBEDDING_DIM`).
+
+```bash
+# Terminal 1 — start the simulator
+cd examples/simulator/fingerprint
+uv sync
+uv run fingerprint-simulator-service                 # :50051
+# or:
+docker compose up --build                            # same, containerised
+
+# Run alongside the deepfake simulator on a different port:
+PORT=50052 uv run fingerprint-simulator-service      # :50052
+```
+
+### Python client
+
+```bash
+cd examples/python
+uv sync                                              # if not already done
+uv run fingerprint-client                            # → localhost:50051 (TLS auto)
+uv run fingerprint-client --target localhost:50052   # side-by-side with deepfake sim
+just fingerprint-client                              # same, via justfile
+just insecure-fingerprint-client                     # plaintext (docker-compose default)
+just mtls-fingerprint-client                         # with client cert
+```
+
+Sample output (silence fallback):
+
+```
+# transport=TLS (self-signed, examples/certs/)
+
+=== silence (5 s @ 16 kHz) ===
+Session: sim-a1b2c3d4
+Embedding | offset=0ms | duration=5000ms | code=3e7f9c1a2b4d5e6f | dim=768 | head=8e3f22c19d4a7b0e
+FINAL     | total=5000ms | embeddings=1
+```
+
+### TypeScript client
+
+```bash
+cd examples/typescript
+npm install                                          # if not already done
+npm run fingerprint-client                           # → localhost:50051 (TLS auto)
+npm run fingerprint-client -- --target localhost:50052
+MTLS=1 npm run fingerprint-client                    # with client cert
+```
+
+Same `EmbeddingResult` shape as the Python client. The generated TS
+client class name is `FingerprintClient`; the RPC is `extractFingerprint`
+(ts-proto camelCases the proto's `ExtractFingerprint`).
+
+### Files
+
+- `simulator/fingerprint/` — minimal deterministic sim. See its README
+  for env vars, Docker usage, and the "run alongside deepfake simulator"
+  side-by-side pattern.
+- `python/fingerprint_client.py` — streams every `.wav` in
+  `examples/audio/` (one session per file). Falls back to 5 s of
+  silence when the dir is empty. Prints per-window `EmbeddingResult`
+  with a hex preview of the first 8 bytes of `embedding` so you can
+  eyeball vector differences without dumping 3072 bytes per window.
+  Reuses the same `common/` helpers (`wav_reader`, `tls`) as the
+  deepfake client — nothing fingerprint-specific there.
+- `typescript/fingerprint_client.ts` — TS twin. Same shape.
+
+### Deferred (not shipped with the first-cut examples)
+
+- Fingerprint-flavoured `phone_call` / `phone_call_burst` / `scan_file`
+  variants — add when there's real demand. The single-session client
+  covers the demo case.
+- Scenario YAML system — fingerprint's deterministic-hash approach
+  doesn't need scenarios. Adding one later is a compatible extension.
+- Smoke test suite for the fingerprint sim in `tests/`.
 
 ## Wire messages — `AudioFrame` (new in 0.3.0) and `AudioBuffer` (deprecated)
 
