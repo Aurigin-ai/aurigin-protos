@@ -54,9 +54,17 @@
 #   just phone-call-burst 5 ID --stagger-ms 500                  # + 500ms stagger
 #   just insecure-phone-call-burst 5                             # 5 plaintext bursts
 #   just insecure-phone-call-burst 10 --duration 30 --audio FILE # 10 × 30s of FILE
+#   just scan-file --file long.wav                               # offline batch scan (8 slices, TLS)
+#   just scan-file-extreme --file long.wav                       # extreme preset (90 × 40s slices)
+#   just scan-file-bench-no-vad --file long.wav                  # extreme + VAD-off bench floor
+#   just insecure-scan-file --file long.wav                      # scan-file → plaintext dfs
+#   just fingerprint-client                                      # WavLM embedding client → localhost (TLS)
+#   just insecure-fingerprint-client                             # ↑ but plaintext
+#   just mtls-fingerprint-client                                 # ↑ with client cert
 #   just mtls-server                           # server in mTLS mode
 #   just mtls-call ID                          # phone-call in mTLS mode
 #   just mtls-phone-call-burst 5 ID            # 5 concurrent mTLS calls
+#   just mtls-scan-file --file long.wav        # offline scan under mTLS
 #   just tls                                   # regenerate the committed self-signed certs
 #   just smoke                                 # end-to-end pytest
 #
@@ -139,6 +147,63 @@ client *FLAGS:
 phone-call *FLAGS:
     uv run phone-call {{FLAGS}}
 
+# Offline batch scan — split one file into N parallel slices, no real-time
+# pacing. Companion to `client` / `phone-call` for maximum-throughput file
+# analysis. Slices are 5-s aligned (kills tail-window artifacts) and share
+# one warm TLS channel. Pass any scan_file.py flag as a trailing argument:
+#   just scan-file --file ../audio/long.wav                    # defaults (8 slices)
+#   just scan-file --file long.wav --concurrency 32            # tune parallelism
+#   just scan-file --file long.wav --extreme                   # 90 slices × 40s (GPU-saturating)
+#   just scan-file --file long.wav --extreme --vad-mode off    # per-session VAD off (bench floor)
+#   just scan-file --file long.wav --extreme --csv /tmp/o.csv  # + CSV export
+# Run `uv run scan-file --help` for the full flag surface, including
+# `--vad-mode {auto,on,off}` and `--vad-threshold PCT` (both require
+# aurigin-protos ≥ 0.4).
+#
+# Offline batch scan → localhost:50051 (TLS); pass any scan_file.py flag.
+[group('run')]
+scan-file *FLAGS:
+    uv run scan-file {{FLAGS}}
+
+# Convenience wrapper: `just scan-file --extreme {{FLAGS}}`. Preset for
+# maximum-throughput scanning (concurrency=90, frame_seconds=40) — sized so
+# every stream fills one BATCH_SIZE=8 batch on the server. Requires a long
+# file (≥60min) and headroom on the target dfs. Every scan_file.py flag is
+# still available as a trailing arg (they override the preset knobs).
+#
+# Extreme-mode offline scan (concurrency=90 × 40s frames); pass any scan_file.py flag.
+[group('run')]
+scan-file-extreme *FLAGS:
+    uv run scan-file --extreme {{FLAGS}}
+
+# Benchmark helper: extreme preset + per-session VAD forced off. Answers
+# "what's the GPU-only inference floor on this hardware?" — bypasses the
+# CPU-side VAD gate that otherwise throttles window delivery at high
+# concurrency. Requires the server-side vad_mode support (dfs on
+# aurigin-protos ≥ 0.4). Compare against `just scan-file-extreme` on the
+# same file to measure VAD's actual contribution to wall time.
+#
+# Extreme scan with per-session VAD disabled (GPU-only inference floor bench).
+[group('run')]
+scan-file-bench-no-vad *FLAGS:
+    uv run scan-file --extreme --vad-mode off {{FLAGS}}
+
+# Fingerprint client — streams every audio/*.wav (or 5s silence fallback) to
+# `Fingerprint.ExtractFingerprint` and prints per-window EmbeddingResult
+# details (offset, duration, fingerprint_code, dim, hex-preview of the first
+# 8 bytes of the embedding). Pair with the fingerprint simulator for local
+# runs:
+#   cd ../simulator/fingerprint && uv run fingerprint-simulator-service
+# Pass any fingerprint_client.py flag as a trailing argument:
+#   just fingerprint-client                                    # defaults
+#   just fingerprint-client --target 127.0.0.1:50051           # custom target
+#   just fingerprint-client --audio-dir ../audio/fixtures      # custom dir
+#
+# Fingerprint client → localhost:50051 (TLS); pass any fingerprint_client.py flag.
+[group('run')]
+fingerprint-client *FLAGS:
+    uv run fingerprint-client {{FLAGS}}
+
 # ─── scenarios ──────────────────────────────────────────────────────────────
 
 # Uses the same loader the simulator uses, so the list always matches
@@ -204,6 +269,21 @@ mtls-call SCENARIO_ID *FLAGS:
 mtls-phone-call-burst N SCENARIO_ID *FLAGS:
     MTLS=1 just phone-call-burst {{N}} {{SCENARIO_ID}} {{FLAGS}}
 
+# Same as `just scan-file`, but every one of the N concurrent slice
+# streams presents the example client cert. Use when the dfs is
+# configured to require mTLS (aurigin.ai staging/prod, or any deployment
+# with GRPC_CLIENT_AUTH=required).
+#
+# Offline batch scan → localhost:50051 (mTLS); pass any scan_file.py flag.
+[group('mtls')]
+mtls-scan-file *FLAGS:
+    MTLS=1 just scan-file {{FLAGS}}
+
+# Same as `just fingerprint-client`, but presents the example client cert.
+[group('mtls')]
+mtls-fingerprint-client *FLAGS:
+    MTLS=1 just fingerprint-client {{FLAGS}}
+
 # ─── insecure (plaintext) ────────────────────────────────────────────────────
 
 # Use these when the gRPC server you're hitting does NOT speak TLS — e.g. a
@@ -254,6 +334,25 @@ insecure-call SCENARIO_ID *FLAGS:
 insecure-phone-call-burst N *FLAGS:
     TLS_CA=/dev/null uv run phone-call-burst --concurrency {{N}} {{FLAGS}}
 
+# Plaintext variant of `just scan-file`. Use against a dfs / backend that
+# is not running TLS (local dev, aurigin-router's plaintext simulator,
+# internal test box). Pass any scan_file.py flag as a trailing argument.
+#
+# Offline batch scan → plaintext localhost:50051; pass any scan_file.py flag.
+[group('insecure')]
+insecure-scan-file *FLAGS:
+    TLS_CA=/dev/null uv run scan-file {{FLAGS}}
+
+# Plaintext variant of `just fingerprint-client`. Use against a fingerprint
+# service / simulator that isn't running TLS (local dev without certs,
+# `docker compose up` in `../simulator/fingerprint/` which is insecure by
+# default). Pass any fingerprint_client.py flag as a trailing argument.
+#
+# Fingerprint client → plaintext localhost:50051; pass any fingerprint_client.py flag.
+[group('insecure')]
+insecure-fingerprint-client *FLAGS:
+    TLS_CA=/dev/null uv run fingerprint-client {{FLAGS}}
+
 # ─── tls ────────────────────────────────────────────────────────────────────
 
 # DO NOT USE THESE KEYS IN PRODUCTION — they're checked into the public repo.
@@ -274,6 +373,155 @@ tls:
         -subj "/CN=aurigin-protos-example-client/O=Example only — DO NOT USE IN PRODUCTION"
     @echo "→ ../certs/server.{crt,key} + ../certs/client.{crt,key} regenerated."
     @echo "  TLS picks up automatically; mTLS picks up when you set MTLS=1."
+
+# Generate a proper CA-based mTLS bundle: 1 root CA, 1 server cert, N
+# client certs (all EC P-256, signed by the CA). Different shape from
+# `just tls` (self-signed simplified model) — this matches what real
+# deepfake deployments expect: TLS_CLIENT_CA on the server + N distinct
+# client certs each chaining to it.
+#
+# Env overrides (pass as VAR=VALUE before `just`):
+#   OUTDIR        default examples/certs/mtls
+#   CLIENT_COUNT  default 3
+#   SERVER_SANS   default "DNS:localhost,IP:127.0.0.1,IP:::1"
+#   DAYS          default 365
+#
+# Examples:
+#   just mtls-bundle                                                # local defaults
+#   SERVER_SANS="IP:54.228.43.76,DNS:localhost" just mtls-bundle    # T4 remote testing
+#   CLIENT_COUNT=5 just mtls-bundle                                 # 5 clients instead of 3
+#
+# Wiring is printed after generation. Deploy server files to the deepfake
+# host, keep client-N files on the caller side and set MTLS=1.
+[group('tls')]
+mtls-bundle:
+    ../../scripts/gen-mtls-bundle.sh
+
+# CLIENT-SIDE: generate a private key + CSR for a new client identity.
+# The .key stays on this machine; the .csr goes to the CA operator.
+# When they return the signed .crt, drop it next to the .key.
+#
+# Env overrides:
+#   REUSE_KEY=<path>   Reuse an existing private key instead of minting a
+#                      new one — writes only the .csr, leaves the .key
+#                      untouched. Use for "rotate the cert but keep the
+#                      key" (HSM-backed key, key pinning downstream,
+#                      fast recovery from cert expiry). Prefer NOT to
+#                      use for regular renewals — rotating the key each
+#                      time is the safer default.
+#
+# Usage:
+#   just mtls-client-csr CN                                   # fresh key
+#   just mtls-client-csr CN /tmp/out                          # fresh key, custom outdir
+#   REUSE_KEY=/tmp/out/CN.key just mtls-client-csr CN /tmp/out # reuse existing key
+#
+# Example — a new orchestrator identity (fresh key):
+#   just mtls-client-csr orchestrator-prod-01
+#   # → orchestrator-prod-01.key (secret, stays here)
+#   # → orchestrator-prod-01.csr (send to CA)
+#
+# Example — rotate cert without touching the key:
+#   REUSE_KEY=../secure/pki/wit-client.key \
+#       just mtls-client-csr wit-client ../secure/pki
+#   # → wit-client.csr (new CSR, bound to the existing key)
+[group('tls')]
+mtls-client-csr CN *OUTDIR:
+    ../../scripts/gen-client-csr.sh {{CN}} {{OUTDIR}}
+
+# CA-OPERATOR: sign a client-provided CSR against our CA. Server needs
+# no changes — CA trust is already in TLS_CLIENT_CA, new client is
+# accepted immediately. Give the .crt back to the requester.
+#
+# Env overrides:
+#   CA_CRT (default ../certs/mtls/ca.crt), CA_KEY, DAYS (default 365)
+#
+# Usage:
+#   just mtls-sign-csr /tmp/incoming/foo.csr             # signed cert next to CSR
+#   just mtls-sign-csr /tmp/incoming/foo.csr /tmp/out    # signed cert in /tmp/out
+[group('tls')]
+mtls-sign-csr CSR *OUTDIR:
+    ../../scripts/sign-client-csr.sh {{CSR}} {{OUTDIR}}
+
+# Create a root CA — the trust anchor of an mTLS setup. Run this once
+# per trust domain (one for your PKI, one per customer that brings their
+# own, etc.). Not the same as `just mtls-bundle` — that composes CA +
+# server + N clients in one shot. Use this when you want just the CA.
+#
+# Env overrides: DAYS (default 365), ORG (default Example)
+#
+# Usage:
+#   just mtls-ca my-company-root                 # writes to cwd
+#   just mtls-ca my-company-root /secure/pki     # writes to /secure/pki
+#   DAYS=3650 just mtls-ca my-company-root       # 10-year root
+[group('tls')]
+mtls-ca NAME *OUTDIR:
+    ../../scripts/gen-mtls-ca.sh {{NAME}} {{OUTDIR}}
+
+# Mint an intermediate CA — a subordinate CA signed by an existing (root
+# or higher-level) CA. Use for delegated / time-boxed trust: mint a
+# short-lived intermediate under your long-lived root, ship it to a
+# customer for a trial window, and let it self-expire.
+#
+# The intermediate has basicConstraints=CA:TRUE,pathlen:0 so it CAN sign
+# leaf certs (client / server) but CANNOT sign further intermediates —
+# bounds the delegation depth.
+#
+# Required env: CA_CRT, CA_KEY (paths to the SIGNING parent CA — usually
+# your root CA from `just mtls-ca`).
+# Env overrides: DAYS (default 30 — intentionally short since intermediates
+# are typically used to time-box trust), ORG (default Example).
+#
+# Usage:
+#   CA_CRT=/secure/pki/my-root.crt CA_KEY=/secure/pki/my-root.key DAYS=30 \
+#       just mtls-intermediate customer-a-trial-ca /secure/trials
+#
+# After minting, sign leaf certs against the intermediate (not the root):
+#   CA_CRT=/secure/trials/customer-a-trial-ca.crt \
+#   CA_KEY=/secure/trials/customer-a-trial-ca.key DAYS=365 \
+#       just mtls-sign-csr /tmp/incoming/customer-a.csr
+#
+# Ship (leaf.crt + intermediate.crt) as a concatenated chain to the caller.
+[group('tls')]
+mtls-intermediate NAME *OUTDIR:
+    ../../scripts/gen-mtls-intermediate.sh {{NAME}} {{OUTDIR}}
+
+# Mint a server cert against an existing CA. Use to rotate the server
+# identity without regenerating the CA, or to issue a server cert in a
+# separate step from CA creation.
+#
+# Named `mtls-server-cert` (not `mtls-server`) because the latter already
+# exists in the run-with-MTLS-mode recipe group above — this one is a
+# cert-generation operation, not a server-runtime shortcut.
+#
+# SANs argument: comma-separated "IP:<addr>" or "DNS:<name>" entries.
+# **NO port numbers in IP entries** — SANs identify the host, not the
+# port. Example: "IP:192.0.2.10,DNS:svc.example.internal,DNS:localhost"
+#
+# Required env: CA_CRT, CA_KEY (paths to the signing CA).
+# Env overrides: DAYS (default 365), ORG (default Example)
+#
+# Usage:
+#   CA_CRT=./ca.crt CA_KEY=./ca.key \
+#       just mtls-server-cert myserver "IP:192.0.2.10,DNS:localhost,IP:127.0.0.1"
+[group('tls')]
+mtls-server-cert NAME SANS *OUTDIR:
+    ../../scripts/gen-mtls-server.sh {{NAME}} {{SANS}} {{OUTDIR}}
+
+# Mint a client cert against an existing CA — LOCAL shortcut where the
+# CA operator also generates the client's key. Appropriate for dev or
+# internal services you own. For remote customer clients, use the CSR
+# round-trip (mtls-client-csr on their side + mtls-sign-csr on yours)
+# so their private key never leaves their machine.
+#
+# Required env: CA_CRT, CA_KEY (paths to the signing CA).
+# Env overrides: DAYS (default 365), ORG (default Example)
+#
+# Usage:
+#   CA_CRT=./ca.crt CA_KEY=./ca.key just mtls-client-cert my-service
+#   CA_CRT=./ca.crt CA_KEY=./ca.key just mtls-client-cert my-service /tmp/certs
+[group('tls')]
+mtls-client-cert NAME *OUTDIR:
+    ../../scripts/gen-mtls-client.sh {{NAME}} {{OUTDIR}}
 
 # ─── test ────────────────────────────────────────────────────────────────────
 

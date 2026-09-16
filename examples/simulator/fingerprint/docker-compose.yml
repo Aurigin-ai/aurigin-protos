@@ -1,0 +1,47 @@
+# One-command local run for the fingerprint simulator service.
+#
+#   cd examples/simulator/fingerprint
+#   docker compose up --build
+#
+# Exposes 50051 on the host by default. Point any Fingerprint client (the
+# Python / TypeScript example clients under examples/, or your own) at
+# `localhost:50051` — insecure by default because no ./certs volume is
+# mounted. See README.md for TLS / mTLS overrides.
+#
+# Running side-by-side with the deepfake simulator (which also defaults
+# to :50051)? Two options:
+#
+#   A. Change the host-side port mapping alone (keep container-internal
+#      50051). Fingerprint on :50052, deepfake on :50051:
+#          # in this file, change the ports: line to:
+#          #   - "50052:50051"
+#          # Then aim your client at localhost:50052.
+#
+#   B. Change both the container and host ports via PORT env. Useful when
+#      running the simulator directly (not in docker) alongside other
+#      services binding 50051 on the loopback:
+#          PORT=50052 docker compose up --build
+#          # ports: line becomes:
+#          #   - "50052:50052"
+#
+# Neither the client nor the proto cares which port — pass `--target
+# HOST:PORT` to any example client to point it at wherever the sim listens.
+
+services:
+  fingerprint-simulator:
+    build:
+      # Context is examples/ (two directories up from this file) — matches
+      # the deepfake simulator so both share the same shape.
+      context: ../..
+      dockerfile: simulator/fingerprint/Dockerfile
+    image: aurigin/fingerprint-simulator-service:local
+    container_name: fingerprint-simulator
+    ports:
+      # Change to "50052:50051" to run side-by-side with the deepfake sim
+      # (which also defaults to 50051). See the top-of-file note.
+      - "50051:50051"
+    environment:
+      PORT: "50051"
+      WINDOW_MS: "5000"        # matches the WavLM fine-tune training config
+      EMBEDDING_DIM: "768"     # matches microsoft/wavlm-base-plus
+    restart: unless-stopped
