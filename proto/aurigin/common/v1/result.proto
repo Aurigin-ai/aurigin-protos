@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package aurigin.common.v1;
+
+// Canonical enum form of the classification labels the deepfake service
+// (and future classification consumers — speaker-ID, PII-detector, etc.)
+// produce. Lives in `common.v1` because both `aurigin.client.v1` (SDK-
+// facing per-window verdicts) and `aurigin.events.v1` (typed pub/sub
+// envelope) reference the same set — extracting it here avoids the
+// cross-package drift that would happen if each carried its own enum.
+//
+// Extension policy: additive-only. New labels go at the tail with the
+// next unused number. Deprecated values keep their slot with
+// `[deprecated = true]` and a removal-version comment. Never re-use
+// retired numbers.
+//
+// Existing `aurigin.deepfake_detection.v1.AnalysisResult.label` stays
+// as a `string` deliberately — the wire contract with external
+// customers of the deepfake service predates this enum and can't churn
+// without breaking clients. New protos that carry labels should use
+// this enum AND keep a `string label_raw` alongside so unknown values
+// still round-trip (see docs/transport-protocol/03-proto-shapes.md
+// § "Design decisions common to all three packages" #3 in
+// platform-backend-services).
+
+// Terminal classification label a per-window or aggregate verdict
+// carries. Mirrors the string values the deepfake service returns
+// today one-for-one so translation is a lookup, not a mapping.
+enum ResultLabel {
+  // Zero-value sentinel. Producer either doesn't know the label yet
+  // (mid-stream, no window complete) or doesn't map to a canonical
+  // value — receivers should treat as "not classified" and fall back
+  // to `label_raw` if present.
+  RESULT_LABEL_UNSPECIFIED = 0;
+
+  // Voice determined authentic — no deepfake signatures detected
+  // above the model's threshold. This is the pass verdict.
+  RESULT_LABEL_BONAFIDE = 1;
+
+  // Voice determined synthetic — deepfake signatures detected across
+  // the analysed window with confidence above the model's threshold.
+  // The default action-rule wire in orchestrator's consumers.yaml
+  // triggers on this label (and PARTIALLY_SPOOFED).
+  RESULT_LABEL_SPOOFED = 2;
+
+  // Portion of the window is synthetic — model detected a mix of
+  // authentic and synthetic speech in the same analysis window (e.g.
+  // a spoofed segment spliced into a live call). Same action-rule
+  // treatment as SPOOFED by default.
+  RESULT_LABEL_PARTIALLY_SPOOFED = 3;
+
+  // VAD (voice-activity detection) gated the window — insufficient
+  // speech content to run the model reliably. Not a failure; the
+  // stream is still healthy. Callers typically skip these when
+  // computing aggregate scores.
+  RESULT_LABEL_SILENCE = 4;
+
+  // Model or inference-path failure on this window — server encountered
+  // an error scoring the audio (bad codec conversion, GPU OOM, timeout,
+  // etc.). Distinct from UNKNOWN: ERROR means "we tried and failed",
+  // UNKNOWN means "we can't classify this input into any label".
+  RESULT_LABEL_ERROR = 5;
+
+  // Model returned a label outside the known set (e.g. a new class
+  // added on the server that predates the client's enum). Callers
+  // should also read `label_raw` on the enclosing message to recover
+  // the original string. Providers of new labels: prefer bumping the
+  // enum over relying on UNKNOWN.
+  RESULT_LABEL_UNKNOWN = 6;
+}
