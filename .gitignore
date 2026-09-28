@@ -26,6 +26,19 @@ examples/audio/*.flac
 examples/audio/*.mp3
 examples/audio/*.m4a
 
+# mTLS test artefacts + local PKI scratch — dev-only material. Kept on
+# a local-only branch (`local/dev-mtls-artifacts`) for personal
+# safekeeping; must never land on a pushable branch. The scripts under
+# `scripts/gen-mtls-*.sh` re-materialise anything under these paths
+# from scratch, so losing them is cheap.
+examples/certs/issued/
+examples/certs/mtls/
+examples/secure/
+
+# Ad-hoc example run outputs (scan_file result dumps, burst logs).
+examples/python/result*.txt
+examples/python/results-*.txt
+
 # Local virtualenvs created during ad-hoc testing
 .venv*/
 

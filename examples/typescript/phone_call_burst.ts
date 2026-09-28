@@ -45,7 +45,7 @@ import {
 // The per-call building blocks. `phone_call_burst` is "sendCall + recvCall
 // instantiated N times over one channel" — importing keeps that
 // relationship explicit and prevents drift between the two files' loops.
-import { type Call, type ResponseSink, recvCall, sendCall } from "./phone_call.js";
+import { type Call, type ResponseSink, type SendResult, recvCall, sendCall } from "./phone_call.js";
 
 const DEFAULT_CHUNK_MS = 20;   // RTP wire default (see phone_call.ts rationale)
 const DEFAULT_DURATION_S = 30;
@@ -82,6 +82,7 @@ function makeLabels(n: number): string[] {
 interface CallResult {
   label: string;
   error: unknown | null;
+  sendResult: SendResult | null;
 }
 
 async function runOneCall(
@@ -95,24 +96,35 @@ async function runOneCall(
   csv: ResultCSV | null,
   fileName: string,
   registerCall: (call: Call) => void,
+  maxWallS: number | null,
 ): Promise<CallResult> {
   // Stagger-driven delay before opening the stream — used by --stagger-ms
   // to spread call starts across wallclock.
   if (delayMs > 0) await sleep(delayMs);
   const call: Call = metadata ? client.detectDeepfake(metadata) : client.detectDeepfake();
   registerCall(call);
+  // Sentinel `no_final_result` is distinct from the legitimate server-side
+  // `unknown` label (AnalysisLabel.UNKNOWN, emitted when analysisCount==0).
+  // If recvCall processes a FinalResult, sink.globalResult is overwritten
+  // with the server's overallLabel ("spoofed" / "bonafide" /
+  // "partially_spoofed" / "silence" / "unknown"). If it isn't — the client
+  // was cancelled mid-drain, the stream errored, or the server never
+  // emitted FinalResult — the CSV row shows `no_final_result` so ops can
+  // distinguish "session was killed" from "session ran but was empty".
   const sink: ResponseSink = {
-    sessionId: "", chunks: [], audioDurationMs: 0, globalResult: "unknown",
+    sessionId: "", chunks: [], audioDurationMs: 0, globalResult: "no_final_result",
   };
   const tStart = performance.now();
+  let sendResult: SendResult | null = null;
   try {
-    await Promise.all([
-      sendCall(call, wav, chunkMs, durationS),
+    const [sr] = await Promise.all([
+      sendCall(call, wav, chunkMs, durationS, { maxWallS: maxWallS ?? undefined }),
       recvCall(call, { label, sink }),
     ]);
-    return { label, error: null };
+    sendResult = sr;
+    return { label, error: null, sendResult };
   } catch (err) {
-    return { label, error: err };
+    return { label, error: err, sendResult };
   } finally {
     if (csv) {
       csv.writeSession(
@@ -129,6 +141,7 @@ async function runOneCall(
 interface Args {
   audio: string | null;
   duration: number;
+  maxWallS: number | null;
   chunkMs: number;
   target: string;
   concurrency: number;
@@ -141,6 +154,7 @@ function parseArgs(argv: string[]): Args {
   const out: Args = {
     audio: null,
     duration: DEFAULT_DURATION_S,
+    maxWallS: null,
     chunkMs: DEFAULT_CHUNK_MS,
     target: "localhost:50051",
     concurrency: DEFAULT_CONCURRENCY,
@@ -154,6 +168,7 @@ function parseArgs(argv: string[]): Args {
     switch (arg) {
       case "--audio": out.audio = next(); break;
       case "--duration": out.duration = Number(next()); break;
+      case "--max-wall-s": out.maxWallS = Number(next()); break;
       case "--chunk-ms": out.chunkMs = Number(next()); break;
       case "--target": out.target = next(); break;
       case "-c": case "--concurrency": out.concurrency = Number(next()); break;
@@ -162,9 +177,17 @@ function parseArgs(argv: string[]): Args {
       case "--csv": out.csv = next(); break;
       case "-h": case "--help":
         console.log("Usage: tsx phone_call_burst.ts [--audio FILE] [--duration SEC]");
+        console.log("                               [--max-wall-s SEC]");
         console.log("                               [--chunk-ms MS] [--target HOST:PORT]");
         console.log("                               [-c|--concurrency N] [--stagger-ms MS]");
         console.log("                               [--scenario-id ID] [--csv PATH]");
+        console.log("");
+        console.log("  --duration SEC       Per-call length in seconds (audio time)");
+        console.log("  --max-wall-s SEC     Hard cap on per-call wall time. Under high concurrency,");
+        console.log("                       if this process can't sustain realtime pacing for every");
+        console.log("                       stream, each session ends gracefully at this deadline");
+        console.log("                       instead of dragging on. Also drives the pacing-quality");
+        console.log("                       summary at the end. Default: no cap.");
         process.exit(0);
       default: throw new Error(`Unknown arg: ${arg}`);
     }
@@ -213,6 +236,7 @@ async function main() {
           client, label, wav, args.chunkMs, args.duration,
           metadata, i * args.staggerMs, csv, path.basename(audioPath),
           (c) => activeCalls.push(c),
+          args.maxWallS,
         ),
       ),
     );
@@ -232,6 +256,34 @@ async function main() {
   console.log("─".repeat(70));
   const ok = args.concurrency - failures.length;
   console.log(`Summary: ${ok}/${args.concurrency} streams OK, ${failures.length} failed`);
+
+  // Pacing quality — the truth signal for "did the client actually
+  // produce a realtime workload for every stream". If this median
+  // isn't ~1.0, the load-generator is the bottleneck, not the server,
+  // and any capacity claim from this run is invalid. Mirrors the
+  // Python burst summary 1:1 so ops sees the same numbers either way.
+  const sendResults = results.map((r) => r.sendResult).filter((s): s is SendResult => s !== null);
+  if (sendResults.length > 0) {
+    const ratios = sendResults.map((s) => s.audioPerWall).sort((a, b) => a - b);
+    const wallCapped = sendResults.filter((s) => s.exitReason === "wall_cap").length;
+    const underPaced = sendResults.filter((s) => s.audioPerWall < 0.95).length;
+    const p50 = ratios[Math.floor(ratios.length / 2)];
+    const p05 = ratios[Math.max(0, Math.floor(ratios.length * 0.05))];
+    console.log(
+      `Pacing: audio_per_wall p50=${p50.toFixed(2)} p05=${p05.toFixed(2)} ` +
+        "(1.00 = perfect realtime; <0.95 = client too slow) — " +
+        `under-paced sessions: ${underPaced}/${sendResults.length}, ` +
+        `wall-capped: ${wallCapped}/${sendResults.length}`,
+    );
+    if (underPaced > 0 || wallCapped > 0) {
+      console.error(
+        "  ⚠  Client-side pacing degraded. If your goal is to benchmark the SERVER, " +
+          "shard the run across multiple processes (each with lower --concurrency) " +
+          "so a single event loop isn't the bottleneck.",
+      );
+    }
+  }
+
   for (const { label, error } of failures) {
     const e = error as ServiceError | Error;
     const code = (e as ServiceError).code !== undefined ? `code=${(e as ServiceError).code} ` : "";
