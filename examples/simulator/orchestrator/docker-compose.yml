@@ -1,0 +1,34 @@
+# One-command local run for the AudioVerification simulator service.
+#
+#   cd examples/simulator/orchestrator
+#   docker compose up --build
+#
+# Exposes 50053 on the host. Point any AudioVerification.Stream client
+# (the Python / TypeScript examples under examples/, or your own SDK)
+# at `localhost:50053` — insecure by default (TLS is out of scope for
+# this minimal simulator).
+
+services:
+  orchestrator-simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aurigin/orchestrator-simulator-service:local
+    container_name: orchestrator-simulator
+    ports:
+      - "50053:50053"
+    environment:
+      PORT: "50053"
+      # Auth enforcement toggle. Default true — matches the platform spec
+      # (every Stream / Verify must carry `authorization: Bearer <token>`).
+      # Flip to false for quick local smokes that bypass auth entirely;
+      # never disable in a shared or public deployment.
+      # AUTH_ENABLED: "false"
+      #
+      # Tokens the simulator will accept in the `authorization: Bearer <t>`
+      # gRPC metadata. Both defaults are baked into the image; override
+      # here to smoke-test against your own tokens. Unset either
+      # (empty string) to disable that flavour.
+      # ORCHESTRATOR_SIM_JWT: "eyJ..."
+      # ORCHESTRATOR_SIM_API_KEY: "sk_..."
+    restart: unless-stopped

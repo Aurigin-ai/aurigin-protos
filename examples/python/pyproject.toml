@@ -4,7 +4,9 @@ version = "0.0.0"
 description = "Reference client examples for aurigin-protos. The scenario-driven simulator server lives at examples/simulator/deepfake/."
 requires-python = ">=3.10"
 dependencies = [
-    "aurigin-protos>=0.3.0",
+    # 0.3.2 introduced `aurigin.client.v1` (AudioVerification) — the
+    # orchestrator_client example imports from that package.
+    "aurigin-protos>=0.3.2",
     "grpcio>=1.62",
 ]
 
@@ -24,6 +26,9 @@ scan-file = "scan_file:cli"
 # Fingerprint client — targets `aurigin.fingerprint.v1.Fingerprint`
 # (pair with `examples/simulator/fingerprint/` for local runs).
 fingerprint-client = "fingerprint_client:cli"
+# Orchestrator client — targets `aurigin.client.v1.AudioVerification`
+# (pair with `examples/simulator/orchestrator/` for local runs).
+orchestrator-client = "orchestrator_client:cli"
 
 [build-system]
 requires = ["hatchling"]
@@ -33,6 +38,7 @@ build-backend = "hatchling.build"
 only-include = [
     "client.py", "phone_call.py", "phone_call_burst.py", "scan_file.py",
     "fingerprint_client.py",
+    "orchestrator_client.py",
     "common",
 ]
 
