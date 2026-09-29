@@ -204,6 +204,22 @@ scan-file-bench-no-vad *FLAGS:
 fingerprint-client *FLAGS:
     uv run fingerprint-client {{FLAGS}}
 
+# Orchestrator client — targets `aurigin.client.v1.AudioVerification`
+# (pair with `examples/simulator/orchestrator/` for local runs).
+# Bearer-token auth is mandatory (--token); TLS auto-detects from
+# --target (insecure for localhost / :80, secure otherwise) and can
+# be forced with --tls always|never. This client does NOT use the
+# example certs — no *insecure-* / *mtls-* variants needed.
+#
+#   just orchestrator-client                                        # localhost:50053 sim, demo token
+#   just orchestrator-client --target host.example:443 --token <t>  # public target, real token
+#   just orchestrator-client --duration 30                          # longer session
+#
+# Run `uv run orchestrator-client --help` for the full flag surface.
+[group('run')]
+orchestrator-client *FLAGS:
+    uv run orchestrator-client {{FLAGS}}
+
 # ─── scenarios ──────────────────────────────────────────────────────────────
 
 # Uses the same loader the simulator uses, so the list always matches
