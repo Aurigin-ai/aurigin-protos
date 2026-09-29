@@ -336,6 +336,16 @@ message Notification {
 // accounting plus per-consumer aggregates so a client that only
 // consumed the terminal message (no per-window verdicts) can still
 // display an overall result.
+//
+// Ordering contract: the server MUST wait for every dispatched
+// consumer to flush its tail before emitting FinalResult. Some
+// consumers have work that outlives the last audio window — the
+// deepfake consumer runs a final analysis pass; embedding consumers
+// finalise a pooling window; a recorder-style consumer (once the
+// recorder moves to gRPC) closes and commits the recording blob
+// before it can report its final URI. Emitting FinalResult before
+// those tails complete would deprive the client of per-consumer
+// aggregates it needs to render the session outcome.
 message FinalResult {
   // Total audio duration analysed across the whole session, in
   // milliseconds. Sum of `duration_ms` over every window the

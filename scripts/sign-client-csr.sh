@@ -52,7 +52,7 @@ if [[ ! -f "$CSR" ]]; then
 fi
 if [[ ! -f "$CA_CRT" ]] || [[ ! -f "$CA_KEY" ]]; then
     echo "CA not found — expected $CA_CRT + $CA_KEY" >&2
-    echo 'Generate one with `just mtls-bundle` or override CA_CRT/CA_KEY.' >&2
+    echo "Generate one with 'just mtls-bundle' or override CA_CRT/CA_KEY." >&2
     exit 1
 fi
 
