@@ -9,10 +9,10 @@ import "aurigin/media/v1/audio_frame.proto";
 // AudioVerification — the single public entry point Aurigin clients use
 // to run verification (deepfake, and eventually speaker-ID / PII / other
 // consumers) on their own audio. The orchestrator terminates this API and
-// dispatches to whichever consumers the tenant configuration + per-session
-// `ClientSessionConfig.consumers` selects; the client says "verify this
-// audio", not "call the deepfake service" — that decoupling is the wall
-// between the public API and the internal consumer topology.
+// dispatches to whichever consumers the tenant configuration selects; the
+// client says "verify this audio", not "call the deepfake service" — that
+// decoupling is the wall between the public API and the internal consumer
+// topology.
 //
 // Wire is gRPC over host:port + TLS (never `wss://`). The three
 // first-party Aurigin SDKs — macOS SDK (Swift · SwiftPM · CoreAudio
@@ -103,14 +103,6 @@ message ClientSessionConfig {
   // proto (they hit orchestrator via different adapters).
   aurigin.common.v1.SessionType session_type = 1;
 
-  // Consumers to dispatch this session to, by canonical name.
-  // Canonical names today: "deepfake", "fingerprint", and any
-  // future speaker-ID / PII-detector / language-ID. Empty = use
-  // the tenant's configured default set (typical case; explicit
-  // override is for A/B tests and per-session opt-in of consumers
-  // the tenant hasn't enabled globally).
-  repeated string consumers = 2;
-
   // Client-side correlation identifiers stamped onto every event
   // this session produces (verdicts on the wire, events on the
   // bus). Typical keys: "agent_id", "contact_center_call_id",
@@ -118,15 +110,7 @@ message ClientSessionConfig {
   // client-defined; the orchestrator passes them through opaquely.
   // Keep values short and non-PII — they land in dashboards and
   // audit logs.
-  map<string, string> attributes = 3;
-
-  // Protected phone number this session's audio belongs to, when
-  // relevant. Populated for multi-leg call sessions where the same
-  // stream flow represents a call to / from a protected identity
-  // (e.g. a bank agent verifying a customer's voice against the
-  // number the customer registered). Absent for anonymous streams.
-  // Format is E.164 without the `+` (14155550100 for a US number).
-  optional string protected_number = 4;
+  map<string, string> attributes = 2;
 }
 
 // ============================================================================
