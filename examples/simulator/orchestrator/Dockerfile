@@ -1,12 +1,11 @@
 # syntax=docker/dockerfile:1.7
 
-# Build context: `examples/` (one directory up from this Dockerfile). The
-# larger context matches the deepfake simulator so both share the same
-# build invocation shape:
+# Minimal image for the AudioVerification simulator. Build context is
+# `examples/simulator/orchestrator/` (this directory).
 #
-#   docker build -f examples/simulator/fingerprint/Dockerfile -t aurigin/fingerprint-simulator-service examples/
+#   docker build -t aurigin/orchestrator-simulator-service examples/simulator/orchestrator/
 #
-# docker-compose.yml in this directory sets the context automatically.
+# docker-compose.yml in this directory wires it up automatically.
 
 ARG PYTHON_VERSION=3.12
 ARG UV_VERSION=0.5.11
@@ -20,12 +19,8 @@ ENV UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/venv
 
 WORKDIR /app
-COPY simulator/fingerprint/pyproject.toml simulator/fingerprint/README.md ./
-COPY simulator/fingerprint/src ./src
-# `uv sync --no-dev` grabs runtime deps (aurigin-protos, grpcio) from
-# PyPI. No lockfile is committed for the simulator — thin reference tool,
-# floating latest patch of each dep is fine.
-#
+COPY pyproject.toml README.md ./
+COPY src ./src
 # --no-editable forces the package to be COPIED into /opt/venv/lib/
 # pythonX.Y/site-packages/ rather than installed as an editable pointer
 # to /app/src (which only exists in the builder stage — the runtime
@@ -38,7 +33,7 @@ FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=50051
+    PORT=50053
 
 RUN useradd --create-home --uid 10001 app
 
@@ -46,5 +41,5 @@ COPY --from=builder /opt/venv /opt/venv
 
 USER app
 WORKDIR /app
-EXPOSE 50051
-ENTRYPOINT ["fingerprint-simulator-service"]
+EXPOSE 50053
+ENTRYPOINT ["orchestrator-simulator-service"]

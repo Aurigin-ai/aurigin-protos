@@ -1,0 +1,29 @@
+[project]
+name = "aurigin-orchestrator-simulator-service"
+version = "0.0.0"
+description = "Minimal gRPC simulator for aurigin.client.v1.AudioVerification (SDK smoke-test target)."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    # Consumed by the generated stubs the server responds with. Aligned with
+    # the aurigin-protos version this repo publishes; bump in lockstep on
+    # each release.
+    "aurigin-protos>=0.3.2",
+    "grpcio>=1.62",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+# `uv run orchestrator-simulator-service` and the Docker ENTRYPOINT both land here.
+orchestrator-simulator-service = "orchestrator_simulator_service.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orchestrator_simulator_service"]
