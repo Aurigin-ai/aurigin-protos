@@ -67,4 +67,18 @@ enum ResultLabel {
   // the original string. Providers of new labels: prefer bumping the
   // enum over relying on UNKNOWN.
   RESULT_LABEL_UNKNOWN = 6;
+
+  // Replay-detection consumer verdicts (aurigin.replay_detection.v1) —
+  // wave-form-level replay of a genuine recording, not a synthetic
+  // voice. Semantically distinct from SPOOFED (which means "generated
+  // by a voice model") — a replayed real voice IS bonafide-source but
+  // is being presented in a session it wasn't captured for. Kept as
+  // separate enum values so downstream sinks + action rules can treat
+  // them independently.
+  //
+  // Producer: `aurigin/replay_detector` (halo-3 onward). Labels on
+  // the wire come out of ReplayAudioClassification.py: 0 = "genuine",
+  // 1 = "replay". Map to these enum values respectively.
+  RESULT_LABEL_REPLAY_GENUINE = 7;
+  RESULT_LABEL_REPLAY_REPLAY = 8;
 }

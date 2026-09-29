@@ -1,0 +1,249 @@
+syntax = "proto3";
+
+package aurigin.replay_detection.v1;
+
+import "aurigin/media/v1/audio_frame.proto";
+
+// Replay Detection Service.
+//
+// Analyzes a continuous audio stream and emits per-window verdicts on
+// whether the audio is a live-captured voice (genuine) or a replay of
+// a previously-captured recording (replay). Semantically distinct from
+// deepfake detection: replay attacks use real recordings of the target
+// speaker, not synthesised audio. Both consumer types can — and often
+// should — be enabled together on the orchestrator side.
+//
+// Structural sibling of `aurigin.deepfake_detection.v1.DeepfakeDetection`
+// on purpose: same bidi shape (stream Request → stream Response with
+// `oneof` request/response) so the orchestrator's `grpc_verdict`
+// consumer dispatch code path handles both without special-casing.
+//
+// Model contract (server-side, see aurigin-replay README):
+//
+//   Model      aurigin/replay_detector @ halo-3-dev-room-sym-cap025-27k
+//   Backbone   facebook/wav2vec2-base
+//   Rate       16 kHz mono
+//   Window     3.0 s (NOT 5.0 s — deepfake default silently degrades this model)
+//   Pooling    masked_mean
+//   Labels     0 = genuine, 1 = replay
+//   do_normalize=False (auto-loaded via preprocessor_config.json)
+//
+// The 3.0 s window length is the one contract element the server
+// cannot enforce for its client — it lives in the segmentation layer,
+// not in the model artefacts. Every consumer of this service MUST
+// leave `ReplayConfig.analysis_interval_s` unset (falls back to
+// server env default of 3.0) OR set it explicitly to 3.0. A pipeline
+// left at the aurigin-standard 5.0 s window will silently produce
+// wrong numbers with no error signal.
+//
+// Session lifecycle:
+//   1. Client sends CreateSessionRequest with optional ReplayConfig.
+//   2. Server responds with CreateSessionResponse containing session_id.
+//   3. Client streams aurigin.media.v1.AudioFrame messages continuously.
+//   4. Server emits AnalysisResult events as each 3.0-s window is scored.
+//   5. On stream end, server emits a FinalResult with session accounting.
+//
+service ReplayDetection {
+  // Bidirectional streaming RPC for real-time replay detection.
+  rpc DetectReplay(stream DetectReplayRequest) returns (stream DetectReplayResponse);
+}
+
+// ============================================================================
+// Request (Client -> Server)
+// ============================================================================
+
+message CreateSessionRequest {
+  // Optional session configuration; server applies defaults for unset fields.
+  optional ReplayConfig config = 1;
+}
+
+message DetectReplayRequest {
+  oneof request {
+    CreateSessionRequest create_session_request = 1;
+    // Aurigin-native self-describing audio frame — codec + sample rate
+    // + channels ride on the message so no session-open coordination
+    // is needed. This service accepts AudioFrame only (no legacy
+    // twilio.AudioBuffer fork — new surface, no back-compat window
+    // to carry, matches aurigin.fingerprint.v1 precedent).
+    aurigin.media.v1.AudioFrame audio_frame = 2;
+  }
+}
+
+// ============================================================================
+// Response (Server -> Client)
+// ============================================================================
+
+message DetectReplayResponse {
+  oneof response {
+    CreateSessionResponse create_session_response = 1;
+    AnalysisResult analysis_result = 2;
+    FinalResult final_result = 3;
+  }
+}
+
+message CreateSessionResponse {
+  // Unique identifier for this session.
+  string session_id = 1;
+}
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+message ReplayConfig {
+  // Per-session override for the analysis window. UNSPECIFIED (== 0.0)
+  // means "follow the server env default", which for replay-service
+  // MUST be 3.0 (matches the halo-3 training config). Setting this to
+  // any value other than 3.0 will silently degrade accuracy — the
+  // model was trained on 3.0 s segments and pooling+conv layers are
+  // shaped around that length. Overriding is provided as an escape
+  // hatch for future model revisions with different training windows;
+  // leave unset for production.
+  optional float analysis_interval_s = 1;
+
+  // Model revision override, e.g. "halo-3-dev-room-sym-cap025-27k" or
+  // "halo-2-dev-230000". Unspecified = use the server's env-configured
+  // default (main revision, tracked by the deploy). Useful for A/B
+  // comparison against older revisions available on the HF repo (see
+  // aurigin/replay_detector "tags" list).
+  optional string model_version = 2;
+
+  // Per-session VAD gate. Same semantics as
+  // aurigin.deepfake_detection.v1.DetectionConfig.vad_mode — off by
+  // default because replay signals often ride on the silence around
+  // speech (room impulse response, background artefacts) and gating
+  // silence windows can suppress the very features the model uses
+  // to spot a replay. Enable only after verifying end-to-end accuracy
+  // impact for the specific deployment.
+  optional VadMode vad_mode = 3;
+
+  // Per-session VAD silence-skip threshold, in percent [0, 100]. Only
+  // meaningful when vad_mode is unset or ON. Unspecified = follow
+  // server env default (SILENCE_THRESHOLD_PCT, typically 80).
+  optional float vad_silence_threshold_pct = 4;
+
+  // Per-session tail-strategy override. Same semantics as
+  // aurigin.deepfake_detection.v1.DetectionConfig.tail_strategy —
+  // controls how the sub-3s residual at stream end is handled. See
+  // TailStrategy enum below for the three options.
+  optional TailStrategy tail_strategy = 5;
+
+  // Per-session floor on residual duration eligible for its own
+  // inference, in seconds. Interacts with tail_strategy: residuals
+  // shorter than this are handled per-strategy rather than scored
+  // directly. Unspecified = follow server env default
+  // (MIN_ANALYSIS_DURATION_S, typically 1.0). Note the wav2vec2-base
+  // feature extractor's kernel-size-3 conv needs at least ~1 s of
+  // audio to produce enough feature frames; setting this lower will
+  // break inference on short residuals.
+  optional float min_analysis_duration_s = 6;
+
+  // Decision threshold override, in [0, 1]. Verdicts with `score`
+  // ≥ this value get label REPLAY_LABEL_REPLAY; below get GENUINE.
+  // Unspecified = follow server env default (DECISION_THRESHOLD).
+  // IMPORTANT: choose from MDR@1%FPR on the held-out eval, not from
+  // ROC AUC — see the aurigin-replay README's "Held-out metrics"
+  // section. A 0.99 AUC coexists with double-digit miss rates at the
+  // 1% FPR operating point; ignore AUC-based thresholding.
+  optional float decision_threshold = 7;
+}
+
+// VAD per-session mode. Controls whether the silence-gate runs before
+// model inference. UNSPECIFIED = follow the server's env-driven default
+// (VAD_ENABLED); ON / OFF override it. Mirrors
+// aurigin.deepfake_detection.v1.VadMode by value + numeric ID (same
+// enum, redeclared here to keep the two consumer contracts independent
+// per house style — see aurigin.fingerprint.v1.TailStrategy precedent).
+enum VadMode {
+  VAD_MODE_UNSPECIFIED = 0;
+  VAD_MODE_ON = 1;
+  VAD_MODE_OFF = 2;
+}
+
+// Per-session tail strategy. Mirrors deepfake-service's server-side
+// TailStrategy enum verbatim (same numeric IDs) so downstream orchestrator
+// dispatch code can treat both consumers uniformly.
+enum TailStrategy {
+  TAIL_STRATEGY_UNSPECIFIED = 0;
+  TAIL_STRATEGY_DROP = 1;
+  TAIL_STRATEGY_EXTEND = 2;
+  TAIL_STRATEGY_RECOMPUTE = 3;
+}
+
+// ============================================================================
+// Replay-detection labels
+// ============================================================================
+
+// Model output label for a single window. Numeric values match the
+// halo-3 model's class indices one-for-one (0 = genuine, 1 = replay)
+// so wire-level round-tripping is a lookup, not a mapping. UNSPECIFIED
+// exists for sentinel cases (window skipped / errored / silence) where
+// the model didn't produce a classification.
+enum ReplayLabel {
+  REPLAY_LABEL_UNSPECIFIED = 0;
+  REPLAY_LABEL_GENUINE = 1;
+  REPLAY_LABEL_REPLAY = 2;
+}
+
+// ============================================================================
+// Analysis events
+// ============================================================================
+
+// Emitted each time a window of audio has been analysed.
+message AnalysisResult {
+  // Audio offset from stream start (ms) — start of the analysed segment.
+  int64 audio_offset_ms = 1;
+  // Duration of the analysed segment (ms). Nominally 3000 (the trained
+  // window length); shorter for tail windows scored under the
+  // MIN_ANALYSIS_DURATION_S floor.
+  int64 duration_ms = 2;
+  // Replay probability score [0, 1]: 0.0 = certainly genuine,
+  // 1.0 = certainly replay. Compare against
+  // ReplayConfig.decision_threshold (or server env default) to derive
+  // the categorical label.
+  float score = 3;
+
+  // Categorical classification of this window. Values map to the halo-3
+  // model output plus VAD/error sentinels:
+  //   REPLAY_LABEL_GENUINE     — score < decision_threshold
+  //   REPLAY_LABEL_REPLAY      — score ≥ decision_threshold
+  //   REPLAY_LABEL_UNSPECIFIED — window not scored (VAD-gated OR
+  //                              inference error OR partial residual
+  //                              below MIN_ANALYSIS_DURATION_S)
+  // Clients should also read `label_raw` for the raw string the server
+  // emitted — future model revisions may return values outside this
+  // enum and receivers should forward `label_raw` unchanged rather
+  // than fail on unknown values.
+  ReplayLabel label = 4;
+
+  // Raw string form of the label as the server emitted it. Populated
+  // on every AnalysisResult so unknown values (VAD "silence" sentinel,
+  // "error", or a future new class) still round-trip. Canonical values
+  // today: "genuine", "replay", "silence", "error".
+  string label_raw = 5;
+
+  // Model confidence in this classification [0, 1]. For "silence"
+  // sentinels this carries the VAD silence fraction (≈silence_pct/100);
+  // for "error" sentinels this is 0.0.
+  float confidence = 6;
+}
+
+// Emitted once when the client closes the stream. Purely accounting —
+// aggregate label is worst-case (any REPLAY wins over GENUINE); real
+// downstream policy lives in the caller (orchestrator action rules).
+message FinalResult {
+  // Total audio received (ms).
+  int64 total_audio_ms = 1;
+  // Average replay score across all analysed windows [0, 1].
+  float overall_score = 2;
+  // Worst-case aggregate label across the session. REPLAY if any window
+  // scored REPLAY, GENUINE if all scored GENUINE and at least one was
+  // scored, UNSPECIFIED if no window was scored (all VAD-gated or
+  // errored).
+  ReplayLabel overall_label = 3;
+  // Raw string form of the aggregate label — same extensibility
+  // contract as AnalysisResult.label_raw.
+  string overall_label_raw = 4;
+  // Number of analysis windows completed (scored, not VAD-gated).
+  int32 analysis_count = 5;
+}
