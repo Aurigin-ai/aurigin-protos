@@ -64,6 +64,22 @@ export interface ResponseSink {
   globalResult: string;
 }
 
+// Return value of sendCall — lets callers verify pacing quality.
+//
+//   - exitReason: "audio_duration" (natural end) | "wall_cap" (hit --max-wall-s)
+//   - audioSentS: total audio time actually pushed on the wire
+//   - wallElapsedS: wall clock from first send to call.end()
+//   - audioPerWall: ratio; 1.0 = perfect realtime, <1.0 = client too slow
+//
+// Matches Python's phone_call.SendResult 1:1 so both examples surface the
+// same signals in the burst summary.
+export interface SendResult {
+  exitReason: "audio_duration" | "wall_cap";
+  audioSentS: number;
+  wallElapsedS: number;
+  audioPerWall: number;
+}
+
 function resolveAudio(arg: string | null): string {
   if (arg) {
     if (!fs.existsSync(arg)) throw new Error(`No such file: ${arg}`);
@@ -85,9 +101,18 @@ function resolveAudio(arg: string | null): string {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// Stream `wav` in real-time-paced AudioFrame chunks until `durationS` is up.
+// Stream `wav` in real-time-paced AudioFrame chunks.
+//
+// Exit condition: whichever of these hits first —
+//   1. `durationS` seconds of AUDIO have been sent (natural end).
+//   2. `maxWallS` seconds of WALL CLOCK have elapsed since the first
+//      send (graceful cap, only when maxWallS is defined).
 //
 // Also imported by phone_call_burst.ts — same loop, just instantiated N times.
+//
+// Returns a SendResult so callers can distinguish a natural end from a
+// wall-cap truncation, and can flag runs where the client failed to
+// sustain realtime pacing (audio delivered ≪ wall elapsed).
 //
 // THIS LOOP IS THE INTEGRATION PATTERN. For a FreeSWITCH `mod_audio_fork`
 // or Twilio Media Stream, replace the `samples.subarray(cursor, …)` slicing
@@ -96,19 +121,33 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 // clock. We loop a finite WAV here just so the example self-contains.
 export async function sendCall(
   call: Call, wav: WavData, chunkMs: number, durationS: number,
-): Promise<void> {
+  opts: { maxWallS?: number } = {},
+): Promise<SendResult> {
+  const { maxWallS } = opts;
   const bytesPerFrame = wav.bytesPerSample * wav.channels;
   const bytesPerChunk = Math.max(1, Math.floor((wav.rate * chunkMs) / 1000) * bytesPerFrame);
   const chunkS = chunkMs / 1000;
 
   call.write({ createSessionRequest: {} });
 
-  let nextSend = Date.now();
+  const startedAt = Date.now();
+  let nextSend = startedAt;
+  const wallDeadline = maxWallS !== undefined ? startedAt + maxWallS * 1000 : Infinity;
   let ptsNs = 0n;
   let cursor = 0;
   let elapsedS = 0;
+  let exitReason: SendResult["exitReason"] = "audio_duration";
 
   while (elapsedS < durationS) {
+    // Wall-cap check runs BEFORE the next send so a slow-pacing client
+    // (many concurrent streams starving the event loop) can't drag a
+    // session past `maxWallS`. call.end() below still fires cleanly, so
+    // the server sees a normal half-close and emits FinalResult.
+    if (Date.now() >= wallDeadline) {
+      exitReason = "wall_cap";
+      break;
+    }
+
     const end = Math.min(cursor + bytesPerChunk, wav.samples.length);
     const chunk = wav.samples.subarray(cursor, end);
     cursor = end;
@@ -137,6 +176,13 @@ export async function sendCall(
   }
 
   call.end();
+  const wallElapsedS = (Date.now() - startedAt) / 1000;
+  // audio-per-wall ratio — 1.0 = perfect realtime pacing, <1.0 = client
+  // is too slow (dropping behind the tick). This is the ground-truth
+  // signal a load-generator needs to know whether it produced the
+  // intended workload; matches server-side `rtf` on session ended.
+  const audioPerWall = wallElapsedS > 0 ? elapsedS / wallElapsedS : 0;
+  return { exitReason, audioSentS: elapsedS, wallElapsedS, audioPerWall };
 }
 
 // Receive every server response as it arrives. Runs concurrently with the
@@ -199,6 +245,7 @@ export function recvCall(
 interface Args {
   audio: string | null;
   duration: number;
+  maxWallS: number | null;
   chunkMs: number;
   target: string;
   scenarioId: string | null;
@@ -208,6 +255,7 @@ function parseArgs(argv: string[]): Args {
   const out: Args = {
     audio: null,
     duration: DEFAULT_DURATION_S,
+    maxWallS: null,
     chunkMs: DEFAULT_CHUNK_MS,
     target: "localhost:50051",
     scenarioId: null,
@@ -218,13 +266,20 @@ function parseArgs(argv: string[]): Args {
     switch (arg) {
       case "--audio": out.audio = next(); break;
       case "--duration": out.duration = Number(next()); break;
+      case "--max-wall-s": out.maxWallS = Number(next()); break;
       case "--chunk-ms": out.chunkMs = Number(next()); break;
       case "--target": out.target = next(); break;
       case "--scenario-id": out.scenarioId = next(); break;
       case "-h": case "--help":
         console.log("Usage: tsx phone_call.ts [--audio FILE] [--duration SEC]");
+        console.log("                         [--max-wall-s SEC]");
         console.log("                         [--chunk-ms MS] [--target HOST:PORT]");
         console.log("                         [--scenario-id ID]");
+        console.log("");
+        console.log("  --duration SEC       Call length in seconds (audio time)");
+        console.log("  --max-wall-s SEC     Hard cap on wall time. Session ends gracefully");
+        console.log("                       at deadline if the client can't sustain realtime");
+        console.log("                       pacing. Default: no cap.");
         process.exit(0);
       default: throw new Error(`Unknown arg: ${arg}`);
     }
@@ -260,7 +315,10 @@ async function main() {
     // Send + receive concurrently: this is the bidi pattern. sendCall
     // writes AudioBuffer messages at real-time pace; recvCall reads
     // AnalysisResult / FinalResult messages as the server emits them.
-    await Promise.all([sendCall(call, wav, args.chunkMs, args.duration), recvCall(call)]);
+    await Promise.all([
+      sendCall(call, wav, args.chunkMs, args.duration, { maxWallS: args.maxWallS ?? undefined }),
+      recvCall(call),
+    ]);
   } finally {
     client.close();
   }

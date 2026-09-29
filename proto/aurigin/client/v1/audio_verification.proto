@@ -1,0 +1,429 @@
+syntax = "proto3";
+
+package aurigin.client.v1;
+
+import "aurigin/common/v1/result.proto";
+import "aurigin/common/v1/session.proto";
+import "aurigin/media/v1/audio_frame.proto";
+
+// AudioVerification — the single public entry point Aurigin clients use
+// to run verification (deepfake, and eventually speaker-ID / PII / other
+// consumers) on their own audio. The orchestrator terminates this API and
+// dispatches to whichever consumers the tenant configuration selects; the
+// client says "verify this audio", not "call the deepfake service" — that
+// decoupling is the wall between the public API and the internal consumer
+// topology.
+//
+// Wire is gRPC over host:port + TLS (never `wss://`). The three
+// first-party Aurigin SDKs — macOS SDK (Swift · SwiftPM · CoreAudio
+// capture), Windows SDK (.NET 8 · NuGet · WASAPI capture), TypeScript
+// SDK (Node.js · npm · consumed by electronjs-app main-process) — all
+// wrap this proto's generated code with per-platform capture + auth +
+// reconnect. Developer API-key streaming clients also target this same
+// service; file-service uses it as a trusted proxy for its REST upload
+// endpoint.
+//
+// The Chrome plugin ingress speaks a WS mirror of the Stream RPC's
+// message shape (JSON-encoded), because gRPC-Web does not support
+// client-streaming. That mirror is orchestrator-side plumbing, not a
+// second proto — same session semantics, same message shape, different
+// framing.
+//
+// See docs/transport-protocol/README.md § "Internal ingress" and
+// docs/transport-protocol/03-proto-shapes.md § "aurigin/client/v1/"
+// in platform-backend-services for the design rationale.
+//
+// Session lifecycle (streaming):
+//   1. Client sends CreateSessionRequest with optional ClientSessionConfig.
+//   2. Server responds with CreateSessionResponse containing session_id.
+//   3. Client streams aurigin.media.v1.AudioFrame messages continuously.
+//   4. Server emits Verdict / EmbeddingVerdict / Notification messages
+//      as each per-window consumer produces output. `consumer_name`
+//      lets the client filter by consumer while keeping one stream.
+//   5. On stream end, server emits a FinalResult with per-consumer
+//      aggregate + total_audio_ms accounting.
+service AudioVerification {
+  // Bidirectional streaming — audio in, verdicts out. Session-open
+  // handshake and per-frame audio share the request stream via the
+  // StreamRequest oneof (matches DetectDeepfake / ExtractFingerprint
+  // shape). Terminal FinalResult lands on the response stream just
+  // before the server half-closes.
+  //
+  // Used by: macOS SDK, Windows SDK, TypeScript SDK (and any consumer
+  // of them — Electron main-process, Node CLIs, TypeScript backends),
+  // Chrome plugin (JSON mirror), developer API-key streaming clients,
+  // and file-service as a trusted proxy for streaming file uploads.
+  rpc Stream(stream StreamRequest) returns (stream StreamResponse);
+
+  // Unary file verification — one whole audio blob in, aggregated
+  // FinalResult + optional per-window verdicts out. Callers can pass
+  // audio inline (small files, server enforces a size limit) or as a
+  // blob URI the server can already read (`s3://`, `minio://`, or a
+  // presigned HTTPS GET). The REST `POST /v1/files` endpoint on
+  // file-service is a JSON encoding of this same shape — same handler
+  // underneath, same VerifyResponse.
+  rpc Verify(VerifyRequest) returns (VerifyResponse);
+}
+
+// ============================================================================
+// Streaming — Request (Client -> Server)
+// ============================================================================
+
+message StreamRequest {
+  // Either the initial session-open handshake OR a subsequent audio
+  // frame. Emitters MUST send exactly one CreateSessionRequest as the
+  // first message on the stream; every subsequent message MUST be an
+  // AudioFrame. Servers that see anything else abort with
+  // INVALID_ARGUMENT.
+  oneof request {
+    CreateSessionRequest create_session_request = 1;
+
+    // Self-describing audio frame — codec + sample rate + channels
+    // + payload ride on the message so no session-open codec
+    // coordination is needed and mid-stream codec renegotiations
+    // (Teams SDP switch, WebRTC bandwidth adaptation) work without
+    // a wire break. AudioFrame is the sole audio type on this
+    // service; there is no legacy fork.
+    aurigin.media.v1.AudioFrame audio_frame = 2;
+  }
+}
+
+message CreateSessionRequest {
+  // Optional per-session configuration; server applies tenant defaults
+  // for every unset field. Sending an empty message (no config) is
+  // valid and picks the tenant default for every knob.
+  optional ClientSessionConfig config = 1;
+}
+
+message ClientSessionConfig {
+  // Shape of the session — drives orchestrator's action-rule scoping
+  // and rides on every event this session produces on the pub/sub
+  // bus. SDK clients typically set USER_STREAM; developer API-key
+  // clients set API_STREAM; Teams/telco ingresses don't use this
+  // proto (they hit orchestrator via different adapters).
+  aurigin.common.v1.SessionType session_type = 1;
+
+  // Client-side correlation identifiers stamped onto every event
+  // this session produces (verdicts on the wire, events on the
+  // bus). Typical keys: "agent_id", "contact_center_call_id",
+  // "recording_id", "campaign_id". The key namespace is
+  // client-defined; the orchestrator passes them through opaquely.
+  // Keep values short and non-PII — they land in dashboards and
+  // audit logs.
+  map<string, string> attributes = 2;
+}
+
+// ============================================================================
+// Streaming — Response (Server -> Client)
+// ============================================================================
+
+message StreamResponse {
+  // Session-open ack, per-window classification verdict, per-window
+  // embedding (fingerprint / speaker-ID style consumers),
+  // server-triggered notification, or terminal FinalResult. Servers
+  // send exactly one CreateSessionResponse first, then zero or more
+  // Verdict / EmbeddingVerdict / Notification messages interleaved
+  // as consumers produce output, then exactly one FinalResult just
+  // before half-close.
+  oneof response {
+    CreateSessionResponse create_session_response = 1;
+
+    // Per-window classification result from any consumer that
+    // produces a categorical label + score (deepfake, future
+    // speaker-ID, PII-detector, language-ID). `consumer_name`
+    // lets the client filter by consumer while keeping one stream.
+    Verdict verdict = 2;
+
+    // Server-triggered client-facing event outside the verdict
+    // stream — warnings (near-quota), info (session-lifecycle
+    // signals), action-fired notices (the tenant's action-rule
+    // played a warning file into the call), quota exceeded, etc.
+    Notification notification = 3;
+
+    // Terminal aggregate on stream end. Landed just before the
+    // server half-closes. Always exactly one per session.
+    FinalResult final_result = 4;
+
+    // Per-window embedding result from consumers whose output is a
+    // vector rather than a classification (fingerprint's WavLM
+    // embedding, future speaker-ID x-vectors). Carried as a
+    // separate branch rather than shoehorned into `Verdict` because
+    // Verdict.attributes is `map<string, string>` which would force
+    // base64-encoding of the raw float32 bytes and lose the
+    // canonical-bytes property. Mirrors
+    // `aurigin.fingerprint.v1.EmbeddingResult` plus the
+    // `consumer_name` axis so a future speaker-ID consumer can
+    // multiplex on the same branch.
+    EmbeddingVerdict embedding_verdict = 5;
+  }
+}
+
+message CreateSessionResponse {
+  // Server-assigned session identifier. Opaque to the client;
+  // logged in dashboards + threaded onto every event this session
+  // produces on the pub/sub bus (`Event.call_uuid` in
+  // aurigin.events.v1).
+  string session_id = 1;
+}
+
+// Per-window classification result from a categorical consumer.
+message Verdict {
+  // Which consumer produced this verdict. Canonical values today:
+  // "deepfake" (currently the only shipping classification consumer).
+  // Future: "speaker_id", "pii_detector", "language_id". Clients
+  // filter on this axis when they subscribe to multiple consumers
+  // in one stream.
+  string consumer_name = 1;
+
+  // Position of the analysed window from stream start, in
+  // milliseconds. Aligns per-window verdicts back to the client's
+  // own audio timeline for UI rendering (e.g. a waveform overlay).
+  int64 audio_offset_ms = 2;
+
+  // Length of the analysed window in milliseconds. Typically the
+  // consumer's server-configured analysis_interval_s times 1000
+  // (5000 for the deepfake service today).
+  int64 duration_ms = 3;
+
+  // Canonical classification. Consumers that produce a label the
+  // enum doesn't cover leave this UNSPECIFIED and populate
+  // `label_raw` — see the extensibility contract on ResultLabel.
+  aurigin.common.v1.ResultLabel label = 4;
+
+  // Raw string form of the label as the consumer returned it —
+  // populated on every Verdict so unknown values still round-trip.
+  // Clients that only understand the enum should prefer `label`
+  // and log `label_raw` for debugging.
+  string label_raw = 5;
+
+  // Model output score, semantics per-consumer. For the deepfake
+  // consumer: probability the window is spoofed, in [0, 1].
+  float score = 6;
+
+  // Confidence in the classification, in [0, 1]. Distinct from
+  // `score`: score is the model output, confidence is the model's
+  // self-assessed certainty about that output (typically derived
+  // from the distance to the decision boundary or from a
+  // calibration head).
+  float confidence = 7;
+
+  // Consumer-specific extra attributes — e.g. per-model version tag,
+  // per-window silence fraction, per-frame codec after transcoding.
+  // Kept as `map<string, string>` deliberately: `google.protobuf.Any`
+  // would allow typed extension but at the cost of a much heavier
+  // decoder. Extension policy: promote a well-used attribute key to
+  // a top-level typed field in the next `v2`; keep the map for
+  // forward-compat.
+  map<string, string> attributes = 8;
+}
+
+// Per-window embedding result from a vector-shaped consumer
+// (fingerprint's WavLM, future speaker-ID x-vectors, language-ID
+// pooling embeddings). Same offset/duration axis as Verdict.
+message EmbeddingVerdict {
+  // Which consumer produced this embedding. Canonical values today:
+  // "fingerprint" (the WavLM feature extractor in aurigin-fingerprint).
+  // Future: "speaker_id", "language_id". Clients subscribed to
+  // multiple embedding-shaped consumers filter on this axis.
+  string consumer_name = 1;
+
+  // Position of the analysed window from stream start, in
+  // milliseconds. Same axis as Verdict.audio_offset_ms.
+  int64 audio_offset_ms = 2;
+
+  // Length of the analysed window in milliseconds — typically the
+  // consumer's server-configured window size (5000 for WavLM).
+  int64 duration_ms = 3;
+
+  // Raw float32 embedding bytes, little-endian. Canonical form
+  // (768 * 4 = 3072 bytes for WavLM-base-plus; other consumers set
+  // their own `dim`). Servers producing similarity-comparable
+  // embeddings L2-normalise on their side so a dot product on the
+  // client is a cosine similarity — receivers MUST NOT re-normalise.
+  bytes embedding = 4;
+
+  // Convenience hash of the raw embedding — sha256(embedding)[:16]
+  // hex. Useful as a quick equality check and cache key without
+  // shipping the full 3072 bytes through downstream logs. Derived
+  // from `embedding`; producers MUST NOT omit it.
+  string fingerprint_code = 5;
+
+  // Embedding dimensionality (768 for WavLM-base-plus). Lets
+  // clients validate `len(embedding) == dim * 4` without hardcoding
+  // a per-consumer constant and survives a future backbone swap
+  // that changes `dim`.
+  int32 dim = 6;
+
+  // Consumer-specific extra attributes — same policy as
+  // `Verdict.attributes`. Typical keys for a fingerprint consumer:
+  // "model_revision", "silence_fraction" (when the consumer
+  // publishes it despite producing embeddings on silence too).
+  map<string, string> attributes = 7;
+}
+
+// Server-triggered client-facing notification. Carries information
+// outside the per-window verdict stream — action-rule outcomes,
+// quota warnings, session-lifecycle info.
+message Notification {
+  // Classification of the notification. Unknown values from a newer
+  // server land as NOTIFICATION_TYPE_UNSPECIFIED at the client;
+  // callers should also read `type_raw` to recover unknown values.
+  NotificationType type = 1;
+
+  // Human-readable message describing the notification. English
+  // today; internationalisation is a client-side concern (the
+  // client maps the enum to its own localised string).
+  string message = 2;
+
+  // Notification-specific extra attributes. Typical keys:
+  // "rule_name" (for ACTION_FIRED), "quota_pct_used" (for
+  // QUOTA_WARN), "session_id" (echo of the session this
+  // notification belongs to when it arrives asynchronously).
+  map<string, string> attributes = 3;
+
+  // Kind of notification. Extension policy same as SessionType —
+  // additive-only, new values at the tail with the next unused
+  // number. Receivers MUST accept unknown values by falling back
+  // to `type_raw` (unpopulated today; reserve field number 4 for
+  // when we need it).
+  enum NotificationType {
+    // Zero-value sentinel — receivers treat as "notification type
+    // unknown", fall back to `message` for display.
+    NOTIFICATION_TYPE_UNSPECIFIED = 0;
+
+    // Non-fatal warning — model boundary reached, degraded input
+    // detected, session approaching an operational limit. Session
+    // continues.
+    NOTIFICATION_TYPE_WARNING = 1;
+
+    // Informational — session lifecycle signal (session opened
+    // downstream on a bus consumer, recording started, model
+    // version rolled), no action required.
+    NOTIFICATION_TYPE_INFO = 2;
+
+    // The tenant's action-rule wire fired — e.g. a `play_file`
+    // action pushed a warning audio file into the call after a
+    // spoofed verdict. Attributes carry `rule_name` and outcome.
+    NOTIFICATION_TYPE_ACTION_FIRED = 3;
+
+    // Session is approaching a tenant quota (per-minute analysis
+    // limit, monthly usage cap). Attributes carry `quota_pct_used`
+    // and `quota_name`. Distinct from a hard cap failure — a hard
+    // cap aborts the session with RESOURCE_EXHAUSTED rather than
+    // firing a notification.
+    NOTIFICATION_TYPE_QUOTA_WARN = 4;
+  }
+}
+
+// Terminal aggregate on stream end. Always exactly one per session,
+// landed just before the server half-closes. Carries session-level
+// accounting plus per-consumer aggregates so a client that only
+// consumed the terminal message (no per-window verdicts) can still
+// display an overall result.
+//
+// Ordering contract: the server MUST wait for every dispatched
+// consumer to flush its tail before emitting FinalResult. Some
+// consumers have work that outlives the last audio window — the
+// deepfake consumer runs a final analysis pass; embedding consumers
+// finalise a pooling window; a recorder-style consumer (once the
+// recorder moves to gRPC) closes and commits the recording blob
+// before it can report its final URI. Emitting FinalResult before
+// those tails complete would deprive the client of per-consumer
+// aggregates it needs to render the session outcome.
+message FinalResult {
+  // Total audio duration analysed across the whole session, in
+  // milliseconds. Sum of `duration_ms` over every window the
+  // consumers scored — differs from wall-clock session duration
+  // because VAD-gated silence windows and any transcode losses are
+  // excluded.
+  int64 total_audio_ms = 1;
+
+  // Per-consumer aggregates. One entry per consumer that produced
+  // any verdict during the session. Order is not significant;
+  // clients key on `consumer_name`.
+  repeated ConsumerFinalResult per_consumer = 2;
+}
+
+message ConsumerFinalResult {
+  // Which consumer this aggregate belongs to. Same value space as
+  // `Verdict.consumer_name` — "deepfake", "fingerprint", …
+  string consumer_name = 1;
+
+  // Session-wide aggregate classification, computed server-side.
+  // Semantics per-consumer: for the deepfake consumer, worst-case
+  // over the window sequence (any SPOOFED / PARTIALLY_SPOOFED
+  // window trumps BONAFIDE); for embedding-shaped consumers this
+  // is UNSPECIFIED (no natural aggregate).
+  aurigin.common.v1.ResultLabel overall_label = 2;
+
+  // Raw string form of `overall_label` — same extensibility
+  // contract as `Verdict.label_raw`.
+  string overall_label_raw = 3;
+
+  // Aggregate score, in [0, 1], semantics per-consumer. For the
+  // deepfake consumer: max score across scored windows.
+  float overall_score = 4;
+
+  // How many per-window analyses this consumer produced during the
+  // session. Useful for the client to sanity-check that the
+  // session ran long enough for a stable aggregate.
+  int32 analysis_count = 5;
+}
+
+// ============================================================================
+// Unary file verification (Verify)
+// ============================================================================
+
+message VerifyRequest {
+  // Either an inline audio payload OR a blob URI the server can
+  // already read. Exactly one MUST be set — servers reject a request
+  // with both or neither as INVALID_ARGUMENT.
+  oneof source {
+    // Small-file inline path — the raw encoded audio bytes ride on
+    // the request. Server enforces a size limit (announced via a
+    // future GetLimits RPC; today, hard-coded to 10 MiB). Clients
+    // above the limit MUST use `blob_uri`.
+    bytes inline_audio = 1;
+
+    // Blob URI the server can read. Accepted schemes:
+    //   `s3://<bucket>/<key>` (server IAM must allow the read)
+    //   `minio://<host>/<bucket>/<key>` (on-prem MinIO)
+    //   `https://…` (presigned S3 GET / any HTTPS URL the server
+    //                can GET without extra auth)
+    // The file-service upload flow returns URIs in this shape after
+    // storing the client's upload; callers can then pass the URI
+    // straight into Verify without re-uploading.
+    string blob_uri = 2;
+  }
+
+  // Optional per-session config — same shape as the streaming
+  // handshake. session_type SHOULD be SESSION_TYPE_FILE_VERIFY for
+  // audit-log clarity; the orchestrator accepts other values but
+  // stamps FILE_VERIFY on the resulting event regardless.
+  optional ClientSessionConfig config = 3;
+
+  // Codec hint for `inline_audio` when the payload is bare PCM
+  // (no self-describing container). Ignored for `blob_uri` — the
+  // server sniffs the container (WAV / FLAC / OGG / MP4) directly.
+  optional aurigin.media.v1.AudioCodec codec_hint = 4;
+}
+
+message VerifyResponse {
+  // Server-generated request identifier. Also used as the
+  // correlation ID on the pub/sub event bus so downstream sinks
+  // can join the request to its `job.completed` event.
+  string request_id = 1;
+
+  // Terminal aggregate for the whole file. Same shape as the
+  // streaming session's FinalResult — same clients can render
+  // both without a special case.
+  FinalResult final_result = 2;
+
+  // Optional per-window detail — one entry per window the
+  // consumers scored, in stream order. Servers MAY truncate the
+  // list for very long files (the truncation limit is a server
+  // policy; clients that need the full list should stream via
+  // `Stream` instead). Empty when the caller opts out (via a
+  // future `include_per_window: false` field on VerifyRequest).
+  repeated Verdict per_window = 3;
+}

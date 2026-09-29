@@ -76,7 +76,12 @@ def _run_session(stub, request_iter, label: str, csv_out: ResultCSV | None = Non
     session_id: str = ""
     chunks: list[ChunkRow] = []
     audio_duration_ms: int = 0
-    global_result: str = "unknown"
+    # Sentinel `no_final_result` is distinct from the legitimate server-side
+    # `unknown` label (AnalysisLabel.UNKNOWN, emitted when analysis_count==0).
+    # Overwritten below when FinalResult arrives; if it never does, the CSV
+    # row shows `no_final_result` so ops can distinguish "session was killed
+    # / stream errored" from "session ran but was empty".
+    global_result: str = "no_final_result"
     # Wallclock from right before the bidi opens to FinalResult-received.
     # Captures network + server-side work + client-side iteration cost — the
     # "user-perceived" latency for processing this file.

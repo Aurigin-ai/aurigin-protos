@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
@@ -60,10 +61,26 @@ def _resolve_audio(arg: Path | None) -> Path:
     return wavs[0]
 
 
-async def send_call(call, wav: WavData, chunk_ms: int, duration_s: float) -> None:
-    """Stream `wav` in real-time-paced AudioFrame chunks until `duration_s` is up.
+async def send_call(
+    call,
+    wav: WavData,
+    chunk_ms: int,
+    duration_s: float,
+    *,
+    max_wall_s: float | None = None,
+) -> "SendResult":
+    """Stream `wav` in real-time-paced AudioFrame chunks.
+
+    Exit condition: whichever of these hits first —
+      1. `duration_s` seconds of AUDIO have been sent (natural end).
+      2. `max_wall_s` seconds of WALL CLOCK have elapsed since the first
+         send (graceful cap, only when `max_wall_s is not None`).
 
     Also imported by phone_call_burst.py — same loop, just instantiated N times.
+
+    Returns a SendResult so callers can distinguish a natural end from a
+    wall-cap truncation, and can flag runs where the client failed to
+    sustain realtime pacing (audio delivered ≪ wall elapsed).
 
     THIS LOOP IS THE INTEGRATION PATTERN. For a FreeSWITCH `mod_audio_fork`
     or Twilio Media Stream, replace the `pcm[cursor:…]` slicing with:
@@ -89,12 +106,23 @@ async def send_call(call, wav: WavData, chunk_ms: int, duration_s: float) -> Non
     await call.write(pb.DetectDeepfakeRequest(create_session_request=pb.CreateSessionRequest()))
 
     loop = asyncio.get_running_loop()
-    next_send = loop.time()
+    started_at = loop.time()
+    next_send = started_at
+    wall_deadline = (started_at + max_wall_s) if max_wall_s is not None else float("inf")
     pts_ns = 0
     cursor = 0
     elapsed_s = 0.0
+    exit_reason = "audio_duration"
 
     while elapsed_s < duration_s:
+        # Wall-cap check runs BEFORE the next send so a slow-pacing client
+        # (many concurrent streams starving asyncio) can't drag a session
+        # past `max_wall_s`. done_writing() below still fires cleanly, so
+        # the server sees a normal half-close and emits FinalResult.
+        if loop.time() >= wall_deadline:
+            exit_reason = "wall_cap"
+            break
+
         chunk = wav.samples[cursor : cursor + bytes_per_chunk]
         cursor += bytes_per_chunk
         if cursor >= len(wav.samples):
@@ -123,6 +151,33 @@ async def send_call(call, wav: WavData, chunk_ms: int, duration_s: float) -> Non
             await asyncio.sleep(sleep_for)
 
     await call.done_writing()
+    wall_elapsed_s = loop.time() - started_at
+    # audio-per-wall ratio — 1.0 = perfect realtime pacing, <1.0 = client
+    # is too slow (dropping behind the tick). This is the ground-truth
+    # signal a load-generator needs to know whether it produced the
+    # intended workload; matches server-side `rtf` on session ended.
+    audio_per_wall = elapsed_s / wall_elapsed_s if wall_elapsed_s > 0 else 0.0
+    return SendResult(
+        exit_reason=exit_reason,
+        audio_sent_s=elapsed_s,
+        wall_elapsed_s=wall_elapsed_s,
+        audio_per_wall=audio_per_wall,
+    )
+
+
+@dataclass(frozen=True)
+class SendResult:
+    """Return value of send_call — lets callers verify pacing quality.
+
+    - `exit_reason`: "audio_duration" (natural end) | "wall_cap" (hit --max-wall-s)
+    - `audio_sent_s`: total audio time actually pushed on the wire
+    - `wall_elapsed_s`: wall clock from first send to done_writing()
+    - `audio_per_wall`: ratio; 1.0 = perfect realtime, <1.0 = client too slow
+    """
+    exit_reason: str
+    audio_sent_s: float
+    wall_elapsed_s: float
+    audio_per_wall: float
 
 
 async def recv_call(
@@ -174,9 +229,15 @@ async def recv_call(
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     parser.add_argument("--audio", type=Path, default=None, help="WAV file to stream (defaults to first in audio/)")
-    parser.add_argument("--duration", type=float, default=DEFAULT_DURATION_S, help="Call length in seconds")
+    parser.add_argument("--duration", type=float, default=DEFAULT_DURATION_S, help="Call length in seconds (audio time)")
     parser.add_argument("--chunk-ms", type=int, default=DEFAULT_CHUNK_MS, help="Audio frame size in milliseconds")
     parser.add_argument("--target", default="localhost:50051", help="gRPC server host:port")
+    parser.add_argument(
+        "--max-wall-s", type=float, default=None,
+        help="Hard cap on per-call wall time in seconds. If the client can't sustain realtime "
+             "pacing (e.g. under high concurrency), the session ends gracefully at this "
+             "deadline instead of dragging on. Default: no cap.",
+    )
     parser.add_argument(
         "--scenario-id", default=None,
         help="Server-side simulator scenario to request (sent as x-scenario-id metadata).",
@@ -210,7 +271,10 @@ async def main() -> None:
         # create_task() rejects. The task wrapper is what
         # install_signal_shutdown cancels on Ctrl-C.
         async def _bidi() -> None:
-            await asyncio.gather(send_call(call, wav, args.chunk_ms, args.duration), recv_call(call))
+            await asyncio.gather(
+                send_call(call, wav, args.chunk_ms, args.duration, max_wall_s=args.max_wall_s),
+                recv_call(call),
+            )
 
         task = asyncio.create_task(_bidi())
         install_signal_shutdown([task])

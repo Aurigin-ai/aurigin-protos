@@ -53,7 +53,7 @@ from common import (
 # The per-call building blocks. `phone_call_burst` is "send_call + recv_call
 # instantiated N times over one channel" — importing keeps that relationship
 # explicit and prevents drift between the two files' send/recv loops.
-from phone_call import recv_call, send_call
+from phone_call import SendResult, recv_call, send_call
 
 DEFAULT_CHUNK_MS = 20   # RTP wire default (see phone_call.py rationale)
 DEFAULT_DURATION_S = 30.0
@@ -79,10 +79,13 @@ async def _run_one_call(
     stub, label: str, wav: WavData, chunk_ms: int, duration_s: float,
     metadata: tuple[tuple[str, str], ...], delay_s: float,
     csv_out: ResultCSV | None, file_name: str,
-) -> tuple[str, BaseException | None]:
+    max_wall_s: float | None,
+) -> tuple[str, BaseException | None, "SendResult | None"]:
     """Open one bidi stream, run send_call + recv_call concurrently. Returns
-    (label, exception_or_none) so a failing call doesn't take the others
-    down — multi-call survival counts need to be meaningful.
+    (label, exception_or_none, send_result_or_none) so a failing call
+    doesn't take the others down — multi-call survival counts need to be
+    meaningful — and the caller can inspect per-session pacing quality
+    (audio_per_wall, exit_reason) in the summary.
 
     The per-call work is exactly what phone_call.py does (same imports,
     same loops); the multi-call coordination — fan-out, stagger, signal
@@ -90,14 +93,23 @@ async def _run_one_call(
     if delay_s > 0:
         await asyncio.sleep(delay_s)
     call = stub.DetectDeepfake(metadata=metadata) if metadata else stub.DetectDeepfake()
+    # Sentinel `no_final_result` is distinct from the legitimate server-side
+    # `unknown` label (AnalysisLabel.UNKNOWN, emitted when analysis_count==0).
+    # If recv_call processes a FinalResult, sink["global_result"] is
+    # overwritten with the server's overall_label ("spoofed" / "bonafide" /
+    # "partially_spoofed" / "silence" / "unknown"). If it isn't — the client
+    # was cancelled mid-drain, the stream errored, or the server never
+    # emitted FinalResult — the CSV row shows `no_final_result` so ops can
+    # distinguish "session was killed" from "session ran but was empty".
     sink: dict = {
         "session_id": "", "chunks": [],
-        "audio_duration_ms": 0, "global_result": "unknown",
+        "audio_duration_ms": 0, "global_result": "no_final_result",
     }
     t_start = time.perf_counter()
+    send_result: SendResult | None = None
     try:
-        await asyncio.gather(
-            send_call(call, wav, chunk_ms, duration_s),
+        send_result, _ = await asyncio.gather(
+            send_call(call, wav, chunk_ms, duration_s, max_wall_s=max_wall_s),
             recv_call(call, label=label, sink=sink),
         )
         result: BaseException | None = None
@@ -110,7 +122,7 @@ async def _run_one_call(
                 sink["audio_duration_ms"], sink["global_result"],
                 (time.perf_counter() - t_start) * 1000.0,
             )
-    return label, result
+    return label, result, send_result
 
 
 def _make_labels(n: int) -> list[str]:
@@ -121,9 +133,16 @@ def _make_labels(n: int) -> list[str]:
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     parser.add_argument("--audio", type=Path, default=None, help="WAV file to stream (defaults to first in audio/)")
-    parser.add_argument("--duration", type=float, default=DEFAULT_DURATION_S, help="Per-call length in seconds")
+    parser.add_argument("--duration", type=float, default=DEFAULT_DURATION_S, help="Per-call length in seconds (audio time)")
     parser.add_argument("--chunk-ms", type=int, default=DEFAULT_CHUNK_MS, help="Audio frame size in milliseconds")
     parser.add_argument("--target", default="localhost:50051", help="gRPC server host:port")
+    parser.add_argument(
+        "--max-wall-s", type=float, default=None,
+        help="Hard cap on per-call wall time in seconds. Under high concurrency, if this "
+             "process can't sustain realtime pacing for every stream, each session ends "
+             "gracefully at this deadline instead of dragging on. Also drives the pacing-quality "
+             "summary at the end. Default: no cap.",
+    )
     parser.add_argument(
         "-c", "--concurrency", type=int, default=DEFAULT_CONCURRENCY,
         help="Number of concurrent streams to open over a single channel.",
@@ -176,6 +195,7 @@ async def main() -> None:
                     stub, label, wav, args.chunk_ms, args.duration,
                     metadata, delay_s=i * stagger_s,
                     csv_out=csv_out, file_name=audio_path.name,
+                    max_wall_s=args.max_wall_s,
                 ))
                 for i, label in enumerate(labels)
             ]
@@ -189,7 +209,8 @@ async def main() -> None:
         if csv_out is not None:
             csv_out.close()
 
-    failures = [(label, exc) for label, exc in results if exc is not None]
+    failures = [(label, exc) for label, exc, _ in results if exc is not None]
+    send_results: list[SendResult] = [sr for _, _, sr in results if sr is not None]
     if shutdown.seen:
         print("─" * 70, file=sys.stderr)
         print(
@@ -200,6 +221,31 @@ async def main() -> None:
     print("─" * 70)
     ok = args.concurrency - len(failures)
     print(f"Summary: {ok}/{args.concurrency} streams OK, {len(failures)} failed")
+
+    # Pacing quality — the truth signal for "did the client actually
+    # produce a realtime workload for every stream". If this median
+    # isn't ~1.0, the load-generator is the bottleneck, not the server,
+    # and any capacity claim from this run is invalid.
+    if send_results:
+        ratios = sorted(sr.audio_per_wall for sr in send_results)
+        wall_capped = sum(1 for sr in send_results if sr.exit_reason == "wall_cap")
+        under_paced = sum(1 for sr in send_results if sr.audio_per_wall < 0.95)
+        p50 = ratios[len(ratios) // 2]
+        p05 = ratios[max(0, int(len(ratios) * 0.05))]
+        print(
+            f"Pacing: audio_per_wall p50={p50:.2f} p05={p05:.2f} "
+            f"(1.00 = perfect realtime; <0.95 = client too slow) — "
+            f"under-paced sessions: {under_paced}/{len(send_results)}, "
+            f"wall-capped: {wall_capped}/{len(send_results)}",
+        )
+        if under_paced or wall_capped:
+            print(
+                "  ⚠  Client-side pacing degraded. If your goal is to benchmark the SERVER, "
+                "shard the run across multiple processes (each with lower --concurrency) "
+                "so a single asyncio loop isn't the bottleneck.",
+                file=sys.stderr,
+            )
+
     for label, exc in failures:
         if isinstance(exc, grpc.aio.AioRpcError):
             print(f"  [{label}] gRPC error: {exc.code().name}: {exc.details()}", file=sys.stderr)

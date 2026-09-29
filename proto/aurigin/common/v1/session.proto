@@ -1,0 +1,143 @@
+syntax = "proto3";
+
+package aurigin.common.v1;
+
+// Session-shape enums and cross-cutting envelope pieces used by any
+// Aurigin proto that needs to describe WHO is calling and WHAT kind of
+// session they've opened. Kept intentionally small — only types that at
+// least two packages need to import belong here. Everything else stays
+// domain-local (see aurigin.deepfake_detection.v1's TailStrategy and
+// aurigin.fingerprint.v1's TailStrategy for the "duplicate-locally-if-
+// only-one-package-needs-it" precedent).
+//
+// See docs/transport-protocol/03-proto-shapes.md § "aurigin/common/v1/"
+// in platform-backend-services for the design rationale.
+
+// Kind of session an Aurigin client has opened. Drives the orchestrator's
+// action-rule scoping (`when: { session_types: […] }` in consumers.yaml)
+// and is stamped on every event on the pub/sub bus so downstream sinks
+// can filter by session shape without decoding the payload.
+//
+// Extension policy: add new values at the tail with the next unused
+// number. Never re-use retired numbers; deprecated values keep their
+// slot with `[deprecated = true]` and a removal-version comment.
+enum SessionType {
+  // Zero-value sentinel. Receivers MUST treat as "session type not
+  // stamped by producer" — do NOT map to a default. Emitters MUST set
+  // one of the explicit values below.
+  SESSION_TYPE_UNSPECIFIED = 0;
+
+  // Live phone call over the telco stack — FreeSWITCH mod_audio_fork,
+  // SIPREC bridge, NICE CXone Agent Assist, Genesys AudioHook. Every
+  // ingress that arrives via the orchestrator's `/audio/{external_id}`
+  // or `/ingress/nice|genesys/*` routes carries this type.
+  SESSION_TYPE_LIVE_CALL = 1;
+
+  // Live conferencing session — Microsoft Teams via the teams-media-proxy
+  // bot, and any future Zoom-like integration that terminates SDK
+  // media in an Aurigin-owned proxy before gRPC-forwarding to the
+  // orchestrator.
+  SESSION_TYPE_LIVE_MEETING = 2;
+
+  // Native user-facing stream from a first-party Aurigin SDK — macOS
+  // SDK (Swift · CoreAudio), Windows SDK (.NET 8 · WASAPI), TypeScript
+  // SDK (Node.js · consumed by electronjs-app), Chrome plugin (WS
+  // mirror because gRPC-Web can't client-stream). Distinguished from
+  // API_STREAM by the caller-type: USER (auth-service-issued JWT) vs
+  // CLIENT (developer API key).
+  SESSION_TYPE_USER_STREAM = 3;
+
+  // Developer API-key streaming client — same `AudioVerification.Stream`
+  // RPC, different auth path (API key in gRPC metadata → auth-service
+  // returns `caller_type=client`). Split from USER_STREAM so tenant
+  // policy + quota + rate-limits can differ per session shape.
+  SESSION_TYPE_API_STREAM = 4;
+
+  // File-upload batch verification (`AudioVerification.Verify` unary
+  // RPC, or the REST `POST /v1/files` alias on file-service). Not a
+  // "live" session in the streaming sense — one request, one response
+  // per file — but tracked as a session so verdicts flow through the
+  // same consumer + event-bus pipeline as streaming ingress.
+  SESSION_TYPE_FILE_VERIFY = 5;
+}
+
+// Identity + tenant attribution for the caller of a session. Carried
+// ONCE at session open (via gRPC metadata for streams, in the event
+// envelope for pub/sub messages) — never per-frame — matching the
+// RequestContext propagation model in platform-backend-services'
+// _common/aurigin_core/context.py.
+message Principal {
+  // Tenant this session belongs to. Required. Populated by
+  // auth-service /verify from either the user's JWT claims or the API
+  // key's tenant binding. Downstream services MUST filter by
+  // tenant_id at every persistence boundary — this is the primary
+  // multi-tenancy invariant.
+  string tenant_id = 1;
+
+  // User id when caller_type = USER (auth-service-issued JWT). Absent
+  // for SERVICE and CLIENT callers. When populated, matches the
+  // `sub` claim on the verified JWT.
+  optional string user_id = 2;
+
+  // API key id when caller_type = CLIENT. Absent for USER and SERVICE
+  // callers. Uniquely identifies the developer-facing key so audit
+  // logs can attribute every request without exposing the secret
+  // itself.
+  optional string api_key_id = 3;
+
+  // Caller-type classifier, mirrors RequestContext.caller_type in
+  // aurigin_core.context. Populated by auth-service /verify based on
+  // which credential validated (JWT → USER, mTLS trusted-proxy → SERVICE,
+  // API key → CLIENT). Receivers filter authorisation policies on
+  // this axis.
+  CallerType caller_type = 4;
+
+  // Authorisation scopes granted to this caller. Populated by
+  // auth-service from the JWT `scope` claim or the API key's stored
+  // scope list. Empty when the caller has no explicit scopes (a
+  // trusted-proxy SERVICE, for example, is trusted for everything
+  // its runtime allows and does not carry scopes here).
+  repeated string scopes = 5;
+
+  // Ingress source that opened this session. String rather than enum
+  // because sources are extensible — one is added per new ingress
+  // adapter. Canonical values today:
+  //   "nice", "genesys", "teams-media-proxy",
+  //   "freeswitch-audio-fork", "siprec",
+  //   "freepbx-tap",
+  //   "macos-sdk", "windows-sdk", "typescript-sdk", "chrome-plugin",
+  //   "api-stream", "file-verify".
+  // Receivers MUST accept unknown strings rather than reject —
+  // forward-compat with future adapters.
+  optional string source = 6;
+
+  // Classifier that reflects HOW the caller was authenticated. Drives
+  // per-type policy (rate-limits differ between USER agent sessions
+  // and CLIENT developer streams, for example).
+  enum CallerType {
+    // Zero-value sentinel. Never a valid runtime type — receivers
+    // MUST reject a Principal with UNSPECIFIED caller_type. Emitters
+    // MUST set one of the explicit values below.
+    CALLER_TYPE_UNSPECIFIED = 0;
+
+    // Interactive user session — auth-service issued the caller a JWT
+    // via the OIDC login flow. `user_id` is populated with the JWT
+    // `sub` claim.
+    CALLER_TYPE_USER = 1;
+
+    // Trusted-proxy service call — the caller is an Aurigin service
+    // acting on behalf of an upstream principal (teams-media-proxy
+    // forwarding Teams participant identity to orchestrator;
+    // file-service forwarding a user's file-verify request). Trust
+    // model is mTLS in-cluster + service identity via SPIFFE-style
+    // certificate CN. `user_id` reflects the upstream principal the
+    // service is acting for.
+    CALLER_TYPE_SERVICE = 2;
+
+    // Developer API-key session — auth-service validated an API key
+    // in the `Authorization: Bearer sk_…` gRPC metadata (or HTTP
+    // header for REST). `api_key_id` identifies the key; `user_id`
+    // is absent (API keys are tenant-scoped, not user-scoped).
+    CALLER_TYPE_CLIENT = 3;
+  }
+}

@@ -72,6 +72,61 @@ message DetectionConfig {
   optional float analysis_interval_s = 1;
   // Model version to use, e.g. "stable" or "dev-v4" (default: server default).
   optional string model_version = 2;
+  // Per-session VAD (voice-activity detection) gate. Unspecified = follow
+  // server default (typically VAD_MODE_ON — silence windows skip inference,
+  // saves GPU on hold-music / dead-air). Set VAD_MODE_OFF to force the
+  // model to score every window regardless of speech content — useful for
+  // offline batch scans of speech-heavy audio where the VAD's CPU cost
+  // outweighs its silence-skip savings, and for benchmark runs that need
+  // a stable model-only inference floor.
+  optional VadMode vad_mode = 3;
+  // Per-session VAD silence-skip threshold, in percent [0, 100]. A window
+  // is skipped (label="silence") if its detected silence fraction meets or
+  // exceeds this value. Only meaningful when vad_mode is unset or ON.
+  // Unspecified = follow server env default (SILENCE_THRESHOLD_PCT, typically 80).
+  // Lowering skips more windows (faster, risks missing short speech
+  // utterances — accuracy trade-off); raising analyses more content
+  // (slower, no accuracy loss).
+  optional float vad_silence_threshold_pct = 4;
+  // Per-session policy for the sub-window residual at stream end.
+  // Unspecified = follow server env default (TAIL_STRATEGY, typically DROP).
+  //   DROP     — residual silently skipped. Accuracy-first: a 5-s-trained
+  //              model can misfire on a 1-2s partial window. Recommended
+  //              for offline file scans.
+  //   EXTEND   — fold residual into the prior window (its duration_ms
+  //              grows). Coverage-first, no extra inference. Recommended
+  //              for live calls where every second matters.
+  //   RECOMPUTE — slide last window back to end-of-stream so it stays
+  //              exactly analysis_interval_s long. HTTP /predict parity;
+  //              one extra inference per session.
+  optional TailStrategy tail_strategy = 5;
+  // Per-session floor on residual duration eligible for its own inference,
+  // in seconds. Interacts with tail_strategy: residuals shorter than this
+  // are handled per-strategy rather than scored directly. Unspecified =
+  // follow server env default (MIN_ANALYSIS_DURATION_S, typically 1.0).
+  // The wav2vec2 feature extractor's kernel-size-3 conv needs at least
+  // ~1 s of audio to produce enough feature frames; setting this lower
+  // will break inference on short residuals.
+  optional float min_analysis_duration_s = 6;
+}
+
+// VAD (voice-activity detection) per-session mode. Controls whether the
+// silence-gate runs before model inference. UNSPECIFIED = follow the
+// server's env-driven default (VAD_ENABLED); ON / OFF override it.
+enum VadMode {
+  VAD_MODE_UNSPECIFIED = 0;
+  VAD_MODE_ON = 1;
+  VAD_MODE_OFF = 2;
+}
+
+// Per-session tail strategy. Mirrors deepfake-service's server-side
+// TailStrategy enum. UNSPECIFIED = follow the server's env-driven default
+// (TAIL_STRATEGY, typically DROP).
+enum TailStrategy {
+  TAIL_STRATEGY_UNSPECIFIED = 0;
+  TAIL_STRATEGY_DROP = 1;
+  TAIL_STRATEGY_EXTEND = 2;
+  TAIL_STRATEGY_RECOMPUTE = 3;
 }
 
 // ============================================================================
