@@ -4,18 +4,24 @@
 // streams synthesised silence for a configurable duration, and prints every
 // `Verdict` + `EmbeddingVerdict` + `FinalResult` the server responds with.
 //
-// Points at the orchestrator simulator by default (`localhost:50053`); flip
-// `--target` to a real orchestrator once one is available.
+// Points at the orchestrator simulator by default (`localhost:50053`).
+// Override `--target` to hit any AudioVerification server.
 //
 // Auth is MANDATORY — the SDK-facing gRPC surface expects
 // `authorization: Bearer <token>` in metadata (spec: aurigin.common.v1.Principal
 // CallerType comment — same header for JWTs and API keys). Pick one of the
 // two demo tokens the simulator accepts (see its README) via
-// `--token <literal>` or supply your own for a real orchestrator.
+// `--token <literal>` or supply your own for a real server.
+//
+// TLS: `--tls auto` (default) picks insecure for `localhost:*` and any
+// `:80` target, secure for everything else. Override with
+// `--tls always` / `--tls never` when the target hostname doesn't give
+// it away.
 //
 // CLI:
 //   tsx orchestrator_client.ts --token sk_test_aurigin_sim_demo_0000000000000000
-//   tsx orchestrator_client.ts --token eyJ… --target orch.example:50053 --duration 30
+//   tsx orchestrator_client.ts --token <jwt> --target host.example:443
+//   tsx orchestrator_client.ts --token <jwt> --target host.example:50053 --duration 30
 
 import { Metadata, credentials } from "@grpc/grpc-js";
 import { AudioVerificationClient } from "@aurigin/protos/aurigin/client/v1/audio_verification";
@@ -37,25 +43,48 @@ interface Args {
   target: string;
   token: string;
   duration: number;
+  tls: "auto" | "always" | "never";
 }
 
 function parseArgs(): Args {
   const argv = process.argv.slice(2);
-  const args: Args = { target: "localhost:50053", token: DEMO_API_KEY, duration: 15 };
+  const args: Args = { target: "localhost:50053", token: DEMO_API_KEY, duration: 15, tls: "auto" };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     const next = argv[i + 1];
     if (flag === "--target" && next) { args.target = next; i++; }
     else if (flag === "--token" && next) { args.token = next; i++; }
     else if (flag === "--duration" && next) { args.duration = Number(next); i++; }
+    else if (flag === "--tls" && (next === "auto" || next === "always" || next === "never")) {
+      args.tls = next; i++;
+    }
   }
   return args;
 }
 
-async function run(args: Args): Promise<void> {
-  console.log(`# target=${args.target} duration=${args.duration}s token_prefix=${args.token.slice(0, 10)}…`);
+// `always` / `never` are explicit; `auto` picks insecure for localhost
+// or any `:80` target, secure for everything else.
+function useTls(target: string, mode: Args["tls"]): boolean {
+  if (mode === "always") return true;
+  if (mode === "never") return false;
+  const idx = target.lastIndexOf(":");
+  const host = idx >= 0 ? target.slice(0, idx) : target;
+  const port = idx >= 0 ? target.slice(idx + 1) : "";
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || port === "80") return false;
+  return true;
+}
 
-  const client = new AudioVerificationClient(args.target, credentials.createInsecure());
+async function run(args: Args): Promise<void> {
+  const tls = useTls(args.target, args.tls);
+  console.log(
+    `# target=${args.target} tls=${tls} duration=${args.duration}s ` +
+    `token_prefix=${args.token.slice(0, 10)}…`
+  );
+
+  const client = new AudioVerificationClient(
+    args.target,
+    tls ? credentials.createSsl() : credentials.createInsecure(),
+  );
 
   const meta = new Metadata();
   meta.set("authorization", `Bearer ${args.token}`);

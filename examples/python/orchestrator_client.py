@@ -4,18 +4,24 @@ Opens one bidi session against `aurigin.client.v1.AudioVerification.Stream`,
 streams synthesised silence for a configurable duration, and prints every
 `Verdict` + `EmbeddingVerdict` + `FinalResult` the server responds with.
 
-Points at the orchestrator simulator by default (`localhost:50053`); flip
-`--target` to a real orchestrator once one is available.
+Points at the orchestrator simulator by default (`localhost:50053`).
+Override `--target` to hit any AudioVerification server.
 
 Auth is MANDATORY — the SDK-facing gRPC surface expects
 `authorization: Bearer <token>` in metadata (spec: aurigin.common.v1.Principal
 CallerType comment — same header for JWTs and API keys). Pick one of the
 two demo tokens the simulator accepts (see its README) via
-`--token <literal>` or supply your own for a real orchestrator.
+`--token <literal>` or supply your own for a real server.
+
+TLS: `--tls auto` (default) picks insecure for `localhost:*` and any
+`:80` target, secure for everything else. Override with
+`--tls always` / `--tls never` when the target hostname doesn't give
+it away.
 
 CLI:
     python orchestrator_client.py --token sk_test_aurigin_sim_demo_0000000000000000
-    python orchestrator_client.py --token eyJ… --target orch.example:50053 --duration 30
+    python orchestrator_client.py --token <jwt> --target host.example:443
+    python orchestrator_client.py --token <jwt> --target host.example:50053 --duration 30
 """
 
 from __future__ import annotations
@@ -70,11 +76,30 @@ async def _request_iter(duration_s: float):
         await asyncio.sleep(_CHUNK_MS / 1000)
 
 
-async def run(target: str, token: str, duration_s: float) -> None:
-    print(f"# target={target} duration={duration_s}s token_prefix={token[:10]}…")
+def _use_tls(target: str, mode: str) -> bool:
+    """`always` / `never` are explicit; `auto` picks insecure for
+    localhost or any `:80` target, secure for everything else."""
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    host, _, port = target.rpartition(":")
+    if host in {"localhost", "127.0.0.1", "::1"} or port == "80":
+        return False
+    return True
+
+
+async def run(target: str, token: str, duration_s: float, tls_mode: str) -> None:
+    use_tls = _use_tls(target, tls_mode)
+    print(f"# target={target} tls={use_tls} duration={duration_s}s token_prefix={token[:10]}…")
     metadata = (("authorization", f"Bearer {token}"),)
 
-    async with grpc.aio.insecure_channel(target) as channel:
+    channel_cm = (
+        grpc.aio.secure_channel(target, grpc.ssl_channel_credentials())
+        if use_tls
+        else grpc.aio.insecure_channel(target)
+    )
+    async with channel_cm as channel:
         stub = pb_grpc.AudioVerificationStub(channel)
         call = stub.Stream(_request_iter(duration_s), metadata=metadata)
         try:
@@ -130,8 +155,14 @@ def cli() -> None:
         default=15.0,
         help="Seconds of silence to stream (default: 15 — long enough for 2-3 sim verdicts)",
     )
+    parser.add_argument(
+        "--tls",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="TLS mode. auto (default) = insecure for localhost / :80, secure otherwise",
+    )
     args = parser.parse_args()
-    asyncio.run(run(args.target, args.token, args.duration))
+    asyncio.run(run(args.target, args.token, args.duration, args.tls))
 
 
 if __name__ == "__main__":
