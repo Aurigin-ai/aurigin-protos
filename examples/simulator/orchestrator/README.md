@@ -107,6 +107,20 @@ so all three can run side-by-side on one host.
 ## Example client
 
 See [`examples/python/orchestrator_client.py`](../../python/orchestrator_client.py)
-for a minimal Python client that opens a session, streams silence for
-15 s, and prints every `Verdict` + `FinalResult` it receives. A TypeScript
-counterpart lives in [`examples/typescript/orchestrator_client.ts`](../../typescript/orchestrator_client.ts).
+for a minimal Python client that opens a session, streams either
+synthesised silence (`--duration`), a single WAV (`--audio-file`),
+or every `*.wav` in a directory (`--audio-dir`), and prints every
+`Verdict` + `EmbeddingVerdict` + `FinalResult` it receives. A TypeScript
+counterpart with matching `--audio-file` support lives in
+[`examples/typescript/orchestrator_client.ts`](../../typescript/orchestrator_client.ts).
+
+    # silence smoke-test
+    uv run orchestrator-client --token <jwt> --target host.example:443
+
+    # real audio (single file)
+    uv run orchestrator-client --token <jwt> --target host.example:443 \
+        --audio-file ../audio/922.wav
+
+    # iterate the whole sample directory
+    uv run orchestrator-client --token <jwt> --target host.example:443 \
+        --audio-dir ../audio
