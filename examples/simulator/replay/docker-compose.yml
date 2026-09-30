@@ -1,0 +1,35 @@
+# One-command local run for the replay simulator service.
+#
+#   cd examples/simulator/replay
+#   docker compose up --build
+#
+# Exposes 50051 on the host by default. Point any ReplayDetection client
+# (the Python / TypeScript example clients under examples/, or your own)
+# at `localhost:50051` — insecure by default because no ./certs volume is
+# mounted. See README.md for TLS / mTLS overrides.
+#
+# Running side-by-side with the deepfake and/or fingerprint simulators
+# (both also default to :50051)? Change the host-side port mapping alone
+# and aim your client at the new port:
+#     - "50053:50051"
+# Neither the client nor the proto cares which port — pass `--target
+# HOST:PORT` to any example client to point it at wherever the sim listens.
+
+services:
+  replay-simulator:
+    build:
+      # Context is examples/ (two directories up from this file) — matches
+      # the fingerprint + deepfake simulators so all three share the same shape.
+      context: ../..
+      dockerfile: simulator/replay/Dockerfile
+    image: aurigin/replay-simulator-service:local
+    container_name: replay-simulator
+    ports:
+      # Change to "50053:50051" to run side-by-side with the deepfake + fingerprint
+      # sims (both also default to 50051). See the top-of-file note.
+      - "50051:50051"
+    environment:
+      PORT: "50051"
+      WINDOW_MS: "3000"        # matches the halo-3 replay-detector training config
+      DECISION_THRESHOLD: "0.5"
+    restart: unless-stopped
