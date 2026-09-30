@@ -29,6 +29,9 @@ fingerprint-client = "fingerprint_client:cli"
 # Orchestrator client — targets `aurigin.client.v1.AudioVerification`
 # (pair with `examples/simulator/orchestrator/` for local runs).
 orchestrator-client = "orchestrator_client:cli"
+# Replay-detection client — targets `aurigin.replay_detection.v1.ReplayDetection`
+# (pair with `examples/simulator/replay/` for local runs).
+replay-client = "replay_client:cli"
 
 [build-system]
 requires = ["hatchling"]
@@ -39,6 +42,7 @@ only-include = [
     "client.py", "phone_call.py", "phone_call_burst.py", "scan_file.py",
     "fingerprint_client.py",
     "orchestrator_client.py",
+    "replay_client.py",
     "common",
 ]
 
