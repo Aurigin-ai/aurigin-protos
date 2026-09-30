@@ -8,15 +8,15 @@ resolution-markers = [
 
 [[package]]
 name = "aurigin-protos"
-version = "0.3.0"
+version = "0.3.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "grpcio" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/84/df/72cceee815734da2d8b9a7d6670e34dd218a55ea5557875be1006e23caae/aurigin_protos-0.3.0.tar.gz", hash = "sha256:af110fd6c910ebccadef6041160bfa0baf2d49e279e598cdb1b4d43d2bc56b1c", size = 12353, upload-time = "2026-08-02T11:33:42.442Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fb/20/e1f617d3818f38f97ef4cf2768306009796b1ffc885c4117eccfdfe84f2f/aurigin_protos-0.3.2.tar.gz", hash = "sha256:bf450ae8bb0a88e2b70c596aaa8e3e7f3c30d18b30b0e2d7a825e5080a78060f", size = 17775, upload-time = "2026-09-29T12:05:00.858Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/a1/fd8b6c07c29431d571b994f25d3013959f0f09e46a9a3d59828f0c4c0a9c/aurigin_protos-0.3.0-py3-none-any.whl", hash = "sha256:42eafbd061d6074bcee2b1d3a61f8f95693cd17a6c40105b85cf05ddf9f3419b", size = 16354, upload-time = "2026-08-02T11:33:41.058Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/80/f2eef82373f07a0fbf7c7a4938b125e43457aff67d6ecff845b876b4c692/aurigin_protos-0.3.2-py3-none-any.whl", hash = "sha256:233c605a4a8af2e16a63427cb3aea5a7a749de49ad02b1c68a3b5d62ec88f749", size = 28606, upload-time = "2026-09-29T12:04:59.673Z" },
 ]
 
 [[package]]
@@ -35,7 +35,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aurigin-protos", specifier = ">=0.3.0" },
+    { name = "aurigin-protos", specifier = ">=0.3.2" },
     { name = "grpcio", specifier = ">=1.62" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
 ]
