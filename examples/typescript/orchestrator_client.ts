@@ -1,8 +1,13 @@
 // Minimal AudioVerification.Stream client — SDK smoke-test target.
 //
 // Opens one bidi session against `aurigin.client.v1.AudioVerification.Stream`,
-// streams synthesised silence for a configurable duration, and prints every
-// `Verdict` + `EmbeddingVerdict` + `FinalResult` the server responds with.
+// streams audio for a configurable duration, and prints every `Verdict` +
+// `EmbeddingVerdict` + `FinalResult` the server responds with.
+//
+// Source of audio:
+//   * default              → synthesised silence (`--duration`).
+//   * `--audio-file PATH`  → the WAV at PATH (S16LE / F32LE / PCMU / PCMA).
+//                             `--duration` is ignored.
 //
 // Points at the orchestrator simulator by default (`localhost:50053`).
 // Override `--target` to hit any AudioVerification server.
@@ -22,11 +27,14 @@
 //   tsx orchestrator_client.ts --token sk_test_aurigin_sim_demo_0000000000000000
 //   tsx orchestrator_client.ts --token <jwt> --target host.example:443
 //   tsx orchestrator_client.ts --token <jwt> --target host.example:50053 --duration 30
+//   tsx orchestrator_client.ts --token <jwt> --target host.example:443 \
+//       --audio-file ../audio/922.wav
 
 import { Metadata, credentials } from "@grpc/grpc-js";
 import { AudioVerificationClient } from "@aurigin/protos/aurigin/client/v1/audio_verification";
 import { SessionType } from "@aurigin/protos/aurigin/common/v1/session";
 import { AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
+import { readWav } from "./common/index.js";
 
 // Same demo token the orchestrator simulator ships with — kept here so
 // `tsx orchestrator_client.ts` (no flags) still works against a
@@ -44,11 +52,18 @@ interface Args {
   token: string;
   duration: number;
   tls: "auto" | "always" | "never";
+  audioFile: string | null;
 }
 
 function parseArgs(): Args {
   const argv = process.argv.slice(2);
-  const args: Args = { target: "localhost:50053", token: DEMO_API_KEY, duration: 15, tls: "auto" };
+  const args: Args = {
+    target: "localhost:50053",
+    token: DEMO_API_KEY,
+    duration: 15,
+    tls: "auto",
+    audioFile: null,
+  };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     const next = argv[i + 1];
@@ -58,6 +73,7 @@ function parseArgs(): Args {
     else if (flag === "--tls" && (next === "auto" || next === "always" || next === "never")) {
       args.tls = next; i++;
     }
+    else if (flag === "--audio-file" && next) { args.audioFile = next; i++; }
   }
   return args;
 }
@@ -76,10 +92,15 @@ function useTls(target: string, mode: Args["tls"]): boolean {
 
 async function run(args: Args): Promise<void> {
   const tls = useTls(args.target, args.tls);
+  const src = args.audioFile ? `file=${args.audioFile}` : `duration=${args.duration}s`;
   console.log(
-    `# target=${args.target} tls=${tls} duration=${args.duration}s ` +
+    `# target=${args.target} tls=${tls} ${src} ` +
     `token_prefix=${args.token.slice(0, 10)}…`
   );
+
+  // Pre-read the WAV (if given) so a bad path fails BEFORE opening the stream —
+  // otherwise the error would surface as a cryptic gRPC "Exception iterating requests".
+  const wav = args.audioFile ? readWav(args.audioFile) : null;
 
   const client = new AudioVerificationClient(
     args.target,
@@ -131,32 +152,56 @@ async function run(args: Args): Promise<void> {
     call.on("end", () => resolve());
   });
 
-  // Send CreateSessionRequest + silence chunks paced to wall-clock so the
+  // Send CreateSessionRequest + audio chunks paced to wall-clock so the
   // server has time to emit interleaved Verdicts on its own timer.
   call.write({
     createSessionRequest: {
       config: {
         sessionType: SessionType.SESSION_TYPE_USER_STREAM,
-        attributes: { example: "orchestrator_client.ts" },
+        attributes: {
+          example: "orchestrator_client.ts",
+          source: args.audioFile ?? `silence-${args.duration}s`,
+        },
       },
     },
   });
 
-  const silence = Buffer.alloc(SAMPLES_PER_CHUNK * CHANNELS * BYTES_PER_SAMPLE, 0);
-  const totalChunks = Math.floor((args.duration * 1000) / CHUNK_MS);
   let ptsNs = 0n;
-  for (let i = 0; i < totalChunks; i++) {
-    call.write({
-      audioFrame: {
-        codec: AudioCodec.AUDIO_CODEC_S16LE,
-        sampleRateHz: RATE,
-        channels: CHANNELS,
-        payload: silence,
-        ptsNs,
-      },
-    });
-    ptsNs += BigInt(CHUNK_MS * 1_000_000);
-    await new Promise((r) => setTimeout(r, CHUNK_MS));
+  if (wav) {
+    const framesPerChunk = Math.floor((wav.rate * CHUNK_MS) / 1000);
+    const bytesPerFrame = wav.bytesPerSample * wav.channels;
+    const bytesPerChunk = framesPerChunk * bytesPerFrame;
+    for (let i = 0; i < wav.samples.length; i += bytesPerChunk) {
+      const chunk = wav.samples.subarray(i, Math.min(i + bytesPerChunk, wav.samples.length));
+      const actualFrames = chunk.length / bytesPerFrame;
+      call.write({
+        audioFrame: {
+          codec: wav.audioCodec,
+          sampleRateHz: wav.rate,
+          channels: wav.channels,
+          payload: chunk,
+          ptsNs,
+        },
+      });
+      ptsNs += BigInt(Math.round((actualFrames / wav.rate) * 1e9));
+      await new Promise((r) => setTimeout(r, CHUNK_MS));
+    }
+  } else {
+    const silence = Buffer.alloc(SAMPLES_PER_CHUNK * CHANNELS * BYTES_PER_SAMPLE, 0);
+    const totalChunks = Math.floor((args.duration * 1000) / CHUNK_MS);
+    for (let i = 0; i < totalChunks; i++) {
+      call.write({
+        audioFrame: {
+          codec: AudioCodec.AUDIO_CODEC_S16LE,
+          sampleRateHz: RATE,
+          channels: CHANNELS,
+          payload: silence,
+          ptsNs,
+        },
+      });
+      ptsNs += BigInt(CHUNK_MS * 1_000_000);
+      await new Promise((r) => setTimeout(r, CHUNK_MS));
+    }
   }
   call.end();
 
