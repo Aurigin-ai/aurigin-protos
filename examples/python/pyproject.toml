@@ -4,9 +4,11 @@ version = "0.0.0"
 description = "Reference client examples for aurigin-protos. The scenario-driven simulator server lives at examples/simulator/deepfake/."
 requires-python = ">=3.10"
 dependencies = [
-    # 0.3.2 introduced `aurigin.client.v1` (AudioVerification) — the
-    # orchestrator_client example imports from that package.
-    "aurigin-protos>=0.3.2",
+    # Pin bumps per package addition:
+    #   0.3.2  — aurigin.client.v1 (AudioVerification), consumed by orchestrator_client
+    #   0.3.3  — aurigin.replay_detection.v1, consumed by replay_client
+    #   0.3.4  — aurigin.recording.v1, consumed by recording_client
+    "aurigin-protos>=0.3.4",
     "grpcio>=1.62",
 ]
 
@@ -32,6 +34,9 @@ orchestrator-client = "orchestrator_client:cli"
 # Replay-detection client — targets `aurigin.replay_detection.v1.ReplayDetection`
 # (pair with `examples/simulator/replay/` for local runs).
 replay-client = "replay_client:cli"
+# Recording client — targets `aurigin.recording.v1.Recording`
+# (pair with `examples/simulator/recording/` for local runs).
+recording-client = "recording_client:cli"
 
 [build-system]
 requires = ["hatchling"]
@@ -43,6 +48,7 @@ only-include = [
     "fingerprint_client.py",
     "orchestrator_client.py",
     "replay_client.py",
+    "recording_client.py",
     "common",
 ]
 

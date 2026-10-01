@@ -1,0 +1,36 @@
+# One-command local run for the recording simulator service.
+#
+#   cd examples/simulator/recording
+#   docker compose up --build
+#
+# Exposes 50051 on the host by default. Point any Recording client
+# (the Python / TypeScript example clients under examples/, or your own)
+# at `localhost:50051` — insecure by default because no ./certs volume is
+# mounted. See README.md for TLS / mTLS overrides.
+#
+# Running side-by-side with the deepfake / fingerprint / replay simulators
+# (all default to :50051)? Change the host-side port mapping alone and
+# aim your client at the new port:
+#     - "50054:50051"
+# Neither the client nor the proto cares which port — pass `--target
+# HOST:PORT` to any example client to point it at wherever the sim listens.
+
+services:
+  recording-simulator:
+    build:
+      # Context is examples/ (two directories up from this file) — matches
+      # the fingerprint + deepfake + replay simulators so all four share
+      # the same shape.
+      context: ../..
+      dockerfile: simulator/recording/Dockerfile
+    image: aurigin/recording-simulator-service:local
+    container_name: recording-simulator
+    ports:
+      # Change to "50054:50051" to run side-by-side with the deepfake +
+      # fingerprint + replay sims (all default to 50051). See the top-of-
+      # file note.
+      - "50051:50051"
+    environment:
+      PORT: "50051"
+      OUTPUT_FORMAT: "wav"
+    restart: unless-stopped

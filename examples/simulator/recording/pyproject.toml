@@ -1,0 +1,36 @@
+[project]
+name = "aurigin-recording-simulator-service"
+version = "0.0.0"
+description = "Minimal gRPC simulator for aurigin Recording.Record — byte-counting sink, no actual blob written."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    # Consumed by the generated stubs the server responds with. Aligned with
+    # the aurigin-protos version this repo publishes; bump in lockstep on
+    # each aurigin-protos release. `recording.v1` package first appears
+    # in aurigin-protos 0.3.4.
+    "aurigin-protos>=0.3.4",
+    "grpcio>=1.62",
+    # No pyyaml / jsonschema / audio deps — this simulator is a pure
+    # byte-counting sink. It never writes a file, never transcodes,
+    # never inspects payload content. Returns a deterministic
+    # synthetic `blob_uri` + `sha256` on close so the orchestrator's
+    # bus-event path can be exercised end-to-end without a real
+    # recorder.
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+# `uv run recording-simulator-service` and the Docker ENTRYPOINT both land here.
+recording-simulator-service = "recording_simulator_service.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/recording_simulator_service"]
