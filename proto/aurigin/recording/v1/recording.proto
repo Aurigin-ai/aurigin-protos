@@ -1,0 +1,225 @@
+syntax = "proto3";
+
+package aurigin.recording.v1;
+
+import "aurigin/media/v1/audio_frame.proto";
+
+// Recording Service.
+//
+// Writes a per-call WAV / FLAC / OPUS_OGG file as audio arrives from
+// the orchestrator. Pure sink — no scoring, no classification. Pairs
+// with the other aurigin.*.v1 bidi services (deepfake_detection,
+// replay_detection, fingerprint) by sharing the AudioFrame wire +
+// CreateSessionRequest/Response + per-event terminal message shape,
+// so the orchestrator's consumer dispatch handles all four with one
+// code path (see platform-backend-services docs/transport-protocol/).
+//
+// Design rationale — see docs/transport-protocol/03-proto-shapes.md
+// § "aurigin/recording/v1/". Highlights:
+//   - Storage location is chosen by the recorder, not the orchestrator;
+//     fits the planned aurigin_core.storage abstraction (S3 / MinIO /
+//     Azure Blob / Local — same one file-service will use).
+//   - Recorder also emits a `recording.complete` event on the pub/sub
+//     bus; the terminal RecordResponse here is the in-band signal to
+//     the orchestrator, the bus event is the durable persistence path.
+//
+// Session lifecycle:
+//   1. Client sends CreateSessionRequest with optional RecordingConfig.
+//   2. Server opens the output blob, responds with CreateSessionResponse
+//      carrying recording_id + planned_blob_uri — orchestrator stamps
+//      a `recording_started` event onto the bus at this point.
+//   3. Client streams aurigin.media.v1.AudioFrame messages.
+//   4. Server MAY emit sparse RecordingProgress messages (bytes +
+//      duration counters) for long sessions — not required.
+//   5. On client half-close, server flushes + closes the blob and
+//      emits RecordingComplete with the final blob_uri, duration,
+//      size, and sha256.
+//   6. On I/O or recorder-internal errors, the stream aborts with a
+//      standard gRPC status (INTERNAL / RESOURCE_EXHAUSTED / etc.)
+//      and the orchestrator stamps `recording_failed` from the status
+//      — no separate error message type on the wire.
+//
+// Codec / rate transcoding contract:
+//   AudioFrame allows per-frame codec + sample-rate swaps (Teams SDP
+//   renegotiation, WebRTC codec change) but a WAV / FLAC / OGG header
+//   locks one codec + rate at file open. The recorder reconciles by
+//   PICKING ONE AT SESSION OPEN. Target selection, in priority order:
+//     1. RecordingConfig.target_codec + target_sample_rate_hz if set
+//        by the caller;
+//     2. server env default (RECORDER_TARGET_CODEC /
+//        RECORDER_TARGET_RATE) if configured;
+//     3. First AudioFrame's codec + rate as fallback.
+//   Per-frame handling after the target is locked:
+//     - Frame codec + rate + channels EXACTLY match the target →
+//       payload bytes are written to the blob UNCHANGED (fast path,
+//       zero copy, bit-identical to what the orchestrator sent).
+//       This is the common case — most calls stay on one codec for
+//       their whole lifetime, so most recordings are byte-identical
+//       pass-throughs with no transcode cost.
+//     - Frame differs from the target → decode + resample + re-encode
+//       to the target before writing. Server MUST log a WARN on
+//       EACH CHANGE in (codec, rate, channels) relative to the last-
+//       seen frame — not per-frame, not just the first mismatch.
+//       Same cardinality + log shape as the gRPC verdict / replay /
+//       embedding consumers already use (one WARN per transition),
+//       so ops can grep one key across the fleet to spot codec
+//       drift between what the ingress reported and what the sink
+//       actually received. A session that goes A → B → A emits two
+//       WARN lines; a session that stays on A emits zero.
+service Recording {
+  // Bidirectional streaming RPC for real-time audio capture.
+  rpc Record(stream RecordRequest) returns (stream RecordResponse);
+}
+
+// ============================================================================
+// Request (Client -> Server)
+// ============================================================================
+
+message CreateSessionRequest {
+  // Optional per-session configuration; server applies env defaults
+  // for unset fields.
+  optional RecordingConfig config = 1;
+}
+
+message RecordRequest {
+  oneof request {
+    CreateSessionRequest create_session_request = 1;
+    aurigin.media.v1.AudioFrame audio_frame = 2;
+  }
+}
+
+// ============================================================================
+// Response (Server -> Client)
+// ============================================================================
+
+message RecordResponse {
+  oneof response {
+    CreateSessionResponse create_session_response = 1;
+    // Sparse, initially unused — reserved so a future deploy can wire
+    // periodic progress heartbeats (one every N seconds) without a
+    // wire break. Receivers MUST tolerate it being absent.
+    RecordingProgress progress = 2;
+    RecordingComplete complete = 3;
+  }
+}
+
+message CreateSessionResponse {
+  // Durable identifier for this recording (`rec-<32hex>` today —
+  // matches the recorder's current id shape so logs + call-service's
+  // `calls.recording_id` column don't change meaning).
+  string recording_id = 1;
+
+  // Informational — where the recorder PLANS to write the blob. The
+  // CANONICAL location comes back on RecordingComplete.blob_uri at
+  // close; the recorder may rotate / move / compress on the way.
+  // Shape depends on the storage backend configured server-side:
+  // `s3://…`, `minio://…`, `file:///…` — opaque to the orchestrator.
+  string planned_blob_uri = 2;
+}
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+message RecordingConfig {
+  // Output container. UNSPECIFIED = server env default
+  // (RECORDER_OUTPUT_FORMAT). WAV is lossless + ubiquitous; FLAC is
+  // lossless + ~50% smaller on speech; OPUS_OGG is lossy and NOT
+  // recommended as the primary archival format (downstream analyses
+  // would be codec-artefact-sensitive) — included for the "transcript-
+  // only, keep storage small" deploy variant.
+  optional ContainerFormat container_format = 1;
+
+  // Blob key hint from the orchestrator — recorder MAY use it to
+  // namespace / dedupe / organise the stored blob (e.g. tenant-prefix
+  // the S3 key). The final URI always comes back in RecordingComplete;
+  // the orchestrator cannot assume the hint was honored verbatim.
+  optional string blob_key_hint = 2;
+
+  // Retention policy, in days. 0 = tenant default (recorder reads
+  // from server config). Positive = override for this one recording
+  // (e.g. a longer-than-default hold for a compliance capture).
+  optional int32 retention_days = 3;
+
+  // Target sample rate for the written file, Hz. UNSPECIFIED (= 0)
+  // means "stay close to the first AudioFrame's rate" — recorder
+  // locks the first frame's rate as the file-header rate and
+  // resamples every subsequent frame to match (AudioFrame allows
+  // per-frame codec/rate swaps, but a WAV / FLAC / OGG header can't).
+  // Set explicitly when the caller needs a canonical rate across
+  // files (e.g. 16000 for downstream models trained at 16 kHz).
+  optional uint32 target_sample_rate_hz = 4;
+
+  // Target codec for the written file. UNSPECIFIED = "stay close to
+  // the first AudioFrame's codec" with these mappings:
+  //   S16LE / S16BE / S24LE / S32LE / F32LE → kept as-is
+  //   PCMU / PCMA                           → decoded to S16LE
+  //                                           (telephony codecs don't
+  //                                           round-trip cleanly through
+  //                                           containers; linear PCM is
+  //                                           the universal fallback)
+  //   OPUS                                  → decoded to S16LE
+  // Set explicitly when the caller wants a non-default container
+  // (e.g. F32LE for lossless float workflows). Recorder transcodes
+  // every incoming frame to the target before writing.
+  optional aurigin.media.v1.AudioCodec target_codec = 5;
+}
+
+enum ContainerFormat {
+  CONTAINER_FORMAT_UNSPECIFIED = 0;
+  CONTAINER_FORMAT_WAV = 1;
+  CONTAINER_FORMAT_FLAC = 2;
+  CONTAINER_FORMAT_OPUS_OGG = 3;
+}
+
+// ============================================================================
+// Progress + terminal messages
+// ============================================================================
+
+// Sparse mid-stream progress heartbeat. Not emitted today; the field
+// is reserved on RecordResponse.response so a future deploy can wire
+// a "once every N seconds" heartbeat without wire-breaking existing
+// clients. Receivers MUST tolerate it being absent.
+message RecordingProgress {
+  // Bytes written to the blob so far.
+  int64 bytes_written = 1;
+  // Audio duration received so far (ms).
+  int64 duration_ms = 2;
+}
+
+// Emitted once when the client closes the stream. Carries the
+// durable attribution + accounting the orchestrator forwards to
+// call-service as `recording_complete` + persists via `calls.recording_id`.
+message RecordingComplete {
+  // Durable identifier — equal to CreateSessionResponse.recording_id,
+  // redeclared here so downstream consumers that only inspect the
+  // terminal message don't need to correlate against the open.
+  string recording_id = 1;
+
+  // Canonical final location of the blob. May differ from
+  // CreateSessionResponse.planned_blob_uri if the recorder rotated /
+  // moved the file (e.g. compressed on close, uploaded to object
+  // storage from a staging dir).
+  string blob_uri = 2;
+
+  // Total audio duration captured (ms). A mid-stream disconnect
+  // truncates this to what landed on the blob.
+  int64 duration_ms = 3;
+
+  // Final size of the blob, bytes.
+  int64 bytes = 4;
+
+  // Hex SHA-256 of the final blob bytes — carried for audit + content
+  // integrity so downstream services can verify the blob they fetch
+  // matches what the recorder wrote.
+  string sha256 = 5;
+
+  // Codec of the audio inside the container. Mirrors the codec on the
+  // AudioFrame stream the orchestrator sent — the recorder doesn't
+  // transcode (that's a storage-side concern if it ever becomes one).
+  aurigin.media.v1.AudioCodec codec = 6;
+
+  // Sample rate of the audio inside the container, Hz. Same
+  // provenance as `codec` — mirrors what rode on AudioFrame.
+  uint32 sample_rate_hz = 7;
+}
