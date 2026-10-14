@@ -203,9 +203,12 @@ export function recvCall(
   return new Promise<void>((resolve, reject) => {
     call.on("data", (response: DetectDeepfakeResponse) => {
       if (response.createSessionResponse) {
-        const sessionId = response.createSessionResponse.sessionId;
-        if (sink) sink.sessionId = sessionId;
-        log(`📞 Session: ${sessionId}`);
+        const ack = response.createSessionResponse;
+        if (sink) sink.sessionId = ack.sessionId;
+        log(`📞 Session: ${ack.sessionId}`);
+        if (ack.modelName || ack.modelVersion) {
+          log(`🧠 Model: ${ack.modelName || "?"}@${ack.modelVersion || "?"}`);
+        }
       } else if (response.analysisResult) {
         const r = response.analysisResult;
         if (sink) {

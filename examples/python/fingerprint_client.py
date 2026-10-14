@@ -76,7 +76,10 @@ def _run_session(stub, request_iter, label: str) -> None:
     for response in stub.ExtractFingerprint(request_iter):
         kind = response.WhichOneof("response")
         if kind == "create_session_response":
-            print(f"Session: {response.create_session_response.session_id}")
+            ack = response.create_session_response
+            print(f"Session: {ack.session_id}")
+            if ack.model_name or ack.model_version:
+                print(f"Model:   {ack.model_name or '?'}@{ack.model_version or '?'}")
         elif kind == "embedding_result":
             r = response.embedding_result
             # Hex preview of the first 8 bytes of the embedding — enough

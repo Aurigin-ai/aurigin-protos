@@ -19,6 +19,8 @@ Env vars:
     PORT               gRPC listen port                             (default 50051)
     WINDOW_MS          window length in ms (matches replay-service) (default 3000)
     DECISION_THRESHOLD score >= this → REPLAY, else GENUINE         (default 0.5)
+    MODEL_NAME         value echoed on CreateSessionResponse        (default "halo3-sim")
+    MODEL_VERSION      value echoed on CreateSessionResponse + FinalResult (default "0.0.0-sim")
 """
 
 from __future__ import annotations
@@ -120,9 +122,17 @@ def _mtls_client_ca() -> bytes | None:
 
 
 class ReplayDetectionImpl(pb_grpc.ReplayDetectionServicer):
-    def __init__(self, window_ms: int, decision_threshold: float) -> None:
+    def __init__(
+        self,
+        window_ms: int,
+        decision_threshold: float,
+        model_name: str,
+        model_version: str,
+    ) -> None:
         self._window_ms = window_ms
         self._decision_threshold = decision_threshold
+        self._model_name = model_name
+        self._model_version = model_version
 
     async def DetectReplay(self, request_iterator, context):  # noqa: N802 - gRPC RPC name
         peer = context.peer() if context else "?"
@@ -145,7 +155,11 @@ class ReplayDetectionImpl(pb_grpc.ReplayDetectionServicer):
                 print(f"[incoming] peer={peer} | replay sim", file=sys.stderr, flush=True)
                 print(f"[{session_id}] start", file=sys.stderr, flush=True)
                 yield pb.DetectReplayResponse(
-                    create_session_response=pb.CreateSessionResponse(session_id=session_id),
+                    create_session_response=pb.CreateSessionResponse(
+                        session_id=session_id,
+                        model_name=self._model_name,
+                        model_version=self._model_version,
+                    ),
                 )
                 continue
 
@@ -226,6 +240,7 @@ class ReplayDetectionImpl(pb_grpc.ReplayDetectionServicer):
                 overall_label=aggregate_label,
                 overall_label_raw=aggregate_label_raw,
                 analysis_count=analysis_count,
+                model_version=self._model_version,
             ),
         )
         print(
@@ -236,10 +251,22 @@ class ReplayDetectionImpl(pb_grpc.ReplayDetectionServicer):
         )
 
 
-async def _serve_async(port: int, window_ms: int, decision_threshold: float) -> None:
+async def _serve_async(
+    port: int,
+    window_ms: int,
+    decision_threshold: float,
+    model_name: str,
+    model_version: str,
+) -> None:
     server = grpc.aio.server()
     pb_grpc.add_ReplayDetectionServicer_to_server(
-        ReplayDetectionImpl(window_ms=window_ms, decision_threshold=decision_threshold), server,
+        ReplayDetectionImpl(
+            window_ms=window_ms,
+            decision_threshold=decision_threshold,
+            model_name=model_name,
+            model_version=model_version,
+        ),
+        server,
     )
 
     tls = _load_tls()
@@ -265,7 +292,8 @@ async def _serve_async(port: int, window_ms: int, decision_threshold: float) -> 
     await server.start()
     print(
         f"Replay simulator listening on :{port} | "
-        f"window_ms={window_ms} | decision_threshold={decision_threshold} | transport={tls_status}",
+        f"window_ms={window_ms} | decision_threshold={decision_threshold} | "
+        f"model={model_name}@{model_version} | transport={tls_status}",
         file=sys.stderr, flush=True,
     )
 
@@ -288,9 +316,13 @@ async def _serve_async(port: int, window_ms: int, decision_threshold: float) -> 
 def serve(port: int = 50051) -> None:
     window_ms = int(os.environ.get("WINDOW_MS", "3000"))
     decision_threshold = float(os.environ.get("DECISION_THRESHOLD", "0.5"))
+    model_name = os.environ.get("MODEL_NAME", "halo3-sim")
+    model_version = os.environ.get("MODEL_VERSION", "0.0.0-sim")
     loop = asyncio.new_event_loop()
     try:
-        loop.run_until_complete(_serve_async(port, window_ms, decision_threshold))
+        loop.run_until_complete(
+            _serve_async(port, window_ms, decision_threshold, model_name, model_version)
+        )
     finally:
         loop.close()
 

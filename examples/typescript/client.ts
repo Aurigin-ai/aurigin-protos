@@ -97,8 +97,12 @@ function runSession(
     const call = client.detectDeepfake();
     call.on("data", (response: DetectDeepfakeResponse) => {
       if (response.createSessionResponse) {
-        sessionId = response.createSessionResponse.sessionId;
+        const ack = response.createSessionResponse;
+        sessionId = ack.sessionId;
         console.log(`Session: ${sessionId}`);
+        if (ack.modelName || ack.modelVersion) {
+          console.log(`Model:   ${ack.modelName || "?"}@${ack.modelVersion || "?"}`);
+        }
       } else if (response.analysisResult) {
         const r = response.analysisResult;
         chunks.push({

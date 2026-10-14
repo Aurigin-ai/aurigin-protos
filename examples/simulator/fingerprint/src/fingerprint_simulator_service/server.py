@@ -23,6 +23,8 @@ Env vars:
     PORT               gRPC listen port                                (default 50051)
     WINDOW_MS          window length in ms (matches fingerprint-service) (default 5000)
     EMBEDDING_DIM      dimensionality of the returned unit vectors    (default 768)
+    MODEL_NAME         value echoed on CreateSessionResponse          (default "wavlm-sim")
+    MODEL_VERSION      value echoed on CreateSessionResponse + FinalResult (default "0.0.0-sim")
 """
 
 from __future__ import annotations
@@ -132,9 +134,17 @@ def _mtls_client_ca() -> bytes | None:
 
 
 class FingerprintImpl(pb_grpc.FingerprintServicer):
-    def __init__(self, window_ms: int, embedding_dim: int) -> None:
+    def __init__(
+        self,
+        window_ms: int,
+        embedding_dim: int,
+        model_name: str,
+        model_version: str,
+    ) -> None:
         self._window_ms = window_ms
         self._embedding_dim = embedding_dim
+        self._model_name = model_name
+        self._model_version = model_version
 
     async def ExtractFingerprint(self, request_iterator, context):  # noqa: N802 - gRPC RPC name
         peer = context.peer() if context else "?"
@@ -159,7 +169,11 @@ class FingerprintImpl(pb_grpc.FingerprintServicer):
                 print(f"[incoming] peer={peer} | fingerprint sim", file=sys.stderr, flush=True)
                 print(f"[{session_id}] start", file=sys.stderr, flush=True)
                 yield pb.ExtractFingerprintResponse(
-                    create_session_response=pb.CreateSessionResponse(session_id=session_id),
+                    create_session_response=pb.CreateSessionResponse(
+                        session_id=session_id,
+                        model_name=self._model_name,
+                        model_version=self._model_version,
+                    ),
                 )
                 continue
 
@@ -226,6 +240,7 @@ class FingerprintImpl(pb_grpc.FingerprintServicer):
             final_result=pb.FinalResult(
                 total_audio_ms=total_audio_ms,
                 embedding_count=embedding_count,
+                model_version=self._model_version,
             ),
         )
         print(
@@ -234,10 +249,22 @@ class FingerprintImpl(pb_grpc.FingerprintServicer):
         )
 
 
-async def _serve_async(port: int, window_ms: int, embedding_dim: int) -> None:
+async def _serve_async(
+    port: int,
+    window_ms: int,
+    embedding_dim: int,
+    model_name: str,
+    model_version: str,
+) -> None:
     server = grpc.aio.server()
     pb_grpc.add_FingerprintServicer_to_server(
-        FingerprintImpl(window_ms=window_ms, embedding_dim=embedding_dim), server,
+        FingerprintImpl(
+            window_ms=window_ms,
+            embedding_dim=embedding_dim,
+            model_name=model_name,
+            model_version=model_version,
+        ),
+        server,
     )
 
     tls = _load_tls()
@@ -263,7 +290,8 @@ async def _serve_async(port: int, window_ms: int, embedding_dim: int) -> None:
     await server.start()
     print(
         f"Fingerprint simulator listening on :{port} | "
-        f"window_ms={window_ms} | embedding_dim={embedding_dim} | transport={tls_status}",
+        f"window_ms={window_ms} | embedding_dim={embedding_dim} | "
+        f"model={model_name}@{model_version} | transport={tls_status}",
         file=sys.stderr, flush=True,
     )
 
@@ -289,11 +317,15 @@ async def _serve_async(port: int, window_ms: int, embedding_dim: int) -> None:
 def serve(port: int = 50051) -> None:
     window_ms = int(os.environ.get("WINDOW_MS", "5000"))
     embedding_dim = int(os.environ.get("EMBEDDING_DIM", "768"))
+    model_name = os.environ.get("MODEL_NAME", "wavlm-sim")
+    model_version = os.environ.get("MODEL_VERSION", "0.0.0-sim")
     # Same event-loop pattern as the deepfake simulator — see its server.py
     # for why we don't use asyncio.run().
     loop = asyncio.new_event_loop()
     try:
-        loop.run_until_complete(_serve_async(port, window_ms, embedding_dim))
+        loop.run_until_complete(
+            _serve_async(port, window_ms, embedding_dim, model_name, model_version)
+        )
     finally:
         loop.close()
 

@@ -79,7 +79,11 @@ function runSession(
     const call = client.extractFingerprint();
     call.on("data", (response: ExtractFingerprintResponse) => {
       if (response.createSessionResponse) {
-        console.log(`Session: ${response.createSessionResponse.sessionId}`);
+        const ack = response.createSessionResponse;
+        console.log(`Session: ${ack.sessionId}`);
+        if (ack.modelName || ack.modelVersion) {
+          console.log(`Model:   ${ack.modelName || "?"}@${ack.modelVersion || "?"}`);
+        }
       } else if (response.embeddingResult) {
         const r = response.embeddingResult;
         // Hex preview of the first 8 bytes of the embedding — enough to
