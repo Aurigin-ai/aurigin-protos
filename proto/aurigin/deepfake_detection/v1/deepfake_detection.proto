@@ -61,6 +61,21 @@ message DetectDeepfakeResponse {
 message CreateSessionResponse {
   // Unique identifier for this session.
   string session_id = 1;
+
+  // Human-readable model name the server loaded for this session —
+  // the fine-tuned release tag (`apollo-5-1`, `wavlm-v3`, …) that
+  // operators grep for in logs + dashboards. Stable across identical
+  // weights; distinct from `model_version` which carries the
+  // specific checkpoint revision.
+  // Empty string when the server hasn't configured a model name
+  // (older deploys, dev builds).
+  string model_name = 2;
+
+  // Specific checkpoint revision loaded — git SHA / HF revision hash
+  // (`deadbeefcafe…`). Change here means a different weights file
+  // even if `model_name` stayed the same.
+  // Empty string when the server hasn't configured one.
+  string model_version = 3;
 }
 
 // ============================================================================

@@ -67,6 +67,16 @@ message ExtractFingerprintResponse {
 message CreateSessionResponse {
   // Unique identifier for this session.
   string session_id = 1;
+
+  // Human-readable model name the server loaded for this session —
+  // the backbone / fine-tune release tag (e.g. `wavlm-base-plus`,
+  // `wavlm-aurigin-v3`). Empty string when the server hasn't
+  // configured one.
+  string model_name = 2;
+
+  // Specific checkpoint revision loaded (git SHA / HF revision hash).
+  // Empty string when the server hasn't configured one.
+  string model_version = 3;
 }
 
 // ============================================================================

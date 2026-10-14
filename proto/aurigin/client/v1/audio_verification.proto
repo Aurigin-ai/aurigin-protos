@@ -103,11 +103,19 @@ message ClientSessionConfig {
   // proto (they hit orchestrator via different adapters).
   aurigin.common.v1.SessionType session_type = 1;
 
-  // Client-side correlation identifiers stamped onto every event
-  // this session produces (verdicts on the wire, events on the
-  // bus). Typical keys: "agent_id", "contact_center_call_id",
-  // "recording_id", "campaign_id". The key namespace is
-  // client-defined; the orchestrator passes them through opaquely.
+  // Mixed bag — client correlation ids AND SDK/device/app telemetry.
+  //
+  // Correlation keys the orchestrator passes through opaquely:
+  //   "agent_id", "contact_center_call_id", "recording_id",
+  //   "campaign_id". Namespace is client-defined.
+  //
+  // SDK/device/app telemetry keys the orchestrator extracts into the
+  // session_opened event's `type_details` block for call-service to
+  // persist (so dashboards can slice calls by SDK/app version to spot
+  // regressions in a specific client build):
+  //   "device_id", "platform", "device_model", "os_version",
+  //   "locale", "sdk_version", "app_id", "app_name", "app_version".
+  //
   // Keep values short and non-PII — they land in dashboards and
   // audit logs.
   map<string, string> attributes = 2;
