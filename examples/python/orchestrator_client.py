@@ -195,10 +195,22 @@ async def run(
     print(f"# target={target} tls={use_tls} sessions={len(sources)} token_prefix={token[:10]}…")
     metadata = (("authorization", f"Bearer {token}"),)
 
+    # Keepalive — client sends HTTP/2 PING frames every 30s regardless of
+    # data flow. gRPC server-side keepalive only fires on idle (no received
+    # frames); during an active bidi stream the server considers the
+    # connection "proven alive by data" and never pings. Client-side
+    # keepalive is the only way to force periodic activity through L7 load
+    # balancers that idle-close long-lived streams (AWS ALB default 60s).
+    channel_options = [
+        ("grpc.keepalive_time_ms", 30_000),
+        ("grpc.keepalive_timeout_ms", 10_000),
+        ("grpc.keepalive_permit_without_calls", 1),
+        ("grpc.http2.max_pings_without_data", 0),
+    ]
     channel_cm = (
-        grpc.aio.secure_channel(target, grpc.ssl_channel_credentials())
+        grpc.aio.secure_channel(target, grpc.ssl_channel_credentials(), options=channel_options)
         if use_tls
-        else grpc.aio.insecure_channel(target)
+        else grpc.aio.insecure_channel(target, options=channel_options)
     )
     async with channel_cm as channel:
         stub = pb_grpc.AudioVerificationStub(channel)
