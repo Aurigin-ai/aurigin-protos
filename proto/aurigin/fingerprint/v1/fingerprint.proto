@@ -161,4 +161,26 @@ message FinalResult {
   // (total_audio_ms / window_ms) when residual windows were skipped
   // per tail_strategy or fell below min_analysis_duration_s.
   int32 embedding_count = 2;
+
+  // Processing wall-time for this session (ms). Server-measured; sum
+  // of time the extractor spent on inference + pre-processing across
+  // every window. Useful for GPU capacity planning, per-call cost
+  // accounting, and the "is this box falling behind?" alert.
+  int64 wall_ms = 3;
+
+  // Real-time factor: wall_ms / total_audio_ms. Server-computed so
+  // clients don't need to divide (and don't hit zero on zero-audio
+  // sessions — the server emits 0 in that edge case). < 1.0 means
+  // faster than real-time (headroom); ≥ 1.0 means the box is behind
+  // real-time on this call.
+  float rtf = 4;
+
+  // Which model checkpoint produced the embeddings in this session.
+  // Opaque to the client — matches MODEL_HUB_REVISION for the current
+  // backbone (or whatever a future backbone swap declares).
+  // Correlation key for A/B rollouts and embedding-regression
+  // post-mortems. Empty when the server didn't declare a version.
+  // Note: no silence aggregate on this message — this consumer
+  // doesn't VAD-gate (see EmbeddingConfig).
+  string model_version = 5;
 }

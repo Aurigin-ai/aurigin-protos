@@ -226,6 +226,13 @@ message AnalysisResult {
   // sentinels this carries the VAD silence fraction (≈silence_pct/100);
   // for "error" sentinels this is 0.0.
   float confidence = 6;
+
+  // VAD-measured silence fraction for THIS window, in percent [0, 100].
+  // Populated on every AnalysisResult regardless of label. Downstream
+  // dashboards want silence context on scored (non-silence) windows
+  // too; inferring from `confidence` only works for the silence
+  // sentinel. 0.0 is "no silence detected", not "unknown".
+  float silence_pct = 7;
 }
 
 // Emitted once when the client closes the stream. Purely accounting —
@@ -246,4 +253,33 @@ message FinalResult {
   string overall_label_raw = 4;
   // Number of analysis windows completed (scored, not VAD-gated).
   int32 analysis_count = 5;
+
+  // Processing wall-time for this session (ms). Server-measured;
+  // sum of time the replay model spent on inference + pre/post-
+  // processing across every window. Decoupled from audio duration —
+  // useful for GPU capacity planning, per-call cost accounting, and
+  // the "is this box falling behind?" alert.
+  int64 wall_ms = 6;
+
+  // Real-time factor: wall_ms / total_audio_ms. Server-computed so
+  // clients don't need to divide (and don't hit zero on zero-audio
+  // sessions — the server emits 0 in that edge case). < 1.0 means
+  // faster than real-time (headroom); ≥ 1.0 means the box is behind
+  // real-time on this call.
+  float rtf = 7;
+
+  // Which model checkpoint produced the verdicts in this session.
+  // Opaque to the client — matches whatever the server rolls out
+  // (semver "0.4.1", git-sha "deadbee", MODEL_HUB_REVISION tag, …).
+  // Correlation key for A/B rollouts and "why did this call score
+  // differently last week" post-mortems. Empty when the server didn't
+  // declare a version.
+  string model_version = 8;
+
+  // Mean VAD silence fraction across all analysed windows [0, 100].
+  // The server-side authoritative aggregate — cheaper and less lossy
+  // than a running mean on the caller. Reflects windows that were
+  // actually scored (not VAD-gated silence sentinels) when VAD is on.
+  // 0.0 is "no silence observed", not "unknown".
+  float silence_pct_mean = 9;
 }
