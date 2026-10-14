@@ -207,14 +207,22 @@ message Verdict {
   // calibration head).
   float confidence = 7;
 
-  // Consumer-specific extra attributes — e.g. per-model version tag,
-  // per-window silence fraction, per-frame codec after transcoding.
-  // Kept as `map<string, string>` deliberately: `google.protobuf.Any`
-  // would allow typed extension but at the cost of a much heavier
-  // decoder. Extension policy: promote a well-used attribute key to
-  // a top-level typed field in the next `v2`; keep the map for
-  // forward-compat.
+  // Consumer-specific extra attributes — e.g. per-frame codec after
+  // transcoding. Kept as `map<string, string>` deliberately:
+  // `google.protobuf.Any` would allow typed extension but at the cost
+  // of a much heavier decoder. Extension policy: promote a well-used
+  // attribute key to a top-level typed field (see `silence_pct`
+  // below — promoted v0.3.5 from `attributes["silence_fraction"]`);
+  // keep the map for forward-compat.
   map<string, string> attributes = 8;
+
+  // VAD-measured silence fraction for THIS window, in percent [0, 100].
+  // Promoted from `attributes` so classification consumers can surface
+  // it on every window instead of only the silence sentinel.
+  // Consumers that don't VAD-gate leave it at 0 and don't emit Verdict
+  // in the first place (they emit EmbeddingVerdict). Clients should
+  // treat 0.0 as "no silence detected", not "unknown".
+  float silence_pct = 9;
 }
 
 // Per-window embedding result from a vector-shaped consumer
@@ -368,6 +376,29 @@ message ConsumerFinalResult {
   // session. Useful for the client to sanity-check that the
   // session ran long enough for a stable aggregate.
   int32 analysis_count = 5;
+
+  // Processing wall-time this consumer spent on the session (ms).
+  // Supports per-call cost accounting and client-side capacity
+  // planning. Decoupled from audio duration.
+  int64 wall_ms = 6;
+
+  // Real-time factor: wall_ms / FinalResult.total_audio_ms. Server
+  // emits 0 on zero-audio sessions. < 1.0 = headroom, ≥ 1.0 = behind
+  // real-time on this call.
+  float rtf = 7;
+
+  // Which model checkpoint this consumer ran. Opaque to the client
+  // (semver, git-sha, or MODEL_HUB_REVISION tag — whatever the
+  // consumer declared). Correlation key for A/B rollouts and
+  // regression post-mortems. Empty when the consumer didn't declare
+  // a version.
+  string model_version = 8;
+
+  // Mean VAD silence fraction across the windows this consumer
+  // scored, in percent [0, 100]. UNSET for consumers that don't
+  // VAD-gate — `optional` so the wire distinguishes "no silence
+  // detected" (set = 0.0) from "concept doesn't apply here" (unset).
+  optional float silence_pct_mean = 9;
 }
 
 // ============================================================================

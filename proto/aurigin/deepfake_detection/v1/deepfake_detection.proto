@@ -153,6 +153,15 @@ message AnalysisResult {
   // Model confidence in this classification [0-1]. For "silence" sentinels
   // this carries the VAD silence fraction; for "error" sentinels this is 0.0.
   float confidence = 5;
+
+  // VAD-measured silence fraction for THIS window, in percent [0, 100].
+  // Populated on every AnalysisResult regardless of label — useful even on
+  // "bonafide" / "spoofed" windows for downstream silence-ratio dashboards.
+  // Previously silence_pct was only inferable from `confidence` when
+  // label == "silence" (hacky and lossy); keep that behaviour backward-
+  // compat and surface the authoritative value here. 0.0 is a legitimate
+  // reading (no silence detected), not "unknown".
+  float silence_pct = 6;
 }
 
 // Emitted once when the client closes the stream.
@@ -165,4 +174,33 @@ message FinalResult {
   string overall_label = 3;
   // Number of analysis windows completed.
   int32 analysis_count = 4;
+
+  // Processing wall-time for this session (ms). The sum of time the
+  // deepfake model spent on inference + pre/post-processing, measured
+  // server-side. Decoupled from audio duration — useful for GPU capacity
+  // planning + per-call cost accounting + the SRE "is this box falling
+  // behind?" alert.
+  int64 wall_ms = 5;
+
+  // Real-time factor: wall_ms / total_audio_ms. Server-computed so
+  // clients don't need to divide (and don't accidentally divide by zero
+  // on zero-audio sessions — server emits 0 in that edge case). < 1.0
+  // means faster than real-time (model has headroom); ≥ 1.0 means the
+  // box is behind real-time on this call.
+  float rtf = 6;
+
+  // Which model checkpoint produced the verdicts in this session.
+  // Opaque to the client; matches whatever the server rolls out
+  // (semver "0.4.1", git-sha "deadbee", MODEL_HUB_REVISION tag, …).
+  // Correlation key for A/B rollouts + "why did this call score
+  // differently last week" post-mortems. Empty when the server didn't
+  // declare a version.
+  string model_version = 7;
+
+  // Mean VAD silence fraction across all analysed windows [0, 100].
+  // The server-side authoritative aggregate — cheaper and less lossy
+  // than a running mean on the caller. Reflects windows that were
+  // actually scored (not VAD-gated silence sentinels) when
+  // vad_mode = ON. 0.0 is "no silence observed", not "unknown".
+  float silence_pct_mean = 8;
 }
