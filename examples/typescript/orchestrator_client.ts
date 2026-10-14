@@ -137,11 +137,12 @@ async function run(args: Args): Promise<void> {
         const f = resp.finalResult;
         console.log(`FINAL   | total_audio_ms=${f.totalAudioMs}`);
         for (const pc of f.perConsumer) {
-          console.log(
+          let line =
             `        | consumer=${pc.consumerName} ` +
             `label=${pc.overallLabelRaw || pc.overallLabel} ` +
-            `score=${pc.overallScore.toFixed(3)} count=${pc.analysisCount}`
-          );
+            `score=${pc.overallScore.toFixed(3)} count=${pc.analysisCount}`;
+          if (pc.modelVersion) line += ` model_version=${pc.modelVersion}`;
+          console.log(line);
         }
       }
     });

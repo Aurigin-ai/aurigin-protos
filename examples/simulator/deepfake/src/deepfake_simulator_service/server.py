@@ -12,6 +12,8 @@ Env vars:
     PORT             gRPC listen port              (default 50051)
     SCENARIOS_DIR    directory of *.yaml scenarios (default <repo>/examples/scenarios)
     SCENARIO_DEFAULT id of the fallback scenario   (default "default")
+    MODEL_NAME       value echoed on CreateSessionResponse       (default "apollo-sim")
+    MODEL_VERSION    value echoed on CreateSessionResponse + FinalResult (default "0.0.0-sim")
 """
 
 from __future__ import annotations
@@ -88,9 +90,17 @@ def _pick_scenario(
 
 
 class DeepfakeDetectionImpl(pb_grpc.DeepfakeDetectionServicer):
-    def __init__(self, scenarios: dict[str, Scenario], default_id: str) -> None:
+    def __init__(
+        self,
+        scenarios: dict[str, Scenario],
+        default_id: str,
+        model_name: str,
+        model_version: str,
+    ) -> None:
         self._scenarios = scenarios
         self._default_id = default_id
+        self._model_name = model_name
+        self._model_version = model_version
 
     async def DetectDeepfake(self, request_iterator, context):  # noqa: N802 - gRPC RPC name
         scenario, requested = _pick_scenario(
@@ -109,11 +119,23 @@ class DeepfakeDetectionImpl(pb_grpc.DeepfakeDetectionServicer):
         else:
             note = f"requested={requested!r} unknown → fallback={scenario.id}"
         print(f"[incoming] peer={peer} | {note}", file=sys.stderr, flush=True)
-        async for response in run_session(scenario, request_iterator, context):
+        async for response in run_session(
+            scenario,
+            request_iterator,
+            context,
+            model_name=self._model_name,
+            model_version=self._model_version,
+        ):
             yield response
 
 
-async def _serve_async(port: int, scenarios_dir: Path, default_id: str) -> None:
+async def _serve_async(
+    port: int,
+    scenarios_dir: Path,
+    default_id: str,
+    model_name: str,
+    model_version: str,
+) -> None:
     scenarios = load_scenarios(scenarios_dir)
     if default_id not in scenarios:
         raise SystemExit(
@@ -122,7 +144,13 @@ async def _serve_async(port: int, scenarios_dir: Path, default_id: str) -> None:
         )
     server = grpc.aio.server()
     pb_grpc.add_DeepfakeDetectionServicer_to_server(
-        DeepfakeDetectionImpl(scenarios, default_id), server
+        DeepfakeDetectionImpl(
+            scenarios,
+            default_id,
+            model_name=model_name,
+            model_version=model_version,
+        ),
+        server,
     )
 
     tls = _load_tls()
@@ -155,7 +183,8 @@ async def _serve_async(port: int, scenarios_dir: Path, default_id: str) -> None:
     print(
         f"DeepfakeDetection simulator listening on :{port} | "
         f"{len(scenarios)} scenarios loaded from {scenarios_dir} | "
-        f"default='{default_id}' | transport={tls_status}",
+        f"default='{default_id}' | model={model_name}@{model_version} | "
+        f"transport={tls_status}",
         file=sys.stderr, flush=True,
     )
 
@@ -187,6 +216,8 @@ async def _serve_async(port: int, scenarios_dir: Path, default_id: str) -> None:
 def serve(port: int = 50051) -> None:
     scenarios_dir = Path(os.environ.get("SCENARIOS_DIR", str(DEFAULT_SCENARIOS_DIR)))
     default_id = os.environ.get("SCENARIO_DEFAULT", "default")
+    model_name = os.environ.get("MODEL_NAME", "apollo-sim")
+    model_version = os.environ.get("MODEL_VERSION", "0.0.0-sim")
     # We deliberately do NOT use asyncio.run() here. Its Runner installs its
     # own SIGINT handler at the Python signal.signal() level, which races our
     # loop.add_signal_handler in _serve_async — the result is a CancelledError
@@ -195,7 +226,9 @@ def serve(port: int = 50051) -> None:
     # add_signal_handler as the only SIGINT path.
     loop = asyncio.new_event_loop()
     try:
-        loop.run_until_complete(_serve_async(port, scenarios_dir, default_id))
+        loop.run_until_complete(
+            _serve_async(port, scenarios_dir, default_id, model_name, model_version)
+        )
     finally:
         loop.close()
 

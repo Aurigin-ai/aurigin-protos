@@ -80,7 +80,11 @@ function runSession(
     const call = client.detectReplay();
     call.on("data", (response: DetectReplayResponse) => {
       if (response.createSessionResponse) {
-        console.log(`Session: ${response.createSessionResponse.sessionId}`);
+        const ack = response.createSessionResponse;
+        console.log(`Session: ${ack.sessionId}`);
+        if (ack.modelName || ack.modelVersion) {
+          console.log(`Model:   ${ack.modelName || "?"}@${ack.modelVersion || "?"}`);
+        }
       } else if (response.analysisResult) {
         const r = response.analysisResult;
         console.log(

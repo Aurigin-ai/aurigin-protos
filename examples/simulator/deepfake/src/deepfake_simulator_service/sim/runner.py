@@ -433,7 +433,14 @@ def _materialise(
     )
 
 
-async def run_session(scenario: Scenario, request_iterator, context):
+async def run_session(
+    scenario: Scenario,
+    request_iterator,
+    context,
+    *,
+    model_name: str = "",
+    model_version: str = "",
+):
     """Async generator yielding DetectDeepfakeResponse for one bidi RPC."""
     loop = asyncio.get_running_loop()
     rng = random.Random(scenario.random_seed) if scenario.random_seed is not None else random.Random()
@@ -450,7 +457,11 @@ async def run_session(scenario: Scenario, request_iterator, context):
 
     state = _SessionState(session_id=_make_session_id(), started_at=loop.time())
     yield pb.DetectDeepfakeResponse(
-        create_session_response=pb.CreateSessionResponse(session_id=state.session_id),
+        create_session_response=pb.CreateSessionResponse(
+            session_id=state.session_id,
+            model_name=model_name,
+            model_version=model_version,
+        ),
     )
     _log(
         state.session_id,
@@ -538,6 +549,7 @@ async def run_session(scenario: Scenario, request_iterator, context):
                 overall_score=overall_score,
                 overall_label=overall_label,
                 analysis_count=state.analysis_count,
+                model_version=model_version,
             ),
         )
     finally:

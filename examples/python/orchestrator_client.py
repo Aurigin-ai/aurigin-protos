@@ -156,11 +156,14 @@ async def _run_session(stub, request_iter, label: str, metadata) -> None:
                 f = resp.final_result
                 print(f"FINAL   | total_audio_ms={f.total_audio_ms}")
                 for pc in f.per_consumer:
-                    print(
+                    line = (
                         f"        | consumer={pc.consumer_name} "
                         f"label={pc.overall_label_raw or pc.overall_label} "
-                        f"score={pc.overall_score:.3f} count={pc.analysis_count}",
+                        f"score={pc.overall_score:.3f} count={pc.analysis_count}"
                     )
+                    if pc.model_version:
+                        line += f" model_version={pc.model_version}"
+                    print(line)
     except grpc.aio.AioRpcError as exc:
         print(f"ERROR   | code={exc.code().name} detail={exc.details()!r}")
 

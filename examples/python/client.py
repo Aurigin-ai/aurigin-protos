@@ -91,8 +91,11 @@ def _run_session(stub, request_iter, label: str, csv_out: ResultCSV | None = Non
     for response in stub.DetectDeepfake(request_iter):
         kind = response.WhichOneof("response")
         if kind == "create_session_response":
-            session_id = response.create_session_response.session_id
+            ack = response.create_session_response
+            session_id = ack.session_id
             print(f"Session: {session_id}")
+            if ack.model_name or ack.model_version:
+                print(f"Model:   {ack.model_name or '?'}@{ack.model_version or '?'}")
         elif kind == "analysis_result":
             r = response.analysis_result
             chunks.append(ChunkRow(

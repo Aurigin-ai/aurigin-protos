@@ -200,10 +200,13 @@ async def recv_call(
     async for response in call:
         kind = response.WhichOneof("response")
         if kind == "create_session_response":
-            session_id = response.create_session_response.session_id
+            ack = response.create_session_response
+            session_id = ack.session_id
             if sink is not None:
                 sink["session_id"] = session_id
             log(f"📞 Session: {session_id}")
+            if ack.model_name or ack.model_version:
+                log(f"🧠 Model: {ack.model_name or '?'}@{ack.model_version or '?'}")
         elif kind == "analysis_result":
             r = response.analysis_result
             if sink is not None:
