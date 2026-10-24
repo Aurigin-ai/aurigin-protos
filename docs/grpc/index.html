@@ -1,0 +1,4085 @@
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <title>Protocol Documentation</title>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Ubuntu:400,700,400italic"/>
+    <style>
+      body {
+        width: 60em;
+        margin: 1em auto;
+        color: #222;
+        font-family: "Ubuntu", sans-serif;
+        padding-bottom: 4em;
+      }
+
+      h1 {
+        font-weight: normal;
+        border-bottom: 1px solid #aaa;
+        padding-bottom: 0.5ex;
+      }
+
+      h2 {
+        border-bottom: 1px solid #aaa;
+        padding-bottom: 0.5ex;
+        margin: 1.5em 0;
+      }
+
+      h3 {
+        font-weight: normal;
+        border-bottom: 1px solid #aaa;
+        padding-bottom: 0.5ex;
+      }
+
+      a {
+        text-decoration: none;
+        color: #567e25;
+      }
+
+      table {
+        width: 100%;
+        font-size: 80%;
+        border-collapse: collapse;
+      }
+
+      thead {
+        font-weight: 700;
+        background-color: #dcdcdc;
+      }
+
+      tbody tr:nth-child(even) {
+        background-color: #fbfbfb;
+      }
+
+      td {
+        border: 1px solid #ccc;
+        padding: 0.5ex 2ex;
+      }
+
+      td p {
+        text-indent: 1em;
+        margin: 0;
+      }
+
+      td p:nth-child(1) {
+        text-indent: 0;  
+      }
+
+       
+      .field-table td:nth-child(1) {  
+        width: 10em;
+      }
+      .field-table td:nth-child(2) {  
+        width: 10em;
+      }
+      .field-table td:nth-child(3) {  
+        width: 6em;
+      }
+      .field-table td:nth-child(4) {  
+        width: auto;
+      }
+
+       
+      .extension-table td:nth-child(1) {  
+        width: 10em;
+      }
+      .extension-table td:nth-child(2) {  
+        width: 10em;
+      }
+      .extension-table td:nth-child(3) {  
+        width: 10em;
+      }
+      .extension-table td:nth-child(4) {  
+        width: 5em;
+      }
+      .extension-table td:nth-child(5) {  
+        width: auto;
+      }
+
+       
+      .enum-table td:nth-child(1) {  
+        width: 10em;
+      }
+      .enum-table td:nth-child(2) {  
+        width: 10em;
+      }
+      .enum-table td:nth-child(3) {  
+        width: auto;
+      }
+
+       
+      .scalar-value-types-table tr {
+        height: 3em;
+      }
+
+       
+      #toc-container ul {
+        list-style-type: none;
+        padding-left: 1em;
+        line-height: 180%;
+        margin: 0;
+      }
+      #toc > li > a {
+        font-weight: bold;
+      }
+
+       
+      .file-heading {
+        width: 100%;
+        display: table;
+        border-bottom: 1px solid #aaa;
+        margin: 4em 0 1.5em 0;
+      }
+      .file-heading h2 {
+        border: none;
+        display: table-cell;
+      }
+      .file-heading a {
+        text-align: right;
+        display: table-cell;
+      }
+
+       
+      .badge {
+        width: 1.6em;
+        height: 1.6em;
+        display: inline-block;
+
+        line-height: 1.6em;
+        text-align: center;
+        font-weight: bold;
+        font-size: 60%;
+
+        color: #89ba48;
+        background-color: #dff0c8;
+
+        margin: 0.5ex 1em 0.5ex -1em;
+        border: 1px solid #fbfbfb;
+        border-radius: 1ex;
+      }
+    </style>
+
+    
+    <link rel="stylesheet" type="text/css" href="stylesheet.css"/>
+  </head>
+
+  <body>
+
+    <h1 id="title">Protocol Documentation</h1>
+
+    <h2>Table of Contents</h2>
+
+    <div id="toc-container">
+      <ul id="toc">
+        
+          
+          <li>
+            <a href="#aurigin%2fclient%2fv1%2faudio_verification.proto">aurigin/client/v1/audio_verification.proto</a>
+            <ul>
+              
+                <li>
+                  <a href="#aurigin.client.v1.ClientSessionConfig"><span class="badge">M</span>ClientSessionConfig</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.ClientSessionConfig.AttributesEntry"><span class="badge">M</span>ClientSessionConfig.AttributesEntry</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.ConsumerFinalResult"><span class="badge">M</span>ConsumerFinalResult</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.CreateSessionRequest"><span class="badge">M</span>CreateSessionRequest</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.CreateSessionResponse"><span class="badge">M</span>CreateSessionResponse</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.EmbeddingVerdict"><span class="badge">M</span>EmbeddingVerdict</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.EmbeddingVerdict.AttributesEntry"><span class="badge">M</span>EmbeddingVerdict.AttributesEntry</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.FinalResult"><span class="badge">M</span>FinalResult</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.Notification"><span class="badge">M</span>Notification</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.Notification.AttributesEntry"><span class="badge">M</span>Notification.AttributesEntry</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.StreamRequest"><span class="badge">M</span>StreamRequest</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.StreamResponse"><span class="badge">M</span>StreamResponse</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.Verdict"><span class="badge">M</span>Verdict</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.Verdict.AttributesEntry"><span class="badge">M</span>Verdict.AttributesEntry</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.VerifyRequest"><span class="badge">M</span>VerifyRequest</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.client.v1.VerifyResponse"><span class="badge">M</span>VerifyResponse</a>
+                </li>
+              
+              
+                <li>
+                  <a href="#aurigin.client.v1.Notification.NotificationType"><span class="badge">E</span>Notification.NotificationType</a>
+                </li>
+              
+              
+              
+                <li>
+                  <a href="#aurigin.client.v1.AudioVerification"><span class="badge">S</span>AudioVerification</a>
+                </li>
+              
+            </ul>
+          </li>
+        
+          
+          <li>
+            <a href="#aurigin%2fcommon%2fv1%2fresult.proto">aurigin/common/v1/result.proto</a>
+            <ul>
+              
+              
+                <li>
+                  <a href="#aurigin.common.v1.ResultLabel"><span class="badge">E</span>ResultLabel</a>
+                </li>
+              
+              
+              
+            </ul>
+          </li>
+        
+          
+          <li>
+            <a href="#aurigin%2fcommon%2fv1%2fsession.proto">aurigin/common/v1/session.proto</a>
+            <ul>
+              
+                <li>
+                  <a href="#aurigin.common.v1.Principal"><span class="badge">M</span>Principal</a>
+                </li>
+              
+              
+                <li>
+                  <a href="#aurigin.common.v1.Principal.CallerType"><span class="badge">E</span>Principal.CallerType</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.common.v1.SessionType"><span class="badge">E</span>SessionType</a>
+                </li>
+              
+              
+              
+            </ul>
+          </li>
+        
+          
+          <li>
+            <a href="#aurigin%2fdeepfake_detection%2fv1%2fdeepfake_detection.proto">aurigin/deepfake_detection/v1/deepfake_detection.proto</a>
+            <ul>
+              
+                <li>
+                  <a href="#aurigin.deepfake_detection.v1.AnalysisResult"><span class="badge">M</span>AnalysisResult</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.deepfake_detection.v1.CreateSessionRequest"><span class="badge">M</span>CreateSessionRequest</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.deepfake_detection.v1.CreateSessionResponse"><span class="badge">M</span>CreateSessionResponse</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.deepfake_detection.v1.DetectDeepfakeRequest"><span class="badge">M</span>DetectDeepfakeRequest</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.deepfake_detection.v1.DetectDeepfakeResponse"><span class="badge">M</span>DetectDeepfakeResponse</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.deepfake_detection.v1.DetectionConfig"><span class="badge">M</span>DetectionConfig</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.deepfake_detection.v1.FinalResult"><span class="badge">M</span>FinalResult</a>
+                </li>
+              
+              
+                <li>
+                  <a href="#aurigin.deepfake_detection.v1.TailStrategy"><span class="badge">E</span>TailStrategy</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.deepfake_detection.v1.VadMode"><span class="badge">E</span>VadMode</a>
+                </li>
+              
+              
+              
+                <li>
+                  <a href="#aurigin.deepfake_detection.v1.DeepfakeDetection"><span class="badge">S</span>DeepfakeDetection</a>
+                </li>
+              
+            </ul>
+          </li>
+        
+          
+          <li>
+            <a href="#aurigin%2ffingerprint%2fv1%2ffingerprint.proto">aurigin/fingerprint/v1/fingerprint.proto</a>
+            <ul>
+              
+                <li>
+                  <a href="#aurigin.fingerprint.v1.CreateSessionRequest"><span class="badge">M</span>CreateSessionRequest</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.fingerprint.v1.CreateSessionResponse"><span class="badge">M</span>CreateSessionResponse</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.fingerprint.v1.EmbeddingResult"><span class="badge">M</span>EmbeddingResult</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.fingerprint.v1.ExtractFingerprintRequest"><span class="badge">M</span>ExtractFingerprintRequest</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.fingerprint.v1.ExtractFingerprintResponse"><span class="badge">M</span>ExtractFingerprintResponse</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.fingerprint.v1.FinalResult"><span class="badge">M</span>FinalResult</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.fingerprint.v1.FingerprintConfig"><span class="badge">M</span>FingerprintConfig</a>
+                </li>
+              
+              
+                <li>
+                  <a href="#aurigin.fingerprint.v1.TailStrategy"><span class="badge">E</span>TailStrategy</a>
+                </li>
+              
+              
+              
+                <li>
+                  <a href="#aurigin.fingerprint.v1.Fingerprint"><span class="badge">S</span>Fingerprint</a>
+                </li>
+              
+            </ul>
+          </li>
+        
+          
+          <li>
+            <a href="#aurigin%2fmedia%2fv1%2faudio_frame.proto">aurigin/media/v1/audio_frame.proto</a>
+            <ul>
+              
+                <li>
+                  <a href="#aurigin.media.v1.AudioFrame"><span class="badge">M</span>AudioFrame</a>
+                </li>
+              
+              
+                <li>
+                  <a href="#aurigin.media.v1.AudioCodec"><span class="badge">E</span>AudioCodec</a>
+                </li>
+              
+              
+              
+            </ul>
+          </li>
+        
+          
+          <li>
+            <a href="#aurigin%2frecording%2fv1%2frecording.proto">aurigin/recording/v1/recording.proto</a>
+            <ul>
+              
+                <li>
+                  <a href="#aurigin.recording.v1.CreateSessionRequest"><span class="badge">M</span>CreateSessionRequest</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.recording.v1.CreateSessionResponse"><span class="badge">M</span>CreateSessionResponse</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.recording.v1.RecordRequest"><span class="badge">M</span>RecordRequest</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.recording.v1.RecordResponse"><span class="badge">M</span>RecordResponse</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.recording.v1.RecordingComplete"><span class="badge">M</span>RecordingComplete</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.recording.v1.RecordingConfig"><span class="badge">M</span>RecordingConfig</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.recording.v1.RecordingProgress"><span class="badge">M</span>RecordingProgress</a>
+                </li>
+              
+              
+                <li>
+                  <a href="#aurigin.recording.v1.ContainerFormat"><span class="badge">E</span>ContainerFormat</a>
+                </li>
+              
+              
+              
+                <li>
+                  <a href="#aurigin.recording.v1.Recording"><span class="badge">S</span>Recording</a>
+                </li>
+              
+            </ul>
+          </li>
+        
+          
+          <li>
+            <a href="#aurigin%2freplay_detection%2fv1%2freplay_detection.proto">aurigin/replay_detection/v1/replay_detection.proto</a>
+            <ul>
+              
+                <li>
+                  <a href="#aurigin.replay_detection.v1.AnalysisResult"><span class="badge">M</span>AnalysisResult</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.replay_detection.v1.CreateSessionRequest"><span class="badge">M</span>CreateSessionRequest</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.replay_detection.v1.CreateSessionResponse"><span class="badge">M</span>CreateSessionResponse</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.replay_detection.v1.DetectReplayRequest"><span class="badge">M</span>DetectReplayRequest</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.replay_detection.v1.DetectReplayResponse"><span class="badge">M</span>DetectReplayResponse</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.replay_detection.v1.FinalResult"><span class="badge">M</span>FinalResult</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.replay_detection.v1.ReplayConfig"><span class="badge">M</span>ReplayConfig</a>
+                </li>
+              
+              
+                <li>
+                  <a href="#aurigin.replay_detection.v1.ReplayLabel"><span class="badge">E</span>ReplayLabel</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.replay_detection.v1.TailStrategy"><span class="badge">E</span>TailStrategy</a>
+                </li>
+              
+                <li>
+                  <a href="#aurigin.replay_detection.v1.VadMode"><span class="badge">E</span>VadMode</a>
+                </li>
+              
+              
+              
+                <li>
+                  <a href="#aurigin.replay_detection.v1.ReplayDetection"><span class="badge">S</span>ReplayDetection</a>
+                </li>
+              
+            </ul>
+          </li>
+        
+          
+          <li>
+            <a href="#twilio%2ftme%2fextensions%2fcommon%2fv1%2faudio_buffer.proto">twilio/tme/extensions/common/v1/audio_buffer.proto</a>
+            <ul>
+              
+                <li>
+                  <a href="#twilio.tme.extensions.common.v1.AudioBuffer"><span class="badge">M</span>AudioBuffer</a>
+                </li>
+              
+              
+              
+              
+            </ul>
+          </li>
+        
+        <li><a href="#scalar-value-types">Scalar Value Types</a></li>
+      </ul>
+    </div>
+
+    
+      
+      <div class="file-heading">
+        <h2 id="aurigin/client/v1/audio_verification.proto">aurigin/client/v1/audio_verification.proto</h2><a href="#title">Top</a>
+      </div>
+      <p></p>
+
+      
+        <h3 id="aurigin.client.v1.ClientSessionConfig">ClientSessionConfig</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>session_type</td>
+                  <td><a href="#aurigin.common.v1.SessionType">aurigin.common.v1.SessionType</a></td>
+                  <td></td>
+                  <td><p>Shape of the session — drives orchestrator&#39;s action-rule scoping
+and rides on every event this session produces on the pub/sub
+bus. SDK clients typically set USER_STREAM; developer API-key
+clients set API_STREAM; Teams/telco ingresses don&#39;t use this
+proto (they hit orchestrator via different adapters). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>attributes</td>
+                  <td><a href="#aurigin.client.v1.ClientSessionConfig.AttributesEntry">ClientSessionConfig.AttributesEntry</a></td>
+                  <td>repeated</td>
+                  <td><p>Mixed bag — client correlation ids AND SDK/device/app telemetry.
+
+Correlation keys the orchestrator passes through opaquely:
+  &#34;agent_id&#34;, &#34;contact_center_call_id&#34;, &#34;recording_id&#34;,
+  &#34;campaign_id&#34;. Namespace is client-defined.
+
+SDK/device/app telemetry keys the orchestrator extracts into the
+session_opened event&#39;s `type_details` block for call-service to
+persist (so dashboards can slice calls by SDK/app version to spot
+regressions in a specific client build):
+  &#34;device_id&#34;, &#34;platform&#34;, &#34;device_model&#34;, &#34;os_version&#34;,
+  &#34;locale&#34;, &#34;sdk_version&#34;, &#34;app_id&#34;, &#34;app_name&#34;, &#34;app_version&#34;.
+
+Keep values short and non-PII — they land in dashboards and
+audit logs. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.ClientSessionConfig.AttributesEntry">ClientSessionConfig.AttributesEntry</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>key</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>value</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.ConsumerFinalResult">ConsumerFinalResult</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>consumer_name</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Which consumer this aggregate belongs to. Same value space as
+`Verdict.consumer_name` — &#34;deepfake&#34;, &#34;fingerprint&#34;, … </p></td>
+                </tr>
+              
+                <tr>
+                  <td>overall_label</td>
+                  <td><a href="#aurigin.common.v1.ResultLabel">aurigin.common.v1.ResultLabel</a></td>
+                  <td></td>
+                  <td><p>Session-wide aggregate classification, computed server-side.
+Semantics per-consumer: for the deepfake consumer, worst-case
+over the window sequence (any SPOOFED / PARTIALLY_SPOOFED
+window trumps BONAFIDE); for embedding-shaped consumers this
+is UNSPECIFIED (no natural aggregate). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>overall_label_raw</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Raw string form of `overall_label` — same extensibility
+contract as `Verdict.label_raw`. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>overall_score</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Aggregate score, in [0, 1], semantics per-consumer. For the
+deepfake consumer: max score across scored windows. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>analysis_count</td>
+                  <td><a href="#int32">int32</a></td>
+                  <td></td>
+                  <td><p>How many per-window analyses this consumer produced during the
+session. Useful for the client to sanity-check that the
+session ran long enough for a stable aggregate. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>wall_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Processing wall-time this consumer spent on the session (ms).
+Supports per-call cost accounting and client-side capacity
+planning. Decoupled from audio duration. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>rtf</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Real-time factor: wall_ms / FinalResult.total_audio_ms. Server
+emits 0 on zero-audio sessions. &lt; 1.0 = headroom, ≥ 1.0 = behind
+real-time on this call. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>model_version</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Which model checkpoint this consumer ran. Opaque to the client
+(semver, git-sha, or MODEL_HUB_REVISION tag — whatever the
+consumer declared). Correlation key for A/B rollouts and
+regression post-mortems. Empty when the consumer didn&#39;t declare
+a version. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>silence_pct_mean</td>
+                  <td><a href="#float">float</a></td>
+                  <td>optional</td>
+                  <td><p>Mean VAD silence fraction across the windows this consumer
+scored, in percent [0, 100]. UNSET for consumers that don&#39;t
+VAD-gate — `optional` so the wire distinguishes &#34;no silence
+detected&#34; (set = 0.0) from &#34;concept doesn&#39;t apply here&#34; (unset). </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.CreateSessionRequest">CreateSessionRequest</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>config</td>
+                  <td><a href="#aurigin.client.v1.ClientSessionConfig">ClientSessionConfig</a></td>
+                  <td>optional</td>
+                  <td><p>Optional per-session configuration; server applies tenant defaults
+for every unset field. Sending an empty message (no config) is
+valid and picks the tenant default for every knob. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.CreateSessionResponse">CreateSessionResponse</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>session_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Server-assigned session identifier. Opaque to the client;
+logged in dashboards &#43; threaded onto every event this session
+produces on the pub/sub bus (`Event.call_uuid` in
+aurigin.events.v1). </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.EmbeddingVerdict">EmbeddingVerdict</h3>
+        <p>Per-window embedding result from a vector-shaped consumer</p><p>(fingerprint's WavLM, future speaker-ID x-vectors, language-ID</p><p>pooling embeddings). Same offset/duration axis as Verdict.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>consumer_name</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Which consumer produced this embedding. Canonical values today:
+&#34;fingerprint&#34; (the WavLM feature extractor in aurigin-fingerprint).
+Future: &#34;speaker_id&#34;, &#34;language_id&#34;. Clients subscribed to
+multiple embedding-shaped consumers filter on this axis. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>audio_offset_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Position of the analysed window from stream start, in
+milliseconds. Same axis as Verdict.audio_offset_ms. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>duration_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Length of the analysed window in milliseconds — typically the
+consumer&#39;s server-configured window size (5000 for WavLM). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>embedding</td>
+                  <td><a href="#bytes">bytes</a></td>
+                  <td></td>
+                  <td><p>Raw float32 embedding bytes, little-endian. Canonical form
+(768 * 4 = 3072 bytes for WavLM-base-plus; other consumers set
+their own `dim`). Servers producing similarity-comparable
+embeddings L2-normalise on their side so a dot product on the
+client is a cosine similarity — receivers MUST NOT re-normalise. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>fingerprint_code</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Convenience hash of the raw embedding — sha256(embedding)[:16]
+hex. Useful as a quick equality check and cache key without
+shipping the full 3072 bytes through downstream logs. Derived
+from `embedding`; producers MUST NOT omit it. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>dim</td>
+                  <td><a href="#int32">int32</a></td>
+                  <td></td>
+                  <td><p>Embedding dimensionality (768 for WavLM-base-plus). Lets
+clients validate `len(embedding) == dim * 4` without hardcoding
+a per-consumer constant and survives a future backbone swap
+that changes `dim`. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>attributes</td>
+                  <td><a href="#aurigin.client.v1.EmbeddingVerdict.AttributesEntry">EmbeddingVerdict.AttributesEntry</a></td>
+                  <td>repeated</td>
+                  <td><p>Consumer-specific extra attributes — same policy as
+`Verdict.attributes`. Typical keys for a fingerprint consumer:
+&#34;model_revision&#34;, &#34;silence_fraction&#34; (when the consumer
+publishes it despite producing embeddings on silence too). </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.EmbeddingVerdict.AttributesEntry">EmbeddingVerdict.AttributesEntry</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>key</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>value</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.FinalResult">FinalResult</h3>
+        <p>Terminal aggregate on stream end. Always exactly one per session,</p><p>landed just before the server half-closes. Carries session-level</p><p>accounting plus per-consumer aggregates so a client that only</p><p>consumed the terminal message (no per-window verdicts) can still</p><p>display an overall result.</p><p>Ordering contract: the server MUST wait for every dispatched</p><p>consumer to flush its tail before emitting FinalResult. Some</p><p>consumers have work that outlives the last audio window — the</p><p>deepfake consumer runs a final analysis pass; embedding consumers</p><p>finalise a pooling window; a recorder-style consumer (once the</p><p>recorder moves to gRPC) closes and commits the recording blob</p><p>before it can report its final URI. Emitting FinalResult before</p><p>those tails complete would deprive the client of per-consumer</p><p>aggregates it needs to render the session outcome.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>total_audio_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Total audio duration analysed across the whole session, in
+milliseconds. Sum of `duration_ms` over every window the
+consumers scored — differs from wall-clock session duration
+because VAD-gated silence windows and any transcode losses are
+excluded. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>per_consumer</td>
+                  <td><a href="#aurigin.client.v1.ConsumerFinalResult">ConsumerFinalResult</a></td>
+                  <td>repeated</td>
+                  <td><p>Per-consumer aggregates. One entry per consumer that produced
+any verdict during the session. Order is not significant;
+clients key on `consumer_name`. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.Notification">Notification</h3>
+        <p>Server-triggered client-facing notification. Carries information</p><p>outside the per-window verdict stream — action-rule outcomes,</p><p>quota warnings, session-lifecycle info.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>type</td>
+                  <td><a href="#aurigin.client.v1.Notification.NotificationType">Notification.NotificationType</a></td>
+                  <td></td>
+                  <td><p>Classification of the notification. Unknown values from a newer
+server land as NOTIFICATION_TYPE_UNSPECIFIED at the client;
+callers should also read `type_raw` to recover unknown values. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>message</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Human-readable message describing the notification. English
+today; internationalisation is a client-side concern (the
+client maps the enum to its own localised string). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>attributes</td>
+                  <td><a href="#aurigin.client.v1.Notification.AttributesEntry">Notification.AttributesEntry</a></td>
+                  <td>repeated</td>
+                  <td><p>Notification-specific extra attributes. Typical keys:
+&#34;rule_name&#34; (for ACTION_FIRED), &#34;quota_pct_used&#34; (for
+QUOTA_WARN), &#34;session_id&#34; (echo of the session this
+notification belongs to when it arrives asynchronously). </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.Notification.AttributesEntry">Notification.AttributesEntry</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>key</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>value</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.StreamRequest">StreamRequest</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>create_session_request</td>
+                  <td><a href="#aurigin.client.v1.CreateSessionRequest">CreateSessionRequest</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>audio_frame</td>
+                  <td><a href="#aurigin.media.v1.AudioFrame">aurigin.media.v1.AudioFrame</a></td>
+                  <td></td>
+                  <td><p>Self-describing audio frame — codec &#43; sample rate &#43; channels
+&#43; payload ride on the message so no session-open codec
+coordination is needed and mid-stream codec renegotiations
+(Teams SDP switch, WebRTC bandwidth adaptation) work without
+a wire break. AudioFrame is the sole audio type on this
+service; there is no legacy fork. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.StreamResponse">StreamResponse</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>create_session_response</td>
+                  <td><a href="#aurigin.client.v1.CreateSessionResponse">CreateSessionResponse</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>verdict</td>
+                  <td><a href="#aurigin.client.v1.Verdict">Verdict</a></td>
+                  <td></td>
+                  <td><p>Per-window classification result from any consumer that
+produces a categorical label &#43; score (deepfake, future
+speaker-ID, PII-detector, language-ID). `consumer_name`
+lets the client filter by consumer while keeping one stream. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>notification</td>
+                  <td><a href="#aurigin.client.v1.Notification">Notification</a></td>
+                  <td></td>
+                  <td><p>Server-triggered client-facing event outside the verdict
+stream — warnings (near-quota), info (session-lifecycle
+signals), action-fired notices (the tenant&#39;s action-rule
+played a warning file into the call), quota exceeded, etc. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>final_result</td>
+                  <td><a href="#aurigin.client.v1.FinalResult">FinalResult</a></td>
+                  <td></td>
+                  <td><p>Terminal aggregate on stream end. Landed just before the
+server half-closes. Always exactly one per session. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>embedding_verdict</td>
+                  <td><a href="#aurigin.client.v1.EmbeddingVerdict">EmbeddingVerdict</a></td>
+                  <td></td>
+                  <td><p>Per-window embedding result from consumers whose output is a
+vector rather than a classification (fingerprint&#39;s WavLM
+embedding, future speaker-ID x-vectors). Carried as a
+separate branch rather than shoehorned into `Verdict` because
+Verdict.attributes is `map&lt;string, string&gt;` which would force
+base64-encoding of the raw float32 bytes and lose the
+canonical-bytes property. Mirrors
+`aurigin.fingerprint.v1.EmbeddingResult` plus the
+`consumer_name` axis so a future speaker-ID consumer can
+multiplex on the same branch. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.Verdict">Verdict</h3>
+        <p>Per-window classification result from a categorical consumer.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>consumer_name</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Which consumer produced this verdict. Canonical values today:
+&#34;deepfake&#34; (currently the only shipping classification consumer).
+Future: &#34;speaker_id&#34;, &#34;pii_detector&#34;, &#34;language_id&#34;. Clients
+filter on this axis when they subscribe to multiple consumers
+in one stream. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>audio_offset_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Position of the analysed window from stream start, in
+milliseconds. Aligns per-window verdicts back to the client&#39;s
+own audio timeline for UI rendering (e.g. a waveform overlay). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>duration_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Length of the analysed window in milliseconds. Typically the
+consumer&#39;s server-configured analysis_interval_s times 1000
+(5000 for the deepfake service today). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>label</td>
+                  <td><a href="#aurigin.common.v1.ResultLabel">aurigin.common.v1.ResultLabel</a></td>
+                  <td></td>
+                  <td><p>Canonical classification. Consumers that produce a label the
+enum doesn&#39;t cover leave this UNSPECIFIED and populate
+`label_raw` — see the extensibility contract on ResultLabel. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>label_raw</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Raw string form of the label as the consumer returned it —
+populated on every Verdict so unknown values still round-trip.
+Clients that only understand the enum should prefer `label`
+and log `label_raw` for debugging. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>score</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Model output score, semantics per-consumer. For the deepfake
+consumer: probability the window is spoofed, in [0, 1]. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>confidence</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Confidence in the classification, in [0, 1]. Distinct from
+`score`: score is the model output, confidence is the model&#39;s
+self-assessed certainty about that output (typically derived
+from the distance to the decision boundary or from a
+calibration head). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>attributes</td>
+                  <td><a href="#aurigin.client.v1.Verdict.AttributesEntry">Verdict.AttributesEntry</a></td>
+                  <td>repeated</td>
+                  <td><p>Consumer-specific extra attributes — e.g. per-frame codec after
+transcoding. Kept as `map&lt;string, string&gt;` deliberately:
+`google.protobuf.Any` would allow typed extension but at the cost
+of a much heavier decoder. Extension policy: promote a well-used
+attribute key to a top-level typed field (see `silence_pct`
+below — promoted v0.3.5 from `attributes[&#34;silence_fraction&#34;]`);
+keep the map for forward-compat. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>silence_pct</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>VAD-measured silence fraction for THIS window, in percent [0, 100].
+Promoted from `attributes` so classification consumers can surface
+it on every window instead of only the silence sentinel.
+Consumers that don&#39;t VAD-gate leave it at 0 and don&#39;t emit Verdict
+in the first place (they emit EmbeddingVerdict). Clients should
+treat 0.0 as &#34;no silence detected&#34;, not &#34;unknown&#34;. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.Verdict.AttributesEntry">Verdict.AttributesEntry</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>key</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>value</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.VerifyRequest">VerifyRequest</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>inline_audio</td>
+                  <td><a href="#bytes">bytes</a></td>
+                  <td></td>
+                  <td><p>Small-file inline path — the raw encoded audio bytes ride on
+the request. Server enforces a size limit (announced via a
+future GetLimits RPC; today, hard-coded to 10 MiB). Clients
+above the limit MUST use `blob_uri`. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>blob_uri</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Blob URI the server can read. Accepted schemes:
+  `s3://&lt;bucket&gt;/&lt;key&gt;` (server IAM must allow the read)
+  `minio://&lt;host&gt;/&lt;bucket&gt;/&lt;key&gt;` (on-prem MinIO)
+  `https://…` (presigned S3 GET / any HTTPS URL the server
+               can GET without extra auth)
+The file-service upload flow returns URIs in this shape after
+storing the client&#39;s upload; callers can then pass the URI
+straight into Verify without re-uploading. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>config</td>
+                  <td><a href="#aurigin.client.v1.ClientSessionConfig">ClientSessionConfig</a></td>
+                  <td>optional</td>
+                  <td><p>Optional per-session config — same shape as the streaming
+handshake. session_type SHOULD be SESSION_TYPE_FILE_VERIFY for
+audit-log clarity; the orchestrator accepts other values but
+stamps FILE_VERIFY on the resulting event regardless. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>codec_hint</td>
+                  <td><a href="#aurigin.media.v1.AudioCodec">aurigin.media.v1.AudioCodec</a></td>
+                  <td>optional</td>
+                  <td><p>Codec hint for `inline_audio` when the payload is bare PCM
+(no self-describing container). Ignored for `blob_uri` — the
+server sniffs the container (WAV / FLAC / OGG / MP4) directly. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.client.v1.VerifyResponse">VerifyResponse</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>request_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Server-generated request identifier. Also used as the
+correlation ID on the pub/sub event bus so downstream sinks
+can join the request to its `job.completed` event. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>final_result</td>
+                  <td><a href="#aurigin.client.v1.FinalResult">FinalResult</a></td>
+                  <td></td>
+                  <td><p>Terminal aggregate for the whole file. Same shape as the
+streaming session&#39;s FinalResult — same clients can render
+both without a special case. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>per_window</td>
+                  <td><a href="#aurigin.client.v1.Verdict">Verdict</a></td>
+                  <td>repeated</td>
+                  <td><p>Optional per-window detail — one entry per window the
+consumers scored, in stream order. Servers MAY truncate the
+list for very long files (the truncation limit is a server
+policy; clients that need the full list should stream via
+`Stream` instead). Empty when the caller opts out (via a
+future `include_per_window: false` field on VerifyRequest). </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+
+      
+        <h3 id="aurigin.client.v1.Notification.NotificationType">Notification.NotificationType</h3>
+        <p>Kind of notification. Extension policy same as SessionType —</p><p>additive-only, new values at the tail with the next unused</p><p>number. Receivers MUST accept unknown values by falling back</p><p>to `type_raw` (unpopulated today; reserve field number 4 for</p><p>when we need it).</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Name</td><td>Number</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>NOTIFICATION_TYPE_UNSPECIFIED</td>
+                <td>0</td>
+                <td><p>Zero-value sentinel — receivers treat as &#34;notification type
+unknown&#34;, fall back to `message` for display.</p></td>
+              </tr>
+            
+              <tr>
+                <td>NOTIFICATION_TYPE_WARNING</td>
+                <td>1</td>
+                <td><p>Non-fatal warning — model boundary reached, degraded input
+detected, session approaching an operational limit. Session
+continues.</p></td>
+              </tr>
+            
+              <tr>
+                <td>NOTIFICATION_TYPE_INFO</td>
+                <td>2</td>
+                <td><p>Informational — session lifecycle signal (session opened
+downstream on a bus consumer, recording started, model
+version rolled), no action required.</p></td>
+              </tr>
+            
+              <tr>
+                <td>NOTIFICATION_TYPE_ACTION_FIRED</td>
+                <td>3</td>
+                <td><p>The tenant&#39;s action-rule wire fired — e.g. a `play_file`
+action pushed a warning audio file into the call after a
+spoofed verdict. Attributes carry `rule_name` and outcome.</p></td>
+              </tr>
+            
+              <tr>
+                <td>NOTIFICATION_TYPE_QUOTA_WARN</td>
+                <td>4</td>
+                <td><p>Session is approaching a tenant quota (per-minute analysis
+limit, monthly usage cap). Attributes carry `quota_pct_used`
+and `quota_name`. Distinct from a hard cap failure — a hard
+cap aborts the session with RESOURCE_EXHAUSTED rather than
+firing a notification.</p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+      
+
+      
+
+      
+        <h3 id="aurigin.client.v1.AudioVerification">AudioVerification</h3>
+        <p>AudioVerification — the single public entry point Aurigin clients use</p><p>to run verification (deepfake, and eventually speaker-ID / PII / other</p><p>consumers) on their own audio. The orchestrator terminates this API and</p><p>dispatches to whichever consumers the tenant configuration selects; the</p><p>client says "verify this audio", not "call the deepfake service" — that</p><p>decoupling is the wall between the public API and the internal consumer</p><p>topology.</p><p>Wire is gRPC over host:port + TLS (never `wss://`). The three</p><p>first-party Aurigin SDKs — macOS SDK (Swift · SwiftPM · CoreAudio</p><p>capture), Windows SDK (.NET 8 · NuGet · WASAPI capture), TypeScript</p><p>SDK (Node.js · npm · consumed by electronjs-app main-process) — all</p><p>wrap this proto's generated code with per-platform capture + auth +</p><p>reconnect. Developer API-key streaming clients also target this same</p><p>service; file-service uses it as a trusted proxy for its REST upload</p><p>endpoint.</p><p>The Chrome plugin ingress speaks a WS mirror of the Stream RPC's</p><p>message shape (JSON-encoded), because gRPC-Web does not support</p><p>client-streaming. That mirror is orchestrator-side plumbing, not a</p><p>second proto — same session semantics, same message shape, different</p><p>framing.</p><p>See docs/transport-protocol/README.md § "Internal ingress" and</p><p>docs/transport-protocol/03-proto-shapes.md § "aurigin/client/v1/"</p><p>in platform-backend-services for the design rationale.</p><p>Session lifecycle (streaming):</p><p>1. Client sends CreateSessionRequest with optional ClientSessionConfig.</p><p>2. Server responds with CreateSessionResponse containing session_id.</p><p>3. Client streams aurigin.media.v1.AudioFrame messages continuously.</p><p>4. Server emits Verdict / EmbeddingVerdict / Notification messages</p><p>as each per-window consumer produces output. `consumer_name`</p><p>lets the client filter by consumer while keeping one stream.</p><p>5. On stream end, server emits a FinalResult with per-consumer</p><p>aggregate + total_audio_ms accounting.</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Method Name</td><td>Request Type</td><td>Response Type</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>Stream</td>
+                <td><a href="#aurigin.client.v1.StreamRequest">StreamRequest</a> stream</td>
+                <td><a href="#aurigin.client.v1.StreamResponse">StreamResponse</a> stream</td>
+                <td><p>Bidirectional streaming — audio in, verdicts out. Session-open
+handshake and per-frame audio share the request stream via the
+StreamRequest oneof (matches DetectDeepfake / ExtractFingerprint
+shape). Terminal FinalResult lands on the response stream just
+before the server half-closes.
+
+Used by: macOS SDK, Windows SDK, TypeScript SDK (and any consumer
+of them — Electron main-process, Node CLIs, TypeScript backends),
+Chrome plugin (JSON mirror), developer API-key streaming clients,
+and file-service as a trusted proxy for streaming file uploads.</p></td>
+              </tr>
+            
+              <tr>
+                <td>Verify</td>
+                <td><a href="#aurigin.client.v1.VerifyRequest">VerifyRequest</a></td>
+                <td><a href="#aurigin.client.v1.VerifyResponse">VerifyResponse</a></td>
+                <td><p>Unary file verification — one whole audio blob in, aggregated
+FinalResult &#43; optional per-window verdicts out. Callers can pass
+audio inline (small files, server enforces a size limit) or as a
+blob URI the server can already read (`s3://`, `minio://`, or a
+presigned HTTPS GET). The REST `POST /v1/files` endpoint on
+file-service is a JSON encoding of this same shape — same handler
+underneath, same VerifyResponse.</p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+
+        
+    
+      
+      <div class="file-heading">
+        <h2 id="aurigin/common/v1/result.proto">aurigin/common/v1/result.proto</h2><a href="#title">Top</a>
+      </div>
+      <p></p>
+
+      
+
+      
+        <h3 id="aurigin.common.v1.ResultLabel">ResultLabel</h3>
+        <p>Terminal classification label a per-window or aggregate verdict</p><p>carries. Mirrors the string values the deepfake service returns</p><p>today one-for-one so translation is a lookup, not a mapping.</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Name</td><td>Number</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>RESULT_LABEL_UNSPECIFIED</td>
+                <td>0</td>
+                <td><p>Zero-value sentinel. Producer either doesn&#39;t know the label yet
+(mid-stream, no window complete) or doesn&#39;t map to a canonical
+value — receivers should treat as &#34;not classified&#34; and fall back
+to `label_raw` if present.</p></td>
+              </tr>
+            
+              <tr>
+                <td>RESULT_LABEL_BONAFIDE</td>
+                <td>1</td>
+                <td><p>Voice determined authentic — no deepfake signatures detected
+above the model&#39;s threshold. This is the pass verdict.</p></td>
+              </tr>
+            
+              <tr>
+                <td>RESULT_LABEL_SPOOFED</td>
+                <td>2</td>
+                <td><p>Voice determined synthetic — deepfake signatures detected across
+the analysed window with confidence above the model&#39;s threshold.
+The default action-rule wire in orchestrator&#39;s consumers.yaml
+triggers on this label (and PARTIALLY_SPOOFED).</p></td>
+              </tr>
+            
+              <tr>
+                <td>RESULT_LABEL_PARTIALLY_SPOOFED</td>
+                <td>3</td>
+                <td><p>Portion of the window is synthetic — model detected a mix of
+authentic and synthetic speech in the same analysis window (e.g.
+a spoofed segment spliced into a live call). Same action-rule
+treatment as SPOOFED by default.</p></td>
+              </tr>
+            
+              <tr>
+                <td>RESULT_LABEL_SILENCE</td>
+                <td>4</td>
+                <td><p>VAD (voice-activity detection) gated the window — insufficient
+speech content to run the model reliably. Not a failure; the
+stream is still healthy. Callers typically skip these when
+computing aggregate scores.</p></td>
+              </tr>
+            
+              <tr>
+                <td>RESULT_LABEL_ERROR</td>
+                <td>5</td>
+                <td><p>Model or inference-path failure on this window — server encountered
+an error scoring the audio (bad codec conversion, GPU OOM, timeout,
+etc.). Distinct from UNKNOWN: ERROR means &#34;we tried and failed&#34;,
+UNKNOWN means &#34;we can&#39;t classify this input into any label&#34;.</p></td>
+              </tr>
+            
+              <tr>
+                <td>RESULT_LABEL_UNKNOWN</td>
+                <td>6</td>
+                <td><p>Model returned a label outside the known set (e.g. a new class
+added on the server that predates the client&#39;s enum). Callers
+should also read `label_raw` on the enclosing message to recover
+the original string. Providers of new labels: prefer bumping the
+enum over relying on UNKNOWN.</p></td>
+              </tr>
+            
+              <tr>
+                <td>RESULT_LABEL_REPLAY_GENUINE</td>
+                <td>7</td>
+                <td><p>Replay-detection consumer verdicts (aurigin.replay_detection.v1) —
+wave-form-level replay of a genuine recording, not a synthetic
+voice. Semantically distinct from SPOOFED (which means &#34;generated
+by a voice model&#34;) — a replayed real voice IS bonafide-source but
+is being presented in a session it wasn&#39;t captured for. Kept as
+separate enum values so downstream sinks &#43; action rules can treat
+them independently.
+
+Producer: `aurigin/replay_detector` (halo-3 onward). Labels on
+the wire come out of ReplayAudioClassification.py: 0 = &#34;genuine&#34;,
+1 = &#34;replay&#34;. Map to these enum values respectively.</p></td>
+              </tr>
+            
+              <tr>
+                <td>RESULT_LABEL_REPLAY_REPLAY</td>
+                <td>8</td>
+                <td><p></p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+      
+
+      
+
+      
+    
+      
+      <div class="file-heading">
+        <h2 id="aurigin/common/v1/session.proto">aurigin/common/v1/session.proto</h2><a href="#title">Top</a>
+      </div>
+      <p></p>
+
+      
+        <h3 id="aurigin.common.v1.Principal">Principal</h3>
+        <p>Identity + tenant attribution for the caller of a session. Carried</p><p>ONCE at session open (via gRPC metadata for streams, in the event</p><p>envelope for pub/sub messages) — never per-frame — matching the</p><p>RequestContext propagation model in platform-backend-services'</p><p>_common/aurigin_core/context.py.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>tenant_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Tenant this session belongs to. Required. Populated by
+auth-service /verify from either the user&#39;s JWT claims or the API
+key&#39;s tenant binding. Downstream services MUST filter by
+tenant_id at every persistence boundary — this is the primary
+multi-tenancy invariant. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>user_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td>optional</td>
+                  <td><p>User id when caller_type = USER (auth-service-issued JWT). Absent
+for SERVICE and CLIENT callers. When populated, matches the
+`sub` claim on the verified JWT. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>api_key_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td>optional</td>
+                  <td><p>API key id when caller_type = CLIENT. Absent for USER and SERVICE
+callers. Uniquely identifies the developer-facing key so audit
+logs can attribute every request without exposing the secret
+itself. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>caller_type</td>
+                  <td><a href="#aurigin.common.v1.Principal.CallerType">Principal.CallerType</a></td>
+                  <td></td>
+                  <td><p>Caller-type classifier, mirrors RequestContext.caller_type in
+aurigin_core.context. Populated by auth-service /verify based on
+which credential validated (JWT → USER, mTLS trusted-proxy → SERVICE,
+API key → CLIENT). Receivers filter authorisation policies on
+this axis. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>scopes</td>
+                  <td><a href="#string">string</a></td>
+                  <td>repeated</td>
+                  <td><p>Authorisation scopes granted to this caller. Populated by
+auth-service from the JWT `scope` claim or the API key&#39;s stored
+scope list. Empty when the caller has no explicit scopes (a
+trusted-proxy SERVICE, for example, is trusted for everything
+its runtime allows and does not carry scopes here). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>source</td>
+                  <td><a href="#string">string</a></td>
+                  <td>optional</td>
+                  <td><p>Ingress source that opened this session. String rather than enum
+because sources are extensible — one is added per new ingress
+adapter. Canonical values today:
+  &#34;nice&#34;, &#34;genesys&#34;, &#34;teams-media-proxy&#34;,
+  &#34;freeswitch-audio-fork&#34;, &#34;siprec&#34;,
+  &#34;freepbx-tap&#34;,
+  &#34;macos-sdk&#34;, &#34;windows-sdk&#34;, &#34;typescript-sdk&#34;, &#34;chrome-plugin&#34;,
+  &#34;api-stream&#34;, &#34;file-verify&#34;.
+Receivers MUST accept unknown strings rather than reject —
+forward-compat with future adapters. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+
+      
+        <h3 id="aurigin.common.v1.Principal.CallerType">Principal.CallerType</h3>
+        <p>Classifier that reflects HOW the caller was authenticated. Drives</p><p>per-type policy (rate-limits differ between USER agent sessions</p><p>and CLIENT developer streams, for example).</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Name</td><td>Number</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>CALLER_TYPE_UNSPECIFIED</td>
+                <td>0</td>
+                <td><p>Zero-value sentinel. Never a valid runtime type — receivers
+MUST reject a Principal with UNSPECIFIED caller_type. Emitters
+MUST set one of the explicit values below.</p></td>
+              </tr>
+            
+              <tr>
+                <td>CALLER_TYPE_USER</td>
+                <td>1</td>
+                <td><p>Interactive user session — auth-service issued the caller a JWT
+via the OIDC login flow. `user_id` is populated with the JWT
+`sub` claim.</p></td>
+              </tr>
+            
+              <tr>
+                <td>CALLER_TYPE_SERVICE</td>
+                <td>2</td>
+                <td><p>Trusted-proxy service call — the caller is an Aurigin service
+acting on behalf of an upstream principal (teams-media-proxy
+forwarding Teams participant identity to orchestrator;
+file-service forwarding a user&#39;s file-verify request). Trust
+model is mTLS in-cluster &#43; service identity via SPIFFE-style
+certificate CN. `user_id` reflects the upstream principal the
+service is acting for.</p></td>
+              </tr>
+            
+              <tr>
+                <td>CALLER_TYPE_CLIENT</td>
+                <td>3</td>
+                <td><p>Developer API-key session — auth-service validated an API key
+in the `Authorization: Bearer sk_…` gRPC metadata (or HTTP
+header for REST). `api_key_id` identifies the key; `user_id`
+is absent (API keys are tenant-scoped, not user-scoped).</p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+      
+        <h3 id="aurigin.common.v1.SessionType">SessionType</h3>
+        <p>Kind of session an Aurigin client has opened. Drives the orchestrator's</p><p>action-rule scoping (`when: { session_types: […] }` in consumers.yaml)</p><p>and is stamped on every event on the pub/sub bus so downstream sinks</p><p>can filter by session shape without decoding the payload.</p><p>Extension policy: add new values at the tail with the next unused</p><p>number. Never re-use retired numbers; deprecated values keep their</p><p>slot with `[deprecated = true]` and a removal-version comment.</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Name</td><td>Number</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>SESSION_TYPE_UNSPECIFIED</td>
+                <td>0</td>
+                <td><p>Zero-value sentinel. Receivers MUST treat as &#34;session type not
+stamped by producer&#34; — do NOT map to a default. Emitters MUST set
+one of the explicit values below.</p></td>
+              </tr>
+            
+              <tr>
+                <td>SESSION_TYPE_LIVE_CALL</td>
+                <td>1</td>
+                <td><p>Live phone call over the telco stack — FreeSWITCH mod_audio_fork,
+SIPREC bridge, NICE CXone Agent Assist, Genesys AudioHook. Every
+ingress that arrives via the orchestrator&#39;s `/audio/{external_id}`
+or `/ingress/nice|genesys/*` routes carries this type.</p></td>
+              </tr>
+            
+              <tr>
+                <td>SESSION_TYPE_LIVE_MEETING</td>
+                <td>2</td>
+                <td><p>Live conferencing session — Microsoft Teams via the teams-media-proxy
+bot, and any future Zoom-like integration that terminates SDK
+media in an Aurigin-owned proxy before gRPC-forwarding to the
+orchestrator.</p></td>
+              </tr>
+            
+              <tr>
+                <td>SESSION_TYPE_USER_STREAM</td>
+                <td>3</td>
+                <td><p>Native user-facing stream from a first-party Aurigin SDK — macOS
+SDK (Swift · CoreAudio), Windows SDK (.NET 8 · WASAPI), TypeScript
+SDK (Node.js · consumed by electronjs-app), Chrome plugin (WS
+mirror because gRPC-Web can&#39;t client-stream). Distinguished from
+API_STREAM by the caller-type: USER (auth-service-issued JWT) vs
+CLIENT (developer API key).</p></td>
+              </tr>
+            
+              <tr>
+                <td>SESSION_TYPE_API_STREAM</td>
+                <td>4</td>
+                <td><p>Developer API-key streaming client — same `AudioVerification.Stream`
+RPC, different auth path (API key in gRPC metadata → auth-service
+returns `caller_type=client`). Split from USER_STREAM so tenant
+policy &#43; quota &#43; rate-limits can differ per session shape.</p></td>
+              </tr>
+            
+              <tr>
+                <td>SESSION_TYPE_FILE_VERIFY</td>
+                <td>5</td>
+                <td><p>File-upload batch verification (`AudioVerification.Verify` unary
+RPC, or the REST `POST /v1/files` alias on file-service). Not a
+&#34;live&#34; session in the streaming sense — one request, one response
+per file — but tracked as a session so verdicts flow through the
+same consumer &#43; event-bus pipeline as streaming ingress.</p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+      
+
+      
+
+      
+    
+      
+      <div class="file-heading">
+        <h2 id="aurigin/deepfake_detection/v1/deepfake_detection.proto">aurigin/deepfake_detection/v1/deepfake_detection.proto</h2><a href="#title">Top</a>
+      </div>
+      <p></p>
+
+      
+        <h3 id="aurigin.deepfake_detection.v1.AnalysisResult">AnalysisResult</h3>
+        <p>Emitted each time a window of audio has been analyzed.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>audio_offset_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Audio offset from stream start (ms) - start of analyzed segment. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>duration_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Duration of the analyzed segment (ms). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>score</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Deepfake probability score [0-1]: 0.0 = fully bonafide, 1.0 = fully spoofed. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>label</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Human-readable classification. Decision values: &#34;bonafide&#34;, &#34;spoofed&#34;,
+&#34;partially_spoofed&#34;. Sentinel values (emitted when no decision was made):
+  - &#34;silence&#34;: the VAD gate suppressed inference because the window was
+    classified non-speech. `score` is 0.0 and `confidence` carries the
+    silence fraction (≈silence_pct/100) so clients can render gradations.
+  - &#34;error&#34;:   per-window inference failed; treat as non-actionable.
+Clients should accept and forward unknown label strings rather than
+failing — new sentinel values may be added without a wire break. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>confidence</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Model confidence in this classification [0-1]. For &#34;silence&#34; sentinels
+this carries the VAD silence fraction; for &#34;error&#34; sentinels this is 0.0. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>silence_pct</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>VAD-measured silence fraction for THIS window, in percent [0, 100].
+Populated on every AnalysisResult regardless of label — useful even on
+&#34;bonafide&#34; / &#34;spoofed&#34; windows for downstream silence-ratio dashboards.
+Previously silence_pct was only inferable from `confidence` when
+label == &#34;silence&#34; (hacky and lossy); keep that behaviour backward-
+compat and surface the authoritative value here. 0.0 is a legitimate
+reading (no silence detected), not &#34;unknown&#34;. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.deepfake_detection.v1.CreateSessionRequest">CreateSessionRequest</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>config</td>
+                  <td><a href="#aurigin.deepfake_detection.v1.DetectionConfig">DetectionConfig</a></td>
+                  <td>optional</td>
+                  <td><p>Optional session configuration; server applies defaults for unset fields. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.deepfake_detection.v1.CreateSessionResponse">CreateSessionResponse</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>session_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Unique identifier for this session. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>model_name</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Human-readable model name the server loaded for this session —
+the fine-tuned release tag (`apollo-5-1`, `wavlm-v3`, …) that
+operators grep for in logs &#43; dashboards. Stable across identical
+weights; distinct from `model_version` which carries the
+specific checkpoint revision.
+Empty string when the server hasn&#39;t configured a model name
+(older deploys, dev builds). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>model_version</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Specific checkpoint revision loaded — git SHA / HF revision hash
+(`deadbeefcafe…`). Change here means a different weights file
+even if `model_name` stayed the same.
+Empty string when the server hasn&#39;t configured one. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.deepfake_detection.v1.DetectDeepfakeRequest">DetectDeepfakeRequest</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>create_session_request</td>
+                  <td><a href="#aurigin.deepfake_detection.v1.CreateSessionRequest">CreateSessionRequest</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>audio</td>
+                  <td><a href="#twilio.tme.extensions.common.v1.AudioBuffer">twilio.tme.extensions.common.v1.AudioBuffer</a></td>
+                  <td></td>
+                  <td><p><strong>Deprecated.</strong> DEPRECATED as of 0.3.0 — use `audio_frame` instead. Kept so
+existing consumers of aurigin-protos 0.2.x continue to work
+during the migration window. Scheduled for removal in 0.4.0 </p></td>
+                </tr>
+              
+                <tr>
+                  <td>audio_frame</td>
+                  <td><a href="#aurigin.media.v1.AudioFrame">aurigin.media.v1.AudioFrame</a></td>
+                  <td></td>
+                  <td><p>Aurigin-native self-describing audio frame — codec &#43; sample rate
+&#43; channels ride on the message so no session-open coordination
+is needed. New clients should populate this field; the deepfake
+service accepts either shape. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+            
+            
+            <h4>Fields with deprecated option</h4>
+            <table>
+              <thead>
+                <tr>
+                  <td>Name</td>
+                  <td>Option</td>
+                </tr>
+              </thead>
+              <tbody>
+              
+                <tr>
+                  <td>audio</td>
+                  <td><p>true</p></td>
+                </tr>
+              
+              </tbody>
+            </table>
+            
+          
+
+        
+      
+        <h3 id="aurigin.deepfake_detection.v1.DetectDeepfakeResponse">DetectDeepfakeResponse</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>create_session_response</td>
+                  <td><a href="#aurigin.deepfake_detection.v1.CreateSessionResponse">CreateSessionResponse</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>analysis_result</td>
+                  <td><a href="#aurigin.deepfake_detection.v1.AnalysisResult">AnalysisResult</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>final_result</td>
+                  <td><a href="#aurigin.deepfake_detection.v1.FinalResult">FinalResult</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.deepfake_detection.v1.DetectionConfig">DetectionConfig</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>analysis_interval_s</td>
+                  <td><a href="#float">float</a></td>
+                  <td>optional</td>
+                  <td><p>How many seconds of audio to accumulate before running analysis (default: 5.0). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>model_version</td>
+                  <td><a href="#string">string</a></td>
+                  <td>optional</td>
+                  <td><p>Model version to use, e.g. &#34;stable&#34; or &#34;dev-v4&#34; (default: server default). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>vad_mode</td>
+                  <td><a href="#aurigin.deepfake_detection.v1.VadMode">VadMode</a></td>
+                  <td>optional</td>
+                  <td><p>Per-session VAD (voice-activity detection) gate. Unspecified = follow
+server default (typically VAD_MODE_ON — silence windows skip inference,
+saves GPU on hold-music / dead-air). Set VAD_MODE_OFF to force the
+model to score every window regardless of speech content — useful for
+offline batch scans of speech-heavy audio where the VAD&#39;s CPU cost
+outweighs its silence-skip savings, and for benchmark runs that need
+a stable model-only inference floor. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>vad_silence_threshold_pct</td>
+                  <td><a href="#float">float</a></td>
+                  <td>optional</td>
+                  <td><p>Per-session VAD silence-skip threshold, in percent [0, 100]. A window
+is skipped (label=&#34;silence&#34;) if its detected silence fraction meets or
+exceeds this value. Only meaningful when vad_mode is unset or ON.
+Unspecified = follow server env default (SILENCE_THRESHOLD_PCT, typically 80).
+Lowering skips more windows (faster, risks missing short speech
+utterances — accuracy trade-off); raising analyses more content
+(slower, no accuracy loss). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>tail_strategy</td>
+                  <td><a href="#aurigin.deepfake_detection.v1.TailStrategy">TailStrategy</a></td>
+                  <td>optional</td>
+                  <td><p>Per-session policy for the sub-window residual at stream end.
+Unspecified = follow server env default (TAIL_STRATEGY, typically DROP).
+  DROP     — residual silently skipped. Accuracy-first: a 5-s-trained
+             model can misfire on a 1-2s partial window. Recommended
+             for offline file scans.
+  EXTEND   — fold residual into the prior window (its duration_ms
+             grows). Coverage-first, no extra inference. Recommended
+             for live calls where every second matters.
+  RECOMPUTE — slide last window back to end-of-stream so it stays
+             exactly analysis_interval_s long. HTTP /predict parity;
+             one extra inference per session. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>min_analysis_duration_s</td>
+                  <td><a href="#float">float</a></td>
+                  <td>optional</td>
+                  <td><p>Per-session floor on residual duration eligible for its own inference,
+in seconds. Interacts with tail_strategy: residuals shorter than this
+are handled per-strategy rather than scored directly. Unspecified =
+follow server env default (MIN_ANALYSIS_DURATION_S, typically 1.0).
+The wav2vec2 feature extractor&#39;s kernel-size-3 conv needs at least
+~1 s of audio to produce enough feature frames; setting this lower
+will break inference on short residuals. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.deepfake_detection.v1.FinalResult">FinalResult</h3>
+        <p>Emitted once when the client closes the stream.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>total_audio_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Total audio received (ms). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>overall_score</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Average deepfake score across all analyzed windows [0-1]. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>overall_label</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Aggregate classification: &#34;bonafide&#34;, &#34;spoofed&#34;, or &#34;partially_spoofed&#34;. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>analysis_count</td>
+                  <td><a href="#int32">int32</a></td>
+                  <td></td>
+                  <td><p>Number of analysis windows completed. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>wall_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Processing wall-time for this session (ms). The sum of time the
+deepfake model spent on inference &#43; pre/post-processing, measured
+server-side. Decoupled from audio duration — useful for GPU capacity
+planning &#43; per-call cost accounting &#43; the SRE &#34;is this box falling
+behind?&#34; alert. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>rtf</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Real-time factor: wall_ms / total_audio_ms. Server-computed so
+clients don&#39;t need to divide (and don&#39;t accidentally divide by zero
+on zero-audio sessions — server emits 0 in that edge case). &lt; 1.0
+means faster than real-time (model has headroom); ≥ 1.0 means the
+box is behind real-time on this call. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>model_version</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Which model checkpoint produced the verdicts in this session.
+Opaque to the client; matches whatever the server rolls out
+(semver &#34;0.4.1&#34;, git-sha &#34;deadbee&#34;, MODEL_HUB_REVISION tag, …).
+Correlation key for A/B rollouts &#43; &#34;why did this call score
+differently last week&#34; post-mortems. Empty when the server didn&#39;t
+declare a version. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>silence_pct_mean</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Mean VAD silence fraction across all analysed windows [0, 100].
+The server-side authoritative aggregate — cheaper and less lossy
+than a running mean on the caller. Reflects windows that were
+actually scored (not VAD-gated silence sentinels) when
+vad_mode = ON. 0.0 is &#34;no silence observed&#34;, not &#34;unknown&#34;. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+
+      
+        <h3 id="aurigin.deepfake_detection.v1.TailStrategy">TailStrategy</h3>
+        <p>Per-session tail strategy. Mirrors deepfake-service's server-side</p><p>TailStrategy enum. UNSPECIFIED = follow the server's env-driven default</p><p>(TAIL_STRATEGY, typically DROP).</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Name</td><td>Number</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>TAIL_STRATEGY_UNSPECIFIED</td>
+                <td>0</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>TAIL_STRATEGY_DROP</td>
+                <td>1</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>TAIL_STRATEGY_EXTEND</td>
+                <td>2</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>TAIL_STRATEGY_RECOMPUTE</td>
+                <td>3</td>
+                <td><p></p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+      
+        <h3 id="aurigin.deepfake_detection.v1.VadMode">VadMode</h3>
+        <p>VAD (voice-activity detection) per-session mode. Controls whether the</p><p>silence-gate runs before model inference. UNSPECIFIED = follow the</p><p>server's env-driven default (VAD_ENABLED); ON / OFF override it.</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Name</td><td>Number</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>VAD_MODE_UNSPECIFIED</td>
+                <td>0</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>VAD_MODE_ON</td>
+                <td>1</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>VAD_MODE_OFF</td>
+                <td>2</td>
+                <td><p></p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+      
+
+      
+
+      
+        <h3 id="aurigin.deepfake_detection.v1.DeepfakeDetection">DeepfakeDetection</h3>
+        <p>Deepfake Detection Service.</p><p>Analyzes a continuous audio stream and emits deepfake detection results.</p><p>Audio is sent as raw PCM buffers and analyzed in rolling windows.</p><p>Session Lifecycle:</p><p>1. Client sends CreateSessionRequest with optional configuration</p><p>2. Server responds with CreateSessionResponse containing session_id</p><p>3. Client streams AudioBuffer messages continuously</p><p>4. Server emits AnalysisResult events as each window is analyzed</p><p>5. On stream end, server emits a FinalResult with aggregate stats</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Method Name</td><td>Request Type</td><td>Response Type</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>DetectDeepfake</td>
+                <td><a href="#aurigin.deepfake_detection.v1.DetectDeepfakeRequest">DetectDeepfakeRequest</a> stream</td>
+                <td><a href="#aurigin.deepfake_detection.v1.DetectDeepfakeResponse">DetectDeepfakeResponse</a> stream</td>
+                <td><p>Bidirectional streaming RPC for real-time deepfake detection.</p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+
+        
+    
+      
+      <div class="file-heading">
+        <h2 id="aurigin/fingerprint/v1/fingerprint.proto">aurigin/fingerprint/v1/fingerprint.proto</h2><a href="#title">Top</a>
+      </div>
+      <p></p>
+
+      
+        <h3 id="aurigin.fingerprint.v1.CreateSessionRequest">CreateSessionRequest</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>config</td>
+                  <td><a href="#aurigin.fingerprint.v1.FingerprintConfig">FingerprintConfig</a></td>
+                  <td>optional</td>
+                  <td><p>Optional session configuration; server applies defaults for unset fields. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.fingerprint.v1.CreateSessionResponse">CreateSessionResponse</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>session_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Unique identifier for this session. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>model_name</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Human-readable model name the server loaded for this session —
+the backbone / fine-tune release tag (e.g. `wavlm-base-plus`,
+`wavlm-aurigin-v3`). Empty string when the server hasn&#39;t
+configured one. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>model_version</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Specific checkpoint revision loaded (git SHA / HF revision hash).
+Empty string when the server hasn&#39;t configured one. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.fingerprint.v1.EmbeddingResult">EmbeddingResult</h3>
+        <p>Emitted each time a window of audio has been fingerprinted.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>audio_offset_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Audio offset from stream start (ms) — start of the analysed segment. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>duration_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Duration of the analysed segment (ms). Normally equals the server&#39;s
+MODEL_WINDOW_SECONDS * 1000; may differ for the last window under
+tail_strategy = EXTEND or = RECOMPUTE. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>embedding</td>
+                  <td><a href="#bytes">bytes</a></td>
+                  <td></td>
+                  <td><p>Raw float32 little-endian embedding bytes. 768 * 4 = 3072 bytes for
+the WavLM-base-plus backbone; a future backbone swap could change
+the length — clients should read the `dim` field rather than
+hardcoding. Canonical binary form: callers can base64 / hash /
+Qdrant-insert directly. L2-normalised on the server so a dot product
+is a cosine similarity. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>fingerprint_code</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>sha256(embedding)[:16] hex. Matches backend-app&#39;s `fingerprint_code`
+shape one-for-one so migration is straight-across. Short human-
+friendly ID for log grep, Qdrant point IDs when the caller doesn&#39;t
+want to compute its own hash. Purely a derived convenience — the
+canonical value is `embedding`. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>dim</td>
+                  <td><a href="#int32">int32</a></td>
+                  <td></td>
+                  <td><p>Embedding dimension (768 for WavLM-base-plus). Lets clients validate
+without hardcoding, and survives a future backbone swap without a
+silent length mismatch. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.fingerprint.v1.ExtractFingerprintRequest">ExtractFingerprintRequest</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>create_session_request</td>
+                  <td><a href="#aurigin.fingerprint.v1.CreateSessionRequest">CreateSessionRequest</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>audio_frame</td>
+                  <td><a href="#aurigin.media.v1.AudioFrame">aurigin.media.v1.AudioFrame</a></td>
+                  <td></td>
+                  <td><p>Aurigin-native self-describing audio frame — codec &#43; sample rate
+&#43; channels ride on the message so no session-open coordination
+is needed. This service accepts AudioFrame only (no legacy
+twilio.AudioBuffer fork — this is a new surface, no back-compat
+window to carry). </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.fingerprint.v1.ExtractFingerprintResponse">ExtractFingerprintResponse</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>create_session_response</td>
+                  <td><a href="#aurigin.fingerprint.v1.CreateSessionResponse">CreateSessionResponse</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>embedding_result</td>
+                  <td><a href="#aurigin.fingerprint.v1.EmbeddingResult">EmbeddingResult</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>final_result</td>
+                  <td><a href="#aurigin.fingerprint.v1.FinalResult">FinalResult</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.fingerprint.v1.FinalResult">FinalResult</h3>
+        <p>Emitted once when the client closes the stream. Purely observability:</p><p>"here's what the server actually computed" so orchestrator + audit +</p><p>dashboards can reason about drop-strategy skips without inferring</p><p>server-side windowing. No aggregated embedding, no similarity, no</p><p>verdict — those are caller-side composition.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>total_audio_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Total audio received on this stream (ms). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>embedding_count</td>
+                  <td><a href="#int32">int32</a></td>
+                  <td></td>
+                  <td><p>Number of EmbeddingResult events emitted. May be less than
+(total_audio_ms / window_ms) when residual windows were skipped
+per tail_strategy or fell below min_analysis_duration_s. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>wall_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Processing wall-time for this session (ms). Server-measured; sum
+of time the extractor spent on inference &#43; pre-processing across
+every window. Useful for GPU capacity planning, per-call cost
+accounting, and the &#34;is this box falling behind?&#34; alert. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>rtf</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Real-time factor: wall_ms / total_audio_ms. Server-computed so
+clients don&#39;t need to divide (and don&#39;t hit zero on zero-audio
+sessions — the server emits 0 in that edge case). &lt; 1.0 means
+faster than real-time (headroom); ≥ 1.0 means the box is behind
+real-time on this call. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>model_version</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Which model checkpoint produced the embeddings in this session.
+Opaque to the client — matches MODEL_HUB_REVISION for the current
+backbone (or whatever a future backbone swap declares).
+Correlation key for A/B rollouts and embedding-regression
+post-mortems. Empty when the server didn&#39;t declare a version.
+Note: no silence aggregate on this message — this consumer
+doesn&#39;t VAD-gate (see EmbeddingConfig). </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.fingerprint.v1.FingerprintConfig">FingerprintConfig</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>tail_strategy</td>
+                  <td><a href="#aurigin.fingerprint.v1.TailStrategy">TailStrategy</a></td>
+                  <td>optional</td>
+                  <td><p>Per-session policy for the sub-window residual at stream end.
+Unspecified = follow server env default (TAIL_STRATEGY, typically DROP).
+  DROP     — residual silently skipped. Recommended for offline file
+             scans — a short partial window produces a noisier
+             embedding that hurts cosine similarity precision.
+  EXTEND   — fold residual into the prior window (its duration_ms
+             grows). Coverage-first, no extra inference. Recommended
+             for live calls where every second matters.
+  RECOMPUTE — slide last window back to end-of-stream so it stays
+             exactly window_seconds long. Extra inference per session. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>min_analysis_duration_s</td>
+                  <td><a href="#float">float</a></td>
+                  <td>optional</td>
+                  <td><p>Per-session floor on residual duration eligible for its own
+inference, in seconds. Interacts with tail_strategy: residuals
+shorter than this are handled per-strategy rather than embedded
+directly. Unspecified = follow server env default
+(MIN_ANALYSIS_DURATION_S, typically 1.0). The WavLM backbone&#39;s
+feature extractor needs enough audio to produce stable pooled
+features; setting this lower can degrade embedding quality on
+short residuals. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+
+      
+        <h3 id="aurigin.fingerprint.v1.TailStrategy">TailStrategy</h3>
+        <p>Per-session tail strategy. Mirrors deepfake-service's TailStrategy so</p><p>operators learn one enum. UNSPECIFIED = follow the server's env-driven</p><p>default (TAIL_STRATEGY, typically DROP).</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Name</td><td>Number</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>TAIL_STRATEGY_UNSPECIFIED</td>
+                <td>0</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>TAIL_STRATEGY_DROP</td>
+                <td>1</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>TAIL_STRATEGY_EXTEND</td>
+                <td>2</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>TAIL_STRATEGY_RECOMPUTE</td>
+                <td>3</td>
+                <td><p></p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+      
+
+      
+
+      
+        <h3 id="aurigin.fingerprint.v1.Fingerprint">Fingerprint</h3>
+        <p>Fingerprint Service.</p><p>Extracts per-window content fingerprints (fine-tuned WavLM embeddings)</p><p>from a continuous audio stream. Each fixed-size window (5 s by default,</p><p>server-configured, matching the training config) produces one 768-d</p><p>L2-normalised float32 embedding.</p><p>The service is a pure compute step in the orchestrator's consumer</p><p>topology (same pattern as `aurigin.deepfake_detection.v1`): audio in →</p><p>embeddings out. Any downstream composition — cosine similarity vs a</p><p>reference, Qdrant lookup, registration centroids, verify verdicts —</p><p>lives in the caller (orchestrator / call-auth-service), not here.</p><p>Session lifecycle:</p><p>1. Client sends CreateSessionRequest with optional configuration.</p><p>2. Server responds with CreateSessionResponse containing session_id.</p><p>3. Client streams AudioFrame messages continuously.</p><p>4. Server emits EmbeddingResult events as each window is analysed.</p><p>5. On stream end, server emits a FinalResult with session accounting</p><p>(total_audio_ms, embedding_count). Deliberately NOT an aggregated</p><p>embedding or similarity — those are caller policy.</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Method Name</td><td>Request Type</td><td>Response Type</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>ExtractFingerprint</td>
+                <td><a href="#aurigin.fingerprint.v1.ExtractFingerprintRequest">ExtractFingerprintRequest</a> stream</td>
+                <td><a href="#aurigin.fingerprint.v1.ExtractFingerprintResponse">ExtractFingerprintResponse</a> stream</td>
+                <td><p>Bidirectional streaming RPC for real-time content fingerprinting.</p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+
+        
+    
+      
+      <div class="file-heading">
+        <h2 id="aurigin/media/v1/audio_frame.proto">aurigin/media/v1/audio_frame.proto</h2><a href="#title">Top</a>
+      </div>
+      <p></p>
+
+      
+        <h3 id="aurigin.media.v1.AudioFrame">AudioFrame</h3>
+        <p>Self-describing audio frame for Aurigin's media plane. Every field the</p><p>receiver needs to decode the payload rides on the message — no</p><p>out-of-band DetectionConfig coordination, no session-open codec</p><p>declaration. The codec may even change mid-stream (e.g. Teams SDP</p><p>renegotiation) without a wire break.</p><p>Introduced in 0.3.0 as the Aurigin-native replacement for the</p><p>Twilio-vendored `twilio.tme.extensions.common.v1.AudioBuffer` on the</p><p>deepfake-detection gRPC wire. Consumers should prefer this message for</p><p>new integrations; AudioBuffer stays valid for backwards compatibility</p><p>but is deprecated and scheduled for removal in 0.4.0.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>codec</td>
+                  <td><a href="#aurigin.media.v1.AudioCodec">AudioCodec</a></td>
+                  <td></td>
+                  <td><p>Wire codec of the `payload` bytes. Required. Receivers that see
+AUDIO_CODEC_UNSPECIFIED MUST reject with INVALID_ARGUMENT — the
+sentinel exists specifically to catch clients that forgot to set
+the field (proto3 injects the zero value on unset scalars, with no
+wire distinction from an explicit zero). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>sample_rate_hz</td>
+                  <td><a href="#uint32">uint32</a></td>
+                  <td></td>
+                  <td><p>Sample rate of the decoded audio in Hz. Typical values at the
+Aurigin edge: 8000 (telco / SIPREC / NICE / Genesys), 16000 (Teams
+via Media Bot host, FreeSWITCH mod_audio_fork), 48000 (WebRTC). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>channels</td>
+                  <td><a href="#uint32">uint32</a></td>
+                  <td></td>
+                  <td><p>Channel count of the decoded audio. Mono at every Aurigin edge
+today; the field is kept for headroom. Receivers that support only
+mono SHOULD mean-downmix multi-channel frames rather than reject. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>payload</td>
+                  <td><a href="#bytes">bytes</a></td>
+                  <td></td>
+                  <td><p>The audio bytes, encoded per `codec`. Length interpretation:
+  - S16LE / S16BE:  2 * samples * channels
+  - F32LE:        4 * samples * channels
+  - PCMU / PCMA:  1 * samples * channels
+  - OPUS:         opus-frame length (variable) </p></td>
+                </tr>
+              
+                <tr>
+                  <td>pts_ns</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td>optional</td>
+                  <td><p>Optional presentation timestamp in nanoseconds since stream start
+(or since epoch — receivers use it only for relative ordering /
+gap detection, not for absolute clock alignment). Populate when
+the ingress can (RTP-derived on SIPREC; wall time otherwise);
+absent means &#34;not tracked&#34;, not &#34;invalid&#34;. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>sequence</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td>optional</td>
+                  <td><p>Optional monotonic per-stream frame counter for gap detection.
+When present, receivers may compare `sequence` deltas to detect
+dropped frames. Absent means the ingress does not track sequence. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+
+      
+        <h3 id="aurigin.media.v1.AudioCodec">AudioCodec</h3>
+        <p>Wire codec of an AudioFrame.payload byte string. Grouped by family:</p><p>linear PCM signed integer (LE + BE), IEEE float, G.711 telco, then</p><p>reserved compressed codecs. New codecs should be added at the end</p><p>with the next unused number; do not reuse retired numbers.</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Name</td><td>Number</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>AUDIO_CODEC_UNSPECIFIED</td>
+                <td>0</td>
+                <td><p>Zero-value sentinel. proto3 requires enums to define a zero
+entry; we deliberately name it UNSPECIFIED (rather than aliasing a
+real codec to 0) so receivers can distinguish &#34;client forgot to
+set codec&#34; from &#34;client explicitly picked codec X&#34;. Never a valid
+runtime codec — receivers MUST reject with INVALID_ARGUMENT.</p></td>
+              </tr>
+            
+              <tr>
+                <td>AUDIO_CODEC_S16LE</td>
+                <td>1</td>
+                <td><p>16-bit signed linear PCM, little-endian. What gstreamer &#43; Twilio
+Media Streams emit; also what Teams Media Bot host and FreeSWITCH
+mod_audio_fork produce after their own decode. 2 bytes per sample.</p></td>
+              </tr>
+            
+              <tr>
+                <td>AUDIO_CODEC_S16BE</td>
+                <td>2</td>
+                <td><p>16-bit signed linear PCM, big-endian. Wire-compatible with IETF
+L16 (RFC 3551, media type `audio/L16`) — Genesys AudioHook&#39;s
+high-fidelity option. 2 bytes per sample.</p></td>
+              </tr>
+            
+              <tr>
+                <td>AUDIO_CODEC_S24LE</td>
+                <td>3</td>
+                <td><p>24-bit signed linear PCM, little-endian, packed 3-bytes-per-sample.
+Common in pro-audio and broadcast WAVs. Deepfake decodes via a
+vectorised numpy pad-to-int32 &#43; astype-to-float32 pass — single
+allocation, no per-sample Python.</p></td>
+              </tr>
+            
+              <tr>
+                <td>AUDIO_CODEC_S32LE</td>
+                <td>4</td>
+                <td><p>32-bit signed linear PCM, little-endian. Same wire width as F32LE
+but different interpretation (integer, not float). Deepfake decodes
+via a single vectorised numpy int32→float32 pass.</p></td>
+              </tr>
+            
+              <tr>
+                <td>AUDIO_CODEC_F32LE</td>
+                <td>5</td>
+                <td><p>32-bit IEEE-float PCM, little-endian, samples in [-1, &#43;1]. What
+`soundfile` / librosa export for high-precision recordings. 4
+bytes per sample.</p></td>
+              </tr>
+            
+              <tr>
+                <td>AUDIO_CODEC_PCMU</td>
+                <td>6</td>
+                <td><p>G.711 μ-law, 8-bit logarithmic companding. The telco default —
+NICE VoiceStream, Genesys AudioHook default, SIPREC PT=0 payload
+type. 1 byte per sample.</p></td>
+              </tr>
+            
+              <tr>
+                <td>AUDIO_CODEC_PCMA</td>
+                <td>7</td>
+                <td><p>G.711 A-law, 8-bit logarithmic companding. Telco variant used on
+European PSTN trunks and SIPREC PT=8 payload type. 1 byte per
+sample.</p></td>
+              </tr>
+            
+              <tr>
+                <td>AUDIO_CODEC_OPUS</td>
+                <td>8</td>
+                <td><p>Opus (RFC 6716), variable bitrate wideband codec. Reserved from
+0.3.0 so the enum value is stable for future clients; the
+decoder is not shipped in this wave. Receivers that don&#39;t yet
+implement Opus decoding MUST reject with UNIMPLEMENTED.</p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+      
+
+      
+
+      
+    
+      
+      <div class="file-heading">
+        <h2 id="aurigin/recording/v1/recording.proto">aurigin/recording/v1/recording.proto</h2><a href="#title">Top</a>
+      </div>
+      <p></p>
+
+      
+        <h3 id="aurigin.recording.v1.CreateSessionRequest">CreateSessionRequest</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>config</td>
+                  <td><a href="#aurigin.recording.v1.RecordingConfig">RecordingConfig</a></td>
+                  <td>optional</td>
+                  <td><p>Optional per-session configuration; server applies env defaults
+for unset fields. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.recording.v1.CreateSessionResponse">CreateSessionResponse</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>recording_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Durable identifier for this recording (`rec-&lt;32hex&gt;` today —
+matches the recorder&#39;s current id shape so logs &#43; call-service&#39;s
+`calls.recording_id` column don&#39;t change meaning). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>planned_blob_uri</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Informational — where the recorder PLANS to write the blob. The
+CANONICAL location comes back on RecordingComplete.blob_uri at
+close; the recorder may rotate / move / compress on the way.
+Shape depends on the storage backend configured server-side:
+`s3://…`, `minio://…`, `file:///…` — opaque to the orchestrator. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.recording.v1.RecordRequest">RecordRequest</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>create_session_request</td>
+                  <td><a href="#aurigin.recording.v1.CreateSessionRequest">CreateSessionRequest</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>audio_frame</td>
+                  <td><a href="#aurigin.media.v1.AudioFrame">aurigin.media.v1.AudioFrame</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.recording.v1.RecordResponse">RecordResponse</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>create_session_response</td>
+                  <td><a href="#aurigin.recording.v1.CreateSessionResponse">CreateSessionResponse</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>progress</td>
+                  <td><a href="#aurigin.recording.v1.RecordingProgress">RecordingProgress</a></td>
+                  <td></td>
+                  <td><p>Sparse, initially unused — reserved so a future deploy can wire
+periodic progress heartbeats (one every N seconds) without a
+wire break. Receivers MUST tolerate it being absent. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>complete</td>
+                  <td><a href="#aurigin.recording.v1.RecordingComplete">RecordingComplete</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.recording.v1.RecordingComplete">RecordingComplete</h3>
+        <p>Emitted once when the client closes the stream. Carries the</p><p>durable attribution + accounting the orchestrator forwards to</p><p>call-service as `recording_complete` + persists via `calls.recording_id`.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>recording_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Durable identifier — equal to CreateSessionResponse.recording_id,
+redeclared here so downstream consumers that only inspect the
+terminal message don&#39;t need to correlate against the open. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>blob_uri</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Canonical final location of the blob. May differ from
+CreateSessionResponse.planned_blob_uri if the recorder rotated /
+moved the file (e.g. compressed on close, uploaded to object
+storage from a staging dir). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>duration_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Total audio duration captured (ms). A mid-stream disconnect
+truncates this to what landed on the blob. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>bytes</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Final size of the blob, bytes. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>sha256</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Hex SHA-256 of the final blob bytes — carried for audit &#43; content
+integrity so downstream services can verify the blob they fetch
+matches what the recorder wrote. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>codec</td>
+                  <td><a href="#aurigin.media.v1.AudioCodec">aurigin.media.v1.AudioCodec</a></td>
+                  <td></td>
+                  <td><p>Codec of the audio inside the container. Mirrors the codec on the
+AudioFrame stream the orchestrator sent — the recorder doesn&#39;t
+transcode (that&#39;s a storage-side concern if it ever becomes one). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>sample_rate_hz</td>
+                  <td><a href="#uint32">uint32</a></td>
+                  <td></td>
+                  <td><p>Sample rate of the audio inside the container, Hz. Same
+provenance as `codec` — mirrors what rode on AudioFrame. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.recording.v1.RecordingConfig">RecordingConfig</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>container_format</td>
+                  <td><a href="#aurigin.recording.v1.ContainerFormat">ContainerFormat</a></td>
+                  <td>optional</td>
+                  <td><p>Output container. UNSPECIFIED = server env default
+(RECORDER_OUTPUT_FORMAT). WAV is lossless &#43; ubiquitous; FLAC is
+lossless &#43; ~50% smaller on speech; OPUS_OGG is lossy and NOT
+recommended as the primary archival format (downstream analyses
+would be codec-artefact-sensitive) — included for the &#34;transcript-
+only, keep storage small&#34; deploy variant. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>blob_key_hint</td>
+                  <td><a href="#string">string</a></td>
+                  <td>optional</td>
+                  <td><p>Blob key hint from the orchestrator — recorder MAY use it to
+namespace / dedupe / organise the stored blob (e.g. tenant-prefix
+the S3 key). The final URI always comes back in RecordingComplete;
+the orchestrator cannot assume the hint was honored verbatim. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>retention_days</td>
+                  <td><a href="#int32">int32</a></td>
+                  <td>optional</td>
+                  <td><p>Retention policy, in days. 0 = tenant default (recorder reads
+from server config). Positive = override for this one recording
+(e.g. a longer-than-default hold for a compliance capture). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>target_sample_rate_hz</td>
+                  <td><a href="#uint32">uint32</a></td>
+                  <td>optional</td>
+                  <td><p>Target sample rate for the written file, Hz. UNSPECIFIED (= 0)
+means &#34;stay close to the first AudioFrame&#39;s rate&#34; — recorder
+locks the first frame&#39;s rate as the file-header rate and
+resamples every subsequent frame to match (AudioFrame allows
+per-frame codec/rate swaps, but a WAV / FLAC / OGG header can&#39;t).
+Set explicitly when the caller needs a canonical rate across
+files (e.g. 16000 for downstream models trained at 16 kHz). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>target_codec</td>
+                  <td><a href="#aurigin.media.v1.AudioCodec">aurigin.media.v1.AudioCodec</a></td>
+                  <td>optional</td>
+                  <td><p>Target codec for the written file. UNSPECIFIED = &#34;stay close to
+the first AudioFrame&#39;s codec&#34; with these mappings:
+  S16LE / S16BE / S24LE / S32LE / F32LE → kept as-is
+  PCMU / PCMA                           → decoded to S16LE
+                                          (telephony codecs don&#39;t
+                                          round-trip cleanly through
+                                          containers; linear PCM is
+                                          the universal fallback)
+  OPUS                                  → decoded to S16LE
+Set explicitly when the caller wants a non-default container
+(e.g. F32LE for lossless float workflows). Recorder transcodes
+every incoming frame to the target before writing. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.recording.v1.RecordingProgress">RecordingProgress</h3>
+        <p>Sparse mid-stream progress heartbeat. Not emitted today; the field</p><p>is reserved on RecordResponse.response so a future deploy can wire</p><p>a "once every N seconds" heartbeat without wire-breaking existing</p><p>clients. Receivers MUST tolerate it being absent.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>bytes_written</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Bytes written to the blob so far. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>duration_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Audio duration received so far (ms). </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+
+      
+        <h3 id="aurigin.recording.v1.ContainerFormat">ContainerFormat</h3>
+        <p></p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Name</td><td>Number</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>CONTAINER_FORMAT_UNSPECIFIED</td>
+                <td>0</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>CONTAINER_FORMAT_WAV</td>
+                <td>1</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>CONTAINER_FORMAT_FLAC</td>
+                <td>2</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>CONTAINER_FORMAT_OPUS_OGG</td>
+                <td>3</td>
+                <td><p></p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+      
+
+      
+
+      
+        <h3 id="aurigin.recording.v1.Recording">Recording</h3>
+        <p>Recording Service.</p><p>Writes a per-call WAV / FLAC / OPUS_OGG file as audio arrives from</p><p>the orchestrator. Pure sink — no scoring, no classification. Pairs</p><p>with the other aurigin.*.v1 bidi services (deepfake_detection,</p><p>replay_detection, fingerprint) by sharing the AudioFrame wire +</p><p>CreateSessionRequest/Response + per-event terminal message shape,</p><p>so the orchestrator's consumer dispatch handles all four with one</p><p>code path (see platform-backend-services docs/transport-protocol/).</p><p>Design rationale — see docs/transport-protocol/03-proto-shapes.md</p><p>§ "aurigin/recording/v1/". Highlights:</p><p>- Storage location is chosen by the recorder, not the orchestrator;</p><p>fits the planned aurigin_core.storage abstraction (S3 / MinIO /</p><p>Azure Blob / Local — same one file-service will use).</p><p>- Recorder also emits a `recording.complete` event on the pub/sub</p><p>bus; the terminal RecordResponse here is the in-band signal to</p><p>the orchestrator, the bus event is the durable persistence path.</p><p>Session lifecycle:</p><p>1. Client sends CreateSessionRequest with optional RecordingConfig.</p><p>2. Server opens the output blob, responds with CreateSessionResponse</p><p>carrying recording_id + planned_blob_uri — orchestrator stamps</p><p>a `recording_started` event onto the bus at this point.</p><p>3. Client streams aurigin.media.v1.AudioFrame messages.</p><p>4. Server MAY emit sparse RecordingProgress messages (bytes +</p><p>duration counters) for long sessions — not required.</p><p>5. On client half-close, server flushes + closes the blob and</p><p>emits RecordingComplete with the final blob_uri, duration,</p><p>size, and sha256.</p><p>6. On I/O or recorder-internal errors, the stream aborts with a</p><p>standard gRPC status (INTERNAL / RESOURCE_EXHAUSTED / etc.)</p><p>and the orchestrator stamps `recording_failed` from the status</p><p>— no separate error message type on the wire.</p><p>Codec / rate transcoding contract:</p><p>AudioFrame allows per-frame codec + sample-rate swaps (Teams SDP</p><p>renegotiation, WebRTC codec change) but a WAV / FLAC / OGG header</p><p>locks one codec + rate at file open. The recorder reconciles by</p><p>PICKING ONE AT SESSION OPEN. Target selection, in priority order:</p><p>1. RecordingConfig.target_codec + target_sample_rate_hz if set</p><p>by the caller;</p><p>2. server env default (RECORDER_TARGET_CODEC /</p><p>RECORDER_TARGET_RATE) if configured;</p><p>3. First AudioFrame's codec + rate as fallback.</p><p>Per-frame handling after the target is locked:</p><p>- Frame codec + rate + channels EXACTLY match the target →</p><p>payload bytes are written to the blob UNCHANGED (fast path,</p><p>zero copy, bit-identical to what the orchestrator sent).</p><p>This is the common case — most calls stay on one codec for</p><p>their whole lifetime, so most recordings are byte-identical</p><p>pass-throughs with no transcode cost.</p><p>- Frame differs from the target → decode + resample + re-encode</p><p>to the target before writing. Server MUST log a WARN on</p><p>EACH CHANGE in (codec, rate, channels) relative to the last-</p><p>seen frame — not per-frame, not just the first mismatch.</p><p>Same cardinality + log shape as the gRPC verdict / replay /</p><p>embedding consumers already use (one WARN per transition),</p><p>so ops can grep one key across the fleet to spot codec</p><p>drift between what the ingress reported and what the sink</p><p>actually received. A session that goes A → B → A emits two</p><p>WARN lines; a session that stays on A emits zero.</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Method Name</td><td>Request Type</td><td>Response Type</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>Record</td>
+                <td><a href="#aurigin.recording.v1.RecordRequest">RecordRequest</a> stream</td>
+                <td><a href="#aurigin.recording.v1.RecordResponse">RecordResponse</a> stream</td>
+                <td><p>Bidirectional streaming RPC for real-time audio capture.</p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+
+        
+    
+      
+      <div class="file-heading">
+        <h2 id="aurigin/replay_detection/v1/replay_detection.proto">aurigin/replay_detection/v1/replay_detection.proto</h2><a href="#title">Top</a>
+      </div>
+      <p></p>
+
+      
+        <h3 id="aurigin.replay_detection.v1.AnalysisResult">AnalysisResult</h3>
+        <p>Emitted each time a window of audio has been analysed.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>audio_offset_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Audio offset from stream start (ms) — start of the analysed segment. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>duration_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Duration of the analysed segment (ms). Nominally 3000 (the trained
+window length); shorter for tail windows scored under the
+MIN_ANALYSIS_DURATION_S floor. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>score</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Replay probability score [0, 1]: 0.0 = certainly genuine,
+1.0 = certainly replay. Compare against
+ReplayConfig.decision_threshold (or server env default) to derive
+the categorical label. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>label</td>
+                  <td><a href="#aurigin.replay_detection.v1.ReplayLabel">ReplayLabel</a></td>
+                  <td></td>
+                  <td><p>Categorical classification of this window. Values map to the halo-3
+model output plus VAD/error sentinels:
+  REPLAY_LABEL_GENUINE     — score &lt; decision_threshold
+  REPLAY_LABEL_REPLAY      — score ≥ decision_threshold
+  REPLAY_LABEL_UNSPECIFIED — window not scored (VAD-gated OR
+                             inference error OR partial residual
+                             below MIN_ANALYSIS_DURATION_S)
+Clients should also read `label_raw` for the raw string the server
+emitted — future model revisions may return values outside this
+enum and receivers should forward `label_raw` unchanged rather
+than fail on unknown values. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>label_raw</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Raw string form of the label as the server emitted it. Populated
+on every AnalysisResult so unknown values (VAD &#34;silence&#34; sentinel,
+&#34;error&#34;, or a future new class) still round-trip. Canonical values
+today: &#34;genuine&#34;, &#34;replay&#34;, &#34;silence&#34;, &#34;error&#34;. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>confidence</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Model confidence in this classification [0, 1]. For &#34;silence&#34;
+sentinels this carries the VAD silence fraction (≈silence_pct/100);
+for &#34;error&#34; sentinels this is 0.0. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>silence_pct</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>VAD-measured silence fraction for THIS window, in percent [0, 100].
+Populated on every AnalysisResult regardless of label. Downstream
+dashboards want silence context on scored (non-silence) windows
+too; inferring from `confidence` only works for the silence
+sentinel. 0.0 is &#34;no silence detected&#34;, not &#34;unknown&#34;. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.replay_detection.v1.CreateSessionRequest">CreateSessionRequest</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>config</td>
+                  <td><a href="#aurigin.replay_detection.v1.ReplayConfig">ReplayConfig</a></td>
+                  <td>optional</td>
+                  <td><p>Optional session configuration; server applies defaults for unset fields. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.replay_detection.v1.CreateSessionResponse">CreateSessionResponse</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>session_id</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Unique identifier for this session. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>model_name</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Human-readable model name the server loaded for this session —
+the fine-tuned release tag operators grep for in logs &#43; dashboards.
+Empty string when the server hasn&#39;t configured one. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>model_version</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Specific checkpoint revision loaded (git SHA / HF revision hash).
+Empty string when the server hasn&#39;t configured one. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.replay_detection.v1.DetectReplayRequest">DetectReplayRequest</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>create_session_request</td>
+                  <td><a href="#aurigin.replay_detection.v1.CreateSessionRequest">CreateSessionRequest</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>audio_frame</td>
+                  <td><a href="#aurigin.media.v1.AudioFrame">aurigin.media.v1.AudioFrame</a></td>
+                  <td></td>
+                  <td><p>Aurigin-native self-describing audio frame — codec &#43; sample rate
+&#43; channels ride on the message so no session-open coordination
+is needed. This service accepts AudioFrame only (no legacy
+twilio.AudioBuffer fork — new surface, no back-compat window
+to carry, matches aurigin.fingerprint.v1 precedent). </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.replay_detection.v1.DetectReplayResponse">DetectReplayResponse</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>create_session_response</td>
+                  <td><a href="#aurigin.replay_detection.v1.CreateSessionResponse">CreateSessionResponse</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>analysis_result</td>
+                  <td><a href="#aurigin.replay_detection.v1.AnalysisResult">AnalysisResult</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+                <tr>
+                  <td>final_result</td>
+                  <td><a href="#aurigin.replay_detection.v1.FinalResult">FinalResult</a></td>
+                  <td></td>
+                  <td><p> </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.replay_detection.v1.FinalResult">FinalResult</h3>
+        <p>Emitted once when the client closes the stream. Purely accounting —</p><p>aggregate label is worst-case (any REPLAY wins over GENUINE); real</p><p>downstream policy lives in the caller (orchestrator action rules).</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>total_audio_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Total audio received (ms). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>overall_score</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Average replay score across all analysed windows [0, 1]. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>overall_label</td>
+                  <td><a href="#aurigin.replay_detection.v1.ReplayLabel">ReplayLabel</a></td>
+                  <td></td>
+                  <td><p>Worst-case aggregate label across the session. REPLAY if any window
+scored REPLAY, GENUINE if all scored GENUINE and at least one was
+scored, UNSPECIFIED if no window was scored (all VAD-gated or
+errored). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>overall_label_raw</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Raw string form of the aggregate label — same extensibility
+contract as AnalysisResult.label_raw. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>analysis_count</td>
+                  <td><a href="#int32">int32</a></td>
+                  <td></td>
+                  <td><p>Number of analysis windows completed (scored, not VAD-gated). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>wall_ms</td>
+                  <td><a href="#int64">int64</a></td>
+                  <td></td>
+                  <td><p>Processing wall-time for this session (ms). Server-measured;
+sum of time the replay model spent on inference &#43; pre/post-
+processing across every window. Decoupled from audio duration —
+useful for GPU capacity planning, per-call cost accounting, and
+the &#34;is this box falling behind?&#34; alert. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>rtf</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Real-time factor: wall_ms / total_audio_ms. Server-computed so
+clients don&#39;t need to divide (and don&#39;t hit zero on zero-audio
+sessions — the server emits 0 in that edge case). &lt; 1.0 means
+faster than real-time (headroom); ≥ 1.0 means the box is behind
+real-time on this call. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>model_version</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>Which model checkpoint produced the verdicts in this session.
+Opaque to the client — matches whatever the server rolls out
+(semver &#34;0.4.1&#34;, git-sha &#34;deadbee&#34;, MODEL_HUB_REVISION tag, …).
+Correlation key for A/B rollouts and &#34;why did this call score
+differently last week&#34; post-mortems. Empty when the server didn&#39;t
+declare a version. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>silence_pct_mean</td>
+                  <td><a href="#float">float</a></td>
+                  <td></td>
+                  <td><p>Mean VAD silence fraction across all analysed windows [0, 100].
+The server-side authoritative aggregate — cheaper and less lossy
+than a running mean on the caller. Reflects windows that were
+actually scored (not VAD-gated silence sentinels) when VAD is on.
+0.0 is &#34;no silence observed&#34;, not &#34;unknown&#34;. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+        <h3 id="aurigin.replay_detection.v1.ReplayConfig">ReplayConfig</h3>
+        <p></p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>analysis_interval_s</td>
+                  <td><a href="#float">float</a></td>
+                  <td>optional</td>
+                  <td><p>Per-session override for the analysis window. UNSPECIFIED (== 0.0)
+means &#34;follow the server env default&#34;, which for replay-service
+MUST be 3.0 (matches the halo-3 training config). Setting this to
+any value other than 3.0 will silently degrade accuracy — the
+model was trained on 3.0 s segments and pooling&#43;conv layers are
+shaped around that length. Overriding is provided as an escape
+hatch for future model revisions with different training windows;
+leave unset for production. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>model_version</td>
+                  <td><a href="#string">string</a></td>
+                  <td>optional</td>
+                  <td><p>Model revision override, e.g. &#34;halo-3-dev-room-sym-cap025-27k&#34; or
+&#34;halo-2-dev-230000&#34;. Unspecified = use the server&#39;s env-configured
+default (main revision, tracked by the deploy). Useful for A/B
+comparison against older revisions available on the HF repo (see
+aurigin/replay_detector &#34;tags&#34; list). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>vad_mode</td>
+                  <td><a href="#aurigin.replay_detection.v1.VadMode">VadMode</a></td>
+                  <td>optional</td>
+                  <td><p>Per-session VAD gate. Same semantics as
+aurigin.deepfake_detection.v1.DetectionConfig.vad_mode — off by
+default because replay signals often ride on the silence around
+speech (room impulse response, background artefacts) and gating
+silence windows can suppress the very features the model uses
+to spot a replay. Enable only after verifying end-to-end accuracy
+impact for the specific deployment. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>vad_silence_threshold_pct</td>
+                  <td><a href="#float">float</a></td>
+                  <td>optional</td>
+                  <td><p>Per-session VAD silence-skip threshold, in percent [0, 100]. Only
+meaningful when vad_mode is unset or ON. Unspecified = follow
+server env default (SILENCE_THRESHOLD_PCT, typically 80). </p></td>
+                </tr>
+              
+                <tr>
+                  <td>tail_strategy</td>
+                  <td><a href="#aurigin.replay_detection.v1.TailStrategy">TailStrategy</a></td>
+                  <td>optional</td>
+                  <td><p>Per-session tail-strategy override. Same semantics as
+aurigin.deepfake_detection.v1.DetectionConfig.tail_strategy —
+controls how the sub-3s residual at stream end is handled. See
+TailStrategy enum below for the three options. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>min_analysis_duration_s</td>
+                  <td><a href="#float">float</a></td>
+                  <td>optional</td>
+                  <td><p>Per-session floor on residual duration eligible for its own
+inference, in seconds. Interacts with tail_strategy: residuals
+shorter than this are handled per-strategy rather than scored
+directly. Unspecified = follow server env default
+(MIN_ANALYSIS_DURATION_S, typically 1.0). Note the wav2vec2-base
+feature extractor&#39;s kernel-size-3 conv needs at least ~1 s of
+audio to produce enough feature frames; setting this lower will
+break inference on short residuals. </p></td>
+                </tr>
+              
+                <tr>
+                  <td>decision_threshold</td>
+                  <td><a href="#float">float</a></td>
+                  <td>optional</td>
+                  <td><p>Decision threshold override, in [0, 1]. Verdicts with `score`
+≥ this value get label REPLAY_LABEL_REPLAY; below get GENUINE.
+Unspecified = follow server env default (DECISION_THRESHOLD).
+IMPORTANT: choose from MDR@1%FPR on the held-out eval, not from
+ROC AUC — see the aurigin-replay README&#39;s &#34;Held-out metrics&#34;
+section. A 0.99 AUC coexists with double-digit miss rates at the
+1% FPR operating point; ignore AUC-based thresholding. </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+
+      
+        <h3 id="aurigin.replay_detection.v1.ReplayLabel">ReplayLabel</h3>
+        <p>Model output label for a single window. Numeric values match the</p><p>halo-3 model's class indices one-for-one (0 = genuine, 1 = replay)</p><p>so wire-level round-tripping is a lookup, not a mapping. UNSPECIFIED</p><p>exists for sentinel cases (window skipped / errored / silence) where</p><p>the model didn't produce a classification.</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Name</td><td>Number</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>REPLAY_LABEL_UNSPECIFIED</td>
+                <td>0</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>REPLAY_LABEL_GENUINE</td>
+                <td>1</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>REPLAY_LABEL_REPLAY</td>
+                <td>2</td>
+                <td><p></p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+      
+        <h3 id="aurigin.replay_detection.v1.TailStrategy">TailStrategy</h3>
+        <p>Per-session tail strategy. Mirrors deepfake-service's server-side</p><p>TailStrategy enum verbatim (same numeric IDs) so downstream orchestrator</p><p>dispatch code can treat both consumers uniformly.</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Name</td><td>Number</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>TAIL_STRATEGY_UNSPECIFIED</td>
+                <td>0</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>TAIL_STRATEGY_DROP</td>
+                <td>1</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>TAIL_STRATEGY_EXTEND</td>
+                <td>2</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>TAIL_STRATEGY_RECOMPUTE</td>
+                <td>3</td>
+                <td><p></p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+      
+        <h3 id="aurigin.replay_detection.v1.VadMode">VadMode</h3>
+        <p>VAD per-session mode. Controls whether the silence-gate runs before</p><p>model inference. UNSPECIFIED = follow the server's env-driven default</p><p>(VAD_ENABLED); ON / OFF override it. Mirrors</p><p>aurigin.deepfake_detection.v1.VadMode by value + numeric ID (same</p><p>enum, redeclared here to keep the two consumer contracts independent</p><p>per house style — see aurigin.fingerprint.v1.TailStrategy precedent).</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Name</td><td>Number</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>VAD_MODE_UNSPECIFIED</td>
+                <td>0</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>VAD_MODE_ON</td>
+                <td>1</td>
+                <td><p></p></td>
+              </tr>
+            
+              <tr>
+                <td>VAD_MODE_OFF</td>
+                <td>2</td>
+                <td><p></p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+      
+
+      
+
+      
+        <h3 id="aurigin.replay_detection.v1.ReplayDetection">ReplayDetection</h3>
+        <p>Replay Detection Service.</p><p>Analyzes a continuous audio stream and emits per-window verdicts on</p><p>whether the audio is a live-captured voice (genuine) or a replay of</p><p>a previously-captured recording (replay). Semantically distinct from</p><p>deepfake detection: replay attacks use real recordings of the target</p><p>speaker, not synthesised audio. Both consumer types can — and often</p><p>should — be enabled together on the orchestrator side.</p><p>Structural sibling of `aurigin.deepfake_detection.v1.DeepfakeDetection`</p><p>on purpose: same bidi shape (stream Request → stream Response with</p><p>`oneof` request/response) so the orchestrator's `grpc_verdict`</p><p>consumer dispatch code path handles both without special-casing.</p><p>Model contract (server-side, see aurigin-replay README):</p><p>Model      aurigin/replay_detector @ halo-3-dev-room-sym-cap025-27k</p><p>Backbone   facebook/wav2vec2-base</p><p>Rate       16 kHz mono</p><p>Window     3.0 s (NOT 5.0 s — deepfake default silently degrades this model)</p><p>Pooling    masked_mean</p><p>Labels     0 = genuine, 1 = replay</p><p>do_normalize=False (auto-loaded via preprocessor_config.json)</p><p>The 3.0 s window length is the one contract element the server</p><p>cannot enforce for its client — it lives in the segmentation layer,</p><p>not in the model artefacts. Every consumer of this service MUST</p><p>leave `ReplayConfig.analysis_interval_s` unset (falls back to</p><p>server env default of 3.0) OR set it explicitly to 3.0. A pipeline</p><p>left at the aurigin-standard 5.0 s window will silently produce</p><p>wrong numbers with no error signal.</p><p>Session lifecycle:</p><p>1. Client sends CreateSessionRequest with optional ReplayConfig.</p><p>2. Server responds with CreateSessionResponse containing session_id.</p><p>3. Client streams aurigin.media.v1.AudioFrame messages continuously.</p><p>4. Server emits AnalysisResult events as each 3.0-s window is scored.</p><p>5. On stream end, server emits a FinalResult with session accounting.</p>
+        <table class="enum-table">
+          <thead>
+            <tr><td>Method Name</td><td>Request Type</td><td>Response Type</td><td>Description</td></tr>
+          </thead>
+          <tbody>
+            
+              <tr>
+                <td>DetectReplay</td>
+                <td><a href="#aurigin.replay_detection.v1.DetectReplayRequest">DetectReplayRequest</a> stream</td>
+                <td><a href="#aurigin.replay_detection.v1.DetectReplayResponse">DetectReplayResponse</a> stream</td>
+                <td><p>Bidirectional streaming RPC for real-time replay detection.</p></td>
+              </tr>
+            
+          </tbody>
+        </table>
+
+        
+    
+      
+      <div class="file-heading">
+        <h2 id="twilio/tme/extensions/common/v1/audio_buffer.proto">twilio/tme/extensions/common/v1/audio_buffer.proto</h2><a href="#title">Top</a>
+      </div>
+      <p></p>
+
+      
+        <h3 id="twilio.tme.extensions.common.v1.AudioBuffer">AudioBuffer</h3>
+        <p>Vendored copy of Twilio's AudioBuffer message used by Twilio Media</p><p>Extensions. Kept here so Aurigin services that consume Twilio media</p><p>streams can import it as a stable, locally-published proto.</p><p>DEPRECATED as of aurigin-protos 0.3.0. New Aurigin-originated media</p><p>streams should use `aurigin.media.v1.AudioFrame`, which is</p><p>self-describing (codec + sample rate + channels on the message) and</p><p>avoids the free-form `format` string this message carries. This file</p><p>is retained for backwards compatibility with 0.2.x consumers and is</p><p>scheduled for removal in 0.4.0.</p>
+
+        
+          <table class="field-table">
+            <thead>
+              <tr><td>Field</td><td>Type</td><td>Label</td><td>Description</td></tr>
+            </thead>
+            <tbody>
+              
+                <tr>
+                  <td>type</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>audio type, always &#34;audio/x-raw&#34; </p></td>
+                </tr>
+              
+                <tr>
+                  <td>format</td>
+                  <td><a href="#string">string</a></td>
+                  <td></td>
+                  <td><p>audio format, i.e. S16LE </p></td>
+                </tr>
+              
+                <tr>
+                  <td>channels</td>
+                  <td><a href="#int32">int32</a></td>
+                  <td></td>
+                  <td><p>number of channels </p></td>
+                </tr>
+              
+                <tr>
+                  <td>rate</td>
+                  <td><a href="#int32">int32</a></td>
+                  <td></td>
+                  <td><p>bitrate </p></td>
+                </tr>
+              
+                <tr>
+                  <td>duration_ns</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p>duration of this buffer in nanoseconds </p></td>
+                </tr>
+              
+                <tr>
+                  <td>pts_ns</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p>presentation timestamp of this buffer in nanoseconds </p></td>
+                </tr>
+              
+                <tr>
+                  <td>size</td>
+                  <td><a href="#uint64">uint64</a></td>
+                  <td></td>
+                  <td><p>size of the audio data </p></td>
+                </tr>
+              
+                <tr>
+                  <td>buffer</td>
+                  <td><a href="#bytes">bytes</a></td>
+                  <td></td>
+                  <td><p>the audio data </p></td>
+                </tr>
+              
+            </tbody>
+          </table>
+
+          
+
+        
+      
+
+      
+
+      
+
+      
+    
+
+    <h2 id="scalar-value-types">Scalar Value Types</h2>
+    <table class="scalar-value-types-table">
+      <thead>
+        <tr><td>.proto Type</td><td>Notes</td><td>C++</td><td>Java</td><td>Python</td><td>Go</td><td>C#</td><td>PHP</td><td>Ruby</td></tr>
+      </thead>
+      <tbody>
+        
+          <tr id="double">
+            <td>double</td>
+            <td></td>
+            <td>double</td>
+            <td>double</td>
+            <td>float</td>
+            <td>float64</td>
+            <td>double</td>
+            <td>float</td>
+            <td>Float</td>
+          </tr>
+        
+          <tr id="float">
+            <td>float</td>
+            <td></td>
+            <td>float</td>
+            <td>float</td>
+            <td>float</td>
+            <td>float32</td>
+            <td>float</td>
+            <td>float</td>
+            <td>Float</td>
+          </tr>
+        
+          <tr id="int32">
+            <td>int32</td>
+            <td>Uses variable-length encoding. Inefficient for encoding negative numbers – if your field is likely to have negative values, use sint32 instead.</td>
+            <td>int32</td>
+            <td>int</td>
+            <td>int</td>
+            <td>int32</td>
+            <td>int</td>
+            <td>integer</td>
+            <td>Bignum or Fixnum (as required)</td>
+          </tr>
+        
+          <tr id="int64">
+            <td>int64</td>
+            <td>Uses variable-length encoding. Inefficient for encoding negative numbers – if your field is likely to have negative values, use sint64 instead.</td>
+            <td>int64</td>
+            <td>long</td>
+            <td>int/long</td>
+            <td>int64</td>
+            <td>long</td>
+            <td>integer/string</td>
+            <td>Bignum</td>
+          </tr>
+        
+          <tr id="uint32">
+            <td>uint32</td>
+            <td>Uses variable-length encoding.</td>
+            <td>uint32</td>
+            <td>int</td>
+            <td>int/long</td>
+            <td>uint32</td>
+            <td>uint</td>
+            <td>integer</td>
+            <td>Bignum or Fixnum (as required)</td>
+          </tr>
+        
+          <tr id="uint64">
+            <td>uint64</td>
+            <td>Uses variable-length encoding.</td>
+            <td>uint64</td>
+            <td>long</td>
+            <td>int/long</td>
+            <td>uint64</td>
+            <td>ulong</td>
+            <td>integer/string</td>
+            <td>Bignum or Fixnum (as required)</td>
+          </tr>
+        
+          <tr id="sint32">
+            <td>sint32</td>
+            <td>Uses variable-length encoding. Signed int value. These more efficiently encode negative numbers than regular int32s.</td>
+            <td>int32</td>
+            <td>int</td>
+            <td>int</td>
+            <td>int32</td>
+            <td>int</td>
+            <td>integer</td>
+            <td>Bignum or Fixnum (as required)</td>
+          </tr>
+        
+          <tr id="sint64">
+            <td>sint64</td>
+            <td>Uses variable-length encoding. Signed int value. These more efficiently encode negative numbers than regular int64s.</td>
+            <td>int64</td>
+            <td>long</td>
+            <td>int/long</td>
+            <td>int64</td>
+            <td>long</td>
+            <td>integer/string</td>
+            <td>Bignum</td>
+          </tr>
+        
+          <tr id="fixed32">
+            <td>fixed32</td>
+            <td>Always four bytes. More efficient than uint32 if values are often greater than 2^28.</td>
+            <td>uint32</td>
+            <td>int</td>
+            <td>int</td>
+            <td>uint32</td>
+            <td>uint</td>
+            <td>integer</td>
+            <td>Bignum or Fixnum (as required)</td>
+          </tr>
+        
+          <tr id="fixed64">
+            <td>fixed64</td>
+            <td>Always eight bytes. More efficient than uint64 if values are often greater than 2^56.</td>
+            <td>uint64</td>
+            <td>long</td>
+            <td>int/long</td>
+            <td>uint64</td>
+            <td>ulong</td>
+            <td>integer/string</td>
+            <td>Bignum</td>
+          </tr>
+        
+          <tr id="sfixed32">
+            <td>sfixed32</td>
+            <td>Always four bytes.</td>
+            <td>int32</td>
+            <td>int</td>
+            <td>int</td>
+            <td>int32</td>
+            <td>int</td>
+            <td>integer</td>
+            <td>Bignum or Fixnum (as required)</td>
+          </tr>
+        
+          <tr id="sfixed64">
+            <td>sfixed64</td>
+            <td>Always eight bytes.</td>
+            <td>int64</td>
+            <td>long</td>
+            <td>int/long</td>
+            <td>int64</td>
+            <td>long</td>
+            <td>integer/string</td>
+            <td>Bignum</td>
+          </tr>
+        
+          <tr id="bool">
+            <td>bool</td>
+            <td></td>
+            <td>bool</td>
+            <td>boolean</td>
+            <td>boolean</td>
+            <td>bool</td>
+            <td>bool</td>
+            <td>boolean</td>
+            <td>TrueClass/FalseClass</td>
+          </tr>
+        
+          <tr id="string">
+            <td>string</td>
+            <td>A string must always contain UTF-8 encoded or 7-bit ASCII text.</td>
+            <td>string</td>
+            <td>String</td>
+            <td>str/unicode</td>
+            <td>string</td>
+            <td>string</td>
+            <td>string</td>
+            <td>String (UTF-8)</td>
+          </tr>
+        
+          <tr id="bytes">
+            <td>bytes</td>
+            <td>May contain any arbitrary sequence of bytes.</td>
+            <td>string</td>
+            <td>ByteString</td>
+            <td>str</td>
+            <td>[]byte</td>
+            <td>ByteString</td>
+            <td>string</td>
+            <td>String (ASCII-8BIT)</td>
+          </tr>
+        
+      </tbody>
+    </table>
+  </body>
+</html>
+

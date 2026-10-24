@@ -30,10 +30,13 @@ mkdir -p "${OUT_DIR}"
 # across runs). Bump by hand when a new release lands.
 IMAGE="pseudomuto/protoc-gen-doc:1.5.1"
 
-# Collect every .proto file as a relative path (protoc-gen-doc needs
-# them as separate args, not a glob). `find -print0 | xargs -0` keeps
-# whitespace-safe even though our paths don't currently have any.
-mapfile -t PROTO_FILES < <(cd "${PROTO_DIR}" && find . -name "*.proto" -type f | sort)
+# Collect every .proto file. Strip the leading `./` because
+# protoc-gen-doc's entrypoint runs protoc with `-Iprotos`, so file
+# args are resolved relative to that import path — a literal `./` on
+# the front makes protoc look under the container WORKDIR instead and
+# raise "Could not make proto path relative". Sorted so the HTML
+# output is byte-stable across runs (CI drift check depends on it).
+mapfile -t PROTO_FILES < <(cd "${PROTO_DIR}" && find . -name "*.proto" -type f | sort | sed 's|^\./||')
 
 if [[ ${#PROTO_FILES[@]} -eq 0 ]]; then
   echo "ERROR: no .proto files found under ${PROTO_DIR}" >&2
@@ -42,7 +45,12 @@ fi
 
 echo "Regenerating ${OUT_DIR}/index.html from ${#PROTO_FILES[@]} proto files…"
 
+# --platform linux/amd64 pins the image arch — the plugin only
+# publishes an amd64 image, and on arm64 (Apple Silicon) docker will
+# otherwise emit a noisy platform-mismatch warning. Rosetta runs it
+# fine; a one-off doc regen doesn't need native perf.
 docker run --rm \
+  --platform linux/amd64 \
   -v "${PROTO_DIR}:/protos:ro" \
   -v "${OUT_DIR}:/out" \
   "${IMAGE}" \
