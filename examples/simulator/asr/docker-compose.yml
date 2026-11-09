@@ -1,0 +1,35 @@
+# One-command local run for the ASR simulator service.
+#
+#   cd examples/simulator/asr
+#   docker compose up --build
+#
+# Exposes 50051 on the host by default. Point any Transcription client
+# (the Python / TypeScript example clients under examples/, or your own)
+# at `localhost:50051` — insecure by default because no ./certs volume is
+# mounted. See README.md for TLS / mTLS overrides.
+#
+# Running side-by-side with the sibling simulators (all also default to
+# :50051)? Change the host-side port mapping alone and aim your client
+# at the new port:
+#     - "50054:50051"
+# Neither the client nor the proto cares which port — pass `--target
+# HOST:PORT` to any example client to point it at wherever the sim listens.
+
+services:
+  asr-simulator:
+    build:
+      # Context is examples/ (two directories up from this file) — matches
+      # the sibling simulators so all share the same shape.
+      context: ../..
+      dockerfile: simulator/asr/Dockerfile
+    image: aurigin/asr-simulator-service:local
+    container_name: asr-simulator
+    ports:
+      # Change to "50054:50051" to run side-by-side with the deepfake +
+      # replay + fingerprint sims (all also default to 50051). See the
+      # top-of-file note.
+      - "50051:50051"
+    environment:
+      PORT: "50051"
+      TURN_MS: "2000"
+    restart: unless-stopped
