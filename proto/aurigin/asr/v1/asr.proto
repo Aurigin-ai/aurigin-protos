@@ -160,6 +160,28 @@ message TranscriptionConfig {
   // only biases the decoder's first-token priors. Unspecified = let
   // the model detect.
   optional string language = 7;
+
+  // Per-session Silero VAD speech-probability cutoff, in [0, 1]. A
+  // frame counts as speech when `silero(frame) >= threshold`. Default
+  // 0.5 (follows server env default, typically VAD_THRESHOLD=0.5 — the
+  // handover's pipeline.yaml value). Lowering captures quieter speech
+  // at the cost of more false positives on noise; raising rejects
+  // noise at the cost of clipping soft speech. Tenant-level override
+  // point for deployments with persistent background-noise profiles
+  // (call centres, mobile-first, etc.).
+  optional float vad_threshold = 8;
+
+  // Per-session window in which the turn-cutter looks for the quietest
+  // frame when a turn hits `max_turn_ms`, in milliseconds. The cut
+  // lands on the frame with the lowest speech probability within the
+  // last `cut_search_ms` of the oversized turn. Default 1500 ms
+  // (follows server env default, typically CUT_SEARCH_MS=1500 — 47
+  // Silero frames of 32 ms at 16 kHz, matching the handover's
+  // `cut_search_s=1.5`). Shortening gives a more "aggressive" cut
+  // closer to the max boundary; lengthening lets the cutter reach
+  // farther back for a cleaner split. Rarely needs changing;
+  // exposed for tenant-level tuning only.
+  optional uint32 cut_search_ms = 9;
 }
 
 // VAD per-session mode. Controls whether the turn-cutter runs between

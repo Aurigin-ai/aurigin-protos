@@ -102,6 +102,28 @@ message FraudVerdict {
   // Consumers that need publish-vs-receive latency observability
   // compare this against their consume timestamp.
   int64 published_at_ms = 9;
+
+  // The raw cassandra answer line before parsing into family + type.
+  // E.g. "fraud | financial_institution.account_compromise_safe_account"
+  // or "legitimate | real_bank_fraud_alert". Opaque to consumers;
+  // populated for audit / debug / model-regression analysis. The parsed
+  // `family` and `type` fields above are the canonical values for
+  // policy; `raw_answer` is the audit trail of what the model actually
+  // wrote. Empty only on vLLM errors (logged server-side; consumers
+  // should treat empty raw_answer alongside empty family + non-empty
+  // type as a parse-fallback case).
+  string raw_answer = 10;
+
+  // The re-ask completion, populated ONLY when the generated line's
+  // class contradicted the threshold decision (or produced no type) and
+  // cassandra was re-called with the class forced (`fraud |` /
+  // `legitimate |`). Non-null means "the model and the threshold
+  // disagreed on this turn, so the classifier forced the class to make
+  // `type` consistent with `decision`". Useful for measuring
+  // disagreement rate + spotting `other.unclear` fallbacks (a valid
+  // type cassandra emits on forced-fraud re-asks for calls it finds
+  // legitimate). Absent when no re-ask fired — the common case.
+  optional string reask_answer = 11;
 }
 
 // Three-way decision cassandra produces per turn. Numeric values are
