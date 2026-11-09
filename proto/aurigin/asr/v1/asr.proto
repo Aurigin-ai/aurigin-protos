@@ -1,0 +1,259 @@
+syntax = "proto3";
+
+package aurigin.asr.v1;
+
+import "aurigin/media/v1/audio_frame.proto";
+
+// Automatic Speech Recognition Service.
+//
+// Analyzes a continuous audio stream and emits one TranscriptTurn per
+// closed turn. A turn is a contiguous span of speech delimited by the
+// server's VAD + turn-cutter state machine; the caller never sees frame-
+// level audio decisions, only finished turns with their text.
+//
+// Structural sibling of `aurigin.deepfake_detection.v1.DeepfakeDetection`
+// and `aurigin.replay_detection.v1.ReplayDetection` on purpose: same
+// bidi shape (stream Request → stream Response with `oneof`
+// request/response) so the orchestrator's consumer dispatch code path
+// handles all three without special-casing. Emits a NEW response type
+// (TranscriptTurn) because an ASR output is semantically distinct from
+// a classifier verdict or an embedding.
+//
+// Model contract (server-side, see aurigin-asr README):
+//
+//   Model      nvidia/parakeet-tdt-0.6b-v3 (TensorRT engine, fp16)
+//   Rate       16 kHz mono, S16LE wire codec
+//   Window     turn-sized (0.3-10 s typical), VAD-delimited
+//   Output     one text transcript per closed turn
+//
+// The TRT engine is built per-GPU-type at install (about 8 minutes),
+// so the server advertises the ready engine's `model_version` on
+// session-open — callers that care about reproducibility pin it.
+//
+// Session lifecycle:
+//   1. Client sends CreateSessionRequest with optional TranscriptionConfig.
+//   2. Server responds with CreateSessionResponse containing session_id.
+//   3. Client streams aurigin.media.v1.AudioFrame messages continuously.
+//   4. Server emits TranscriptTurn events as each turn closes (pause,
+//      max-length cut, or end-of-stream flush).
+//   5. On stream end, server emits a FinalResult with session accounting.
+//
+service Transcription {
+  // Bidirectional streaming RPC for real-time transcription.
+  rpc Transcribe(stream TranscribeRequest) returns (stream TranscribeResponse);
+}
+
+// ============================================================================
+// Request (Client -> Server)
+// ============================================================================
+
+message CreateSessionRequest {
+  // Optional session configuration; server applies defaults for unset fields.
+  optional TranscriptionConfig config = 1;
+}
+
+message TranscribeRequest {
+  oneof request {
+    CreateSessionRequest create_session_request = 1;
+    // Aurigin-native self-describing audio frame — codec + sample rate
+    // + channels ride on the message so no session-open coordination
+    // is needed. AudioFrame only (no legacy twilio.AudioBuffer fork —
+    // new surface, no back-compat window to carry, matches
+    // aurigin.replay_detection.v1 and aurigin.fingerprint.v1 precedent).
+    //
+    // Cassandra's downstream classifier contract requires 16 kHz mono
+    // S16LE. The server validates codec + sample_rate_hz + channels on
+    // every frame and rejects mismatches with INVALID_ARGUMENT; it does
+    // NOT resample. Callers that need rate conversion should do it
+    // before send.
+    aurigin.media.v1.AudioFrame audio_frame = 2;
+  }
+}
+
+// ============================================================================
+// Response (Server -> Client)
+// ============================================================================
+
+message TranscribeResponse {
+  oneof response {
+    CreateSessionResponse create_session_response = 1;
+    TranscriptTurn transcript_turn = 2;
+    FinalResult final_result = 3;
+  }
+}
+
+message CreateSessionResponse {
+  // Unique identifier for this session. Opaque to clients; used in
+  // server-side logs + metrics. Carried on every subsequent response
+  // for correlation.
+  string session_id = 1;
+
+  // Human-readable ASR model name — e.g. `parakeet-tdt-0.6b-v3`. Stable
+  // across identical weights; distinct from `model_version` which
+  // carries the TRT engine build or HF revision. Empty string when the
+  // server hasn't configured one.
+  string model_name = 2;
+
+  // Specific checkpoint / TRT-engine revision loaded. Change here
+  // means a different engine binary even if `model_name` stayed the
+  // same (common on TRT rebuilds for a new GPU family). Empty string
+  // when the server hasn't configured one.
+  string model_version = 3;
+}
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+message TranscriptionConfig {
+  // Per-session VAD gate. UNSPECIFIED (default) = follow server env
+  // default (typically VAD_MODE_ON — turn-cutter drives the whole
+  // pipeline). VAD_MODE_OFF disables turn cutting and treats each
+  // CreateSessionRequest + stream of AudioFrames as a single
+  // transcribe call at stream close; useful for offline file scans
+  // where the caller already knows the segmentation.
+  optional VadMode vad_mode = 1;
+
+  // Per-session override for the silence duration that closes a turn,
+  // in milliseconds. Unspecified = follow server env default
+  // (PAUSE_MS, typically 800). The handover-v2 default is 800 ms
+  // (25 Silero frames of 32 ms) — shortening it cuts turns on
+  // breath-pauses, lengthening it merges short exchanges into one
+  // turn. Change only if the downstream classifier's segmentation
+  // contract allows it.
+  optional uint32 pause_ms = 2;
+
+  // Per-session override for the maximum turn length, in milliseconds.
+  // Unspecified = follow server env default (MAX_TURN_MS, typically
+  // 10000 = 160 000 samples at 16 kHz). A turn that reaches this
+  // length is cut at the quietest frame in its last ~1.5 s (47
+  // frames); subsequent speech continues as the next turn without
+  // pre-roll.
+  optional uint32 max_turn_ms = 3;
+
+  // Per-session override for the minimum turn duration eligible for
+  // transcription, in milliseconds. Unspecified = follow server env
+  // default (MIN_SPEECH_MS, typically 300 = 10 Silero frames).
+  // Shorter turns (coughs, clicks, breath noises) are dropped
+  // silently — no TranscriptTurn is emitted and the turn number does
+  // not advance.
+  optional uint32 min_speech_ms = 4;
+
+  // Per-session override for pre-roll audio kept before the first
+  // speech frame, in milliseconds. Unspecified = follow server env
+  // default (PRE_ROLL_MS, typically 200 = 3 200 samples at 16 kHz).
+  // Prevents the first syllable from being clipped when VAD lags one
+  // frame behind speech onset. Less than this amount is kept at the
+  // very start of the call (whatever audio has been seen so far).
+  optional uint32 pre_roll_ms = 5;
+
+  // Model revision override, e.g. a specific TRT engine tag or HF
+  // revision hash. Unspecified = use the server's env-configured
+  // default. Useful for A/B comparisons against older engines
+  // available in the model repo. Note: TRT engines are GPU-arch-
+  // specific, so the server rejects a revision whose engine wasn't
+  // built for its GPU type with FAILED_PRECONDITION.
+  optional string model_version = 6;
+
+  // Optional language hint, BCP-47 tag (e.g. "en-US", "de-CH"). Parakeet
+  // TDT 0.6B v3 is multilingual with language auto-detection; the hint
+  // only biases the decoder's first-token priors. Unspecified = let
+  // the model detect.
+  optional string language = 7;
+}
+
+// VAD per-session mode. Controls whether the turn-cutter runs between
+// AudioFrame arrival and model inference. UNSPECIFIED = follow the
+// server's env-driven default (VAD_ENABLED); ON / OFF override it.
+// Mirrors aurigin.deepfake_detection.v1.VadMode by value + numeric ID
+// per house style.
+enum VadMode {
+  VAD_MODE_UNSPECIFIED = 0;
+  VAD_MODE_ON = 1;
+  VAD_MODE_OFF = 2;
+}
+
+// ============================================================================
+// Transcript events
+// ============================================================================
+
+// Emitted each time a turn closes and is successfully transcribed.
+// Empty-text turns (ASR returned no words) are skipped silently — no
+// TranscriptTurn is emitted and the turn number does not advance, so
+// downstream consumers see a dense turn sequence without gaps.
+message TranscriptTurn {
+  // Monotonic turn counter within this session, starting at 0 and
+  // incrementing by 1 per emitted TranscriptTurn. Skipped turns
+  // (empty text, VAD-rejected shorts) do NOT consume a number, so
+  // every number a consumer sees carries real content.
+  uint32 turn = 1;
+
+  // Audio offset of the turn's first sample from stream start, in
+  // milliseconds. Inclusive of pre-roll.
+  int64 t0_ms = 2;
+
+  // Audio offset of the turn's last sample from stream start, in
+  // milliseconds. Exclusive — a 2 000 ms turn starting at t0_ms=5000
+  // has t1_ms=7000.
+  int64 t1_ms = 3;
+
+  // Transcribed text for this turn. UTF-8, lowercased per Parakeet's
+  // default decoder output. May contain punctuation if the engine was
+  // built with punctuation enabled. Never empty (empty results are
+  // dropped before emission — see message doc above).
+  string text = 4;
+
+  // ASR confidence for this turn [0, 1]. Parakeet's TDT decoder
+  // exposes a per-turn average token-probability; the server passes
+  // it through. 0.0 is a legitimate low-confidence reading, not
+  // "unknown". Consumers that gate on confidence should pick a
+  // threshold against measured validation data, not a round number.
+  float confidence = 5;
+
+  // VAD-measured silence fraction for THIS turn, in percent [0, 100].
+  // Populated on every TranscriptTurn regardless of the model's
+  // confidence. Useful for downstream silence-ratio dashboards and
+  // for callers that want to distinguish "clean speech" from "noisy
+  // room with sparse utterances". 0.0 is "no silence detected",
+  // not "unknown".
+  float silence_pct = 6;
+}
+
+// Emitted once when the client closes the stream. Purely accounting —
+// aggregate text concatenation happens on the caller side, not here.
+message FinalResult {
+  // Total audio received (ms). Includes silence frames.
+  int64 total_audio_ms = 1;
+
+  // Number of TranscriptTurn events emitted on this stream. Equal to
+  // the count of non-empty-text closed turns; skipped turns are not
+  // included.
+  uint32 turn_count = 2;
+
+  // Processing wall-time for this session (ms). Server-measured; sum
+  // of time the ASR engine spent on transcription + pre/post-
+  // processing across every turn. Decoupled from audio duration —
+  // useful for GPU capacity planning, per-call cost accounting, and
+  // the "is this box falling behind?" alert.
+  int64 wall_ms = 3;
+
+  // Real-time factor: wall_ms / total_audio_ms. Server-computed so
+  // clients don't need to divide (and don't hit zero on zero-audio
+  // sessions — the server emits 0 in that edge case). < 1.0 means
+  // faster than real-time (headroom); ≥ 1.0 means the box is behind
+  // real-time on this call.
+  float rtf = 4;
+
+  // Which model / TRT engine produced the transcripts in this session.
+  // Opaque to the client — matches whatever the server rolls out.
+  // Correlation key for A/B rollouts and "why did this call transcribe
+  // differently last week" post-mortems. Empty when the server didn't
+  // declare a version.
+  string model_version = 5;
+
+  // Mean VAD silence fraction across all transcribed turns [0, 100].
+  // Server-side authoritative aggregate — cheaper and less lossy
+  // than a running mean on the caller. 0.0 is "no silence observed",
+  // not "unknown".
+  float silence_pct_mean = 6;
+}

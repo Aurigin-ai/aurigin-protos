@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+package aurigin.fraud.v1;
+
+// Fraud detection event shapes — Kafka message envelopes, NOT a gRPC
+// service surface.
+//
+// Fraud detection in Aurigin is a pipeline composed from two existing
+// capabilities rather than a dedicated gRPC service:
+//
+//   1. PBS orchestrator-service opens a `grpc_transcript` consumer to
+//      aurigin-asr (aurigin.asr.v1.Transcription), streams per-call
+//      audio, and publishes each aurigin.asr.v1.TranscriptTurn to the
+//      `transcript_turns` Kafka topic keyed by call_id.
+//
+//   2. aurigin-fraud-classifier consumes `transcript_turns`, assembles
+//      the running transcript into a cassandra prompt, calls its
+//      sibling vLLM container, and publishes a FraudVerdict (below) to
+//      `fraud_verdicts` keyed by call_id.
+//
+//   3. PBS orchestrator-service consumes `fraud_verdicts` and triggers
+//      the usual `actions:` block from consumers.yaml (play_file into
+//      the call, bus-emit, etc.) — same shape as today's deepfake +
+//      replay verdict handling.
+//
+// No gRPC service lives here because the classifier doesn't open any
+// inbound connection; it is a Kafka-in / Kafka-out worker. The only
+// thing consumers need from aurigin-protos for fraud is the shape of
+// the FraudVerdict message.
+
+// ============================================================================
+// Verdict (fraud_verdicts Kafka topic payload)
+// ============================================================================
+
+// Published once per closed turn after the cassandra classifier has
+// scored it. Keyed in Kafka by `call_id` so all verdicts for one call
+// land on the same partition and consumer, preserving per-call order
+// and enabling prefix-cache locality at the vLLM layer.
+message FraudVerdict {
+  // Caller-supplied call identifier (opaque to this service). The
+  // same `call_id` the ASR service, PBS orchestrator-service, and
+  // downstream action consumers all use for correlation.
+  string call_id = 1;
+
+  // Monotonic turn counter within this call, matching the
+  // aurigin.asr.v1.TranscriptTurn.turn that produced this verdict.
+  // Consumers that need "latest verdict for call X" can order by this
+  // field; Kafka ordering alone is not sufficient if a partition
+  // rebalance replays earlier offsets.
+  uint32 turn = 2;
+
+  // Scam probability for the call so far, in [0, 1]:
+  //   score = P(fraud) / (P(fraud) + P(legitimate))
+  // computed from cassandra's first-token top-20 logprobs. Judges the
+  // WHOLE call history, not just the latest turn — resending the full
+  // transcript is cheap thanks to vLLM's prefix cache.
+  float score = 3;
+
+  // Categorical decision derived from `score` against the per-session
+  // `threshold`, gated by `min_words`:
+  //   DECISION_UNSPECIFIED — never emitted; proto3 zero-value sentinel
+  //   DECISION_UNDECIDED   — fewer than min_words words heard; score
+  //                          is still populated for observability
+  //   DECISION_LEGITIMATE  — score < threshold AND word budget met
+  //   DECISION_FRAUD       — score ≥ threshold AND word budget met
+  Decision decision = 4;
+
+  // Scam family from cassandra's answer line, split on `|` and `.`.
+  // Examples: "financial_institution", "authority", "tech_support",
+  // "legitimate" (for non-fraud lines). Always lower_snake_case.
+  // Empty string only on model-output parse errors (logged
+  // server-side; consumers should treat empty family + non-empty
+  // type as a parse-fallback case).
+  string family = 5;
+
+  // Scam type from cassandra's answer line (the part after the `.`).
+  // Examples: "account_compromise_safe_account", "digital_arrest",
+  // "real_bank_fraud_alert". Always lower_snake_case. When the
+  // generated line's class contradicted the threshold decision, the
+  // classifier re-asks cassandra with the forced class prefix
+  // (`fraud |` or `legitimate |`) to get a consistent type — so
+  // `type` always matches `decision`. `other.unclear` is a valid
+  // value meaning "no specific scam type", typically seen on
+  // force-fraud re-asks for calls the model finds legitimate.
+  string type = 6;
+
+  // The turn's text. Present only when the session's `include_text`
+  // flag was set at CreateSessionRequest; absent otherwise. No audio
+  // ever rides this message — audio is dropped at the ASR boundary
+  // and never crosses Kafka.
+  optional string text = 7;
+
+  // Cassandra model revision that produced this verdict — e.g. the
+  // `aurigin/cassandra` HF commit SHA from the pipeline.yaml pinned
+  // for this deploy. Correlation key for A/B rollouts and model-
+  // regression post-mortems. Empty when the server didn't declare
+  // a version.
+  string model_version = 8;
+
+  // Unix epoch milliseconds when this verdict was published. Server-
+  // measured on the classifier side, after the vLLM call returned.
+  // Consumers that need publish-vs-receive latency observability
+  // compare this against their consume timestamp.
+  int64 published_at_ms = 9;
+}
+
+// Three-way decision cassandra produces per turn. Numeric values are
+// stable; consumers may safely compare equality. Decoupled from
+// aurigin.deepfake_detection.v1 / aurigin.replay_detection.v1 enums on
+// purpose — a fraud verdict is categorically different from a
+// deepfake / replay verdict and downstream policy wants them typed
+// distinctly.
+enum Decision {
+  // Proto3 zero-value sentinel. Never a legitimate runtime value —
+  // consumers that see this should treat the message as malformed
+  // and log it.
+  DECISION_UNSPECIFIED = 0;
+
+  // Score was computed but the per-session `min_words` word budget
+  // has not yet been reached across the call's transcript. The
+  // `score` field is still populated and consumers that want an
+  // early signal may use it, but the authoritative categorical
+  // decision is not yet available.
+  DECISION_UNDECIDED = 1;
+
+  // Call is classified as legitimate. `score` < `threshold` AND
+  // the word budget is met.
+  DECISION_LEGITIMATE = 2;
+
+  // Call is classified as fraudulent. `score` ≥ `threshold` AND
+  // the word budget is met. This is the decision that triggers
+  // `actions:` rules on the orchestrator side (warning injection,
+  // bus emit, etc.).
+  DECISION_FRAUD = 3;
+}

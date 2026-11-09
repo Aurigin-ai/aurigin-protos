@@ -21,6 +21,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
+import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -353,6 +354,114 @@ test("fingerprint sim produces identical embeddings for identical input across r
       "This breaks the sim's determinism invariant — check server.py's " +
       "_synthetic_embedding() for non-deterministic changes (seed source, " +
       "PRNG constants, normalisation order).",
+    );
+  });
+});
+
+// ─── asr simulator + client ────────────────────────────────────────────
+//
+// Same pattern as the fingerprint tests above, but points at the ASR
+// simulator (deterministic transcripts drawn from a fixed vocabulary
+// cycled by turn index — no scenarios, no YAML). Two tests:
+//
+//   1. Silence roundtrip — proto/wire smoke on the fallback path.
+//      4 s of silence @ default TURN_MS=2000 → exactly 2 TranscriptTurns
+//      + 1 FinalResult.
+//   2. Determinism — the sim's core invariant is "same input → same
+//      transcript". Run the silence client twice, assert the same
+//      transcript sequence both times. Catches drift in _text_for()
+//      before it leaks into consumer test suites that rely on stable
+//      transcripts.
+
+const ASR_SIMULATOR_SRC = path.join(REPO_ROOT, "examples", "simulator", "asr", "src");
+
+function startAsrServer(port: number): ChildProcess {
+  return spawn(
+    "uv",
+    [
+      "run", "--no-project", "--python", "3.11",
+      "--with", "grpcio", "--with", "protobuf",
+      "python", "-m", "asr_simulator_service",
+    ],
+    {
+      env: {
+        ...process.env,
+        PORT: String(port),
+        PYTHONPATH: [GEN_PY, ASR_SIMULATOR_SRC, process.env.PYTHONPATH ?? ""].join(path.delimiter),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+}
+
+async function withAsrServer<T>(fn: (port: number) => Promise<T>): Promise<T> {
+  const port = await freePort();
+  const server = startAsrServer(port);
+  let serverOutput = "";
+  server.stdout?.on("data", (d: Buffer) => { serverOutput += d.toString(); });
+  server.stderr?.on("data", (d: Buffer) => { serverOutput += d.toString(); });
+  try {
+    const reachable = await waitForPort(port);
+    assert.ok(reachable, `ASR server didn't bind on :${port} within 15 s.\n${serverOutput}`);
+    return await fn(port);
+  } finally {
+    await killAndWait(server);
+  }
+}
+
+test("asr_client streams silence and roundtrips two TranscriptTurns", async () => {
+  // Point the client at an empty tmp dir so the silence fallback path
+  // runs deterministically regardless of whatever WAVs live in
+  // examples/audio/ (used by the deepfake fixture matrix).
+  const emptyAudioDir = fs.mkdtempSync(path.join(os.tmpdir(), "asr-smoke-"));
+  await withAsrServer(async (port) => {
+    const { code, stdout, stderr } = await runProc(
+      path.join(EXAMPLES_DIR, "asr_client.ts"),
+      ["--target", `localhost:${port}`, "--audio-dir", emptyAudioDir],
+    );
+    assert.equal(code, 0, `asr_client failed: stderr=${stderr}`);
+    assert.match(stdout, /Session: /, `missing session line in:\n${stdout}`);
+    assert.match(stdout, /sim-/, `missing simulator session id prefix in:\n${stdout}`);
+    // 4 s @ 2 s per turn → exactly 2 Turn lines. t1_ms is padded to
+    // width 6 so trailing spaces may appear before the literal `ms`.
+    const turnLines = stdout.match(/Turn\s+\d+\s+\|\s+\d+-\d+\s*ms\s+\|/g) ?? [];
+    assert.equal(
+      turnLines.length, 2,
+      `expected 2 Turn lines, got ${turnLines.length} in:\n${stdout}`,
+    );
+    assert.match(
+      stdout,
+      /FINAL\s+\| total=4000ms \| turns=2/,
+      `missing / malformed FINAL line in:\n${stdout}`,
+    );
+  });
+});
+
+test("asr sim produces identical transcripts for identical input across runs", async () => {
+  // The sim's determinism invariant: _text_for(turn) walks a fixed
+  // vocabulary cycled by turn index, with no random draws. Same silence
+  // payload → same transcript lines in the same order. Both runs must match.
+  const textRe = /Turn\s+\d+\s+\|.*?\|\s+"([^"]+)"/g;
+  const emptyAudioDir = fs.mkdtempSync(path.join(os.tmpdir(), "asr-smoke-"));
+  await withAsrServer(async (port) => {
+    const runs: string[][] = [];
+    for (let i = 0; i < 2; i++) {
+      const { code, stdout, stderr } = await runProc(
+        path.join(EXAMPLES_DIR, "asr_client.ts"),
+        ["--target", `localhost:${port}`, "--audio-dir", emptyAudioDir],
+      );
+      assert.equal(code, 0, `asr_client failed: stderr=${stderr}`);
+      const texts: string[] = [];
+      for (const m of stdout.matchAll(textRe)) texts.push(m[1]);
+      assert.ok(texts.length > 0, `missing Turn text in:\n${stdout}`);
+      runs.push(texts);
+    }
+    assert.deepEqual(
+      runs[0], runs[1],
+      `transcripts drifted across runs: ${JSON.stringify(runs[0])} != ${JSON.stringify(runs[1])}. ` +
+      "This breaks the sim's determinism invariant — check server.py's " +
+      "_text_for() for non-deterministic changes (random draws, mutable state, " +
+      "PRNG injection).",
     );
   });
 });
