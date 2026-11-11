@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package aurigin.deepfake_detection.v1;
 
+import "aurigin/common/v1/endpoint.proto";
 import "aurigin/media/v1/audio_frame.proto";
 import "twilio/tme/extensions/common/v1/audio_buffer.proto";
 
@@ -123,6 +124,16 @@ message DetectionConfig {
   // ~1 s of audio to produce enough feature frames; setting this lower
   // will break inference on short residuals.
   optional float min_analysis_duration_s = 6;
+
+  // Pass-through metadata the orchestrator sets at session open. The
+  // deepfake service caches these values and echoes them on every
+  // AnalysisResult + FinalResult it emits on this session. The service
+  // MUST NOT branch on them — leg-attribution policy lives in the
+  // orchestrator; the consumer side is transport-only. Unset means
+  // "no attribution attached to this session" and the echoed fields
+  // on outputs stay unset.
+  optional aurigin.common.v1.Endpoint endpoint = 7;
+  optional string track_id = 8;
 }
 
 // VAD (voice-activity detection) per-session mode. Controls whether the
@@ -177,6 +188,11 @@ message AnalysisResult {
   // compat and surface the authoritative value here. 0.0 is a legitimate
   // reading (no silence detected), not "unknown".
   float silence_pct = 6;
+
+  // Echo of the session's endpoint metadata (from DetectionConfig).
+  // Unset when the session had no attribution attached.
+  optional aurigin.common.v1.Endpoint endpoint = 7;
+  optional string track_id = 8;
 }
 
 // Emitted once when the client closes the stream.
@@ -218,4 +234,9 @@ message FinalResult {
   // actually scored (not VAD-gated silence sentinels) when
   // vad_mode = ON. 0.0 is "no silence observed", not "unknown".
   float silence_pct_mean = 8;
+
+  // Echo of the session's endpoint metadata (from DetectionConfig).
+  // Unset when the session had no attribution attached.
+  optional aurigin.common.v1.Endpoint endpoint = 9;
+  optional string track_id = 10;
 }

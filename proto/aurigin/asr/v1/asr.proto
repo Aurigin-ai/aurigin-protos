@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package aurigin.asr.v1;
 
+import "aurigin/common/v1/endpoint.proto";
 import "aurigin/media/v1/audio_frame.proto";
 
 // Automatic Speech Recognition Service.
@@ -182,6 +183,14 @@ message TranscriptionConfig {
   // farther back for a cleaner split. Rarely needs changing;
   // exposed for tenant-level tuning only.
   optional uint32 cut_search_ms = 9;
+
+  // Pass-through metadata the orchestrator sets at session open. The
+  // ASR service caches these values and echoes them on every
+  // TranscriptTurn + FinalResult it emits on this session. The
+  // service MUST NOT branch on them — leg-attribution policy lives
+  // in the orchestrator; the consumer side is transport-only.
+  optional aurigin.common.v1.Endpoint endpoint = 10;
+  optional string track_id = 11;
 }
 
 // VAD per-session mode. Controls whether the turn-cutter runs between
@@ -239,6 +248,18 @@ message TranscriptTurn {
   // room with sparse utterances". 0.0 is "no silence detected",
   // not "unknown".
   float silence_pct = 6;
+
+  // Echo of the session's endpoint metadata (from TranscriptionConfig).
+  // The ASR service caches the TranscriptionConfig values at session
+  // open and echoes them on every TranscriptTurn without
+  // interpreting — pass-through only. Optional; unset means the
+  // orchestrator opened the session with no attribution attached
+  // (legacy ingress path).
+  optional aurigin.common.v1.Endpoint endpoint = 7;
+
+  // Echo of the session's track_id metadata. Same semantics as
+  // `endpoint` above — pass-through, server does not inspect.
+  optional string track_id = 8;
 }
 
 // Emitted once when the client closes the stream. Purely accounting —
@@ -278,4 +299,9 @@ message FinalResult {
   // than a running mean on the caller. 0.0 is "no silence observed",
   // not "unknown".
   float silence_pct_mean = 6;
+
+  // Echo of the session's endpoint metadata (from TranscriptionConfig).
+  // Unset when the session had no attribution attached.
+  optional aurigin.common.v1.Endpoint endpoint = 7;
+  optional string track_id = 8;
 }
