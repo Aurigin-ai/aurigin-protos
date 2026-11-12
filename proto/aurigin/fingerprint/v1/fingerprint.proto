@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package aurigin.fingerprint.v1;
 
+import "aurigin/common/v1/endpoint.proto";
 import "aurigin/media/v1/audio_frame.proto";
 
 // Fingerprint Service.
@@ -116,6 +117,14 @@ message FingerprintConfig {
   //     invoking this RPC.
   //   - model_version — rollout is by MODEL_HUB_REVISION on the server,
   //     not by client-selectable string.
+
+  // Pass-through metadata the orchestrator sets at session open. The
+  // fingerprint service caches these values and echoes them on every
+  // EmbeddingResult + FinalResult it emits on this session. The
+  // service MUST NOT branch on them — leg-attribution policy lives in
+  // the orchestrator; the consumer side is transport-only.
+  optional aurigin.common.v1.Endpoint endpoint = 3;
+  optional string track_id = 4;
 }
 
 // Per-session tail strategy. Mirrors deepfake-service's TailStrategy so
@@ -157,6 +166,11 @@ message EmbeddingResult {
   // without hardcoding, and survives a future backbone swap without a
   // silent length mismatch.
   int32 dim = 5;
+
+  // Echo of the session's endpoint metadata (from FingerprintConfig).
+  // Unset when the session had no attribution attached.
+  optional aurigin.common.v1.Endpoint endpoint = 6;
+  optional string track_id = 7;
 }
 
 // Emitted once when the client closes the stream. Purely observability:
@@ -193,4 +207,9 @@ message FinalResult {
   // Note: no silence aggregate on this message — this consumer
   // doesn't VAD-gate (see EmbeddingConfig).
   string model_version = 5;
+
+  // Echo of the session's endpoint metadata (from FingerprintConfig).
+  // Unset when the session had no attribution attached.
+  optional aurigin.common.v1.Endpoint endpoint = 6;
+  optional string track_id = 7;
 }

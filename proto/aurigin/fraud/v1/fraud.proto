@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package aurigin.fraud.v1;
 
+import "aurigin/common/v1/endpoint.proto";
+
 // Fraud detection event shapes — Kafka message envelopes, NOT a gRPC
 // service surface.
 //
@@ -124,6 +126,23 @@ message FraudVerdict {
   // type cassandra emits on forced-fraud re-asks for calls it finds
   // legitimate). Absent when no re-ask fired — the common case.
   optional string reask_answer = 11;
+
+  // Endpoint the transcript turn that produced this verdict came
+  // from. Pass-through: the ASR service stamped it on the inbound
+  // TranscriptTurn (echoed from the TranscriptionConfig the
+  // orchestrator supplied at session open), fraud-classifier copies
+  // the field as-is from the inbound `transcript_turns` Kafka
+  // message to the outbound `fraud_verdicts` message. The
+  // classifier does not inspect the value.
+  //
+  // Optional. Unset when the upstream ASR session was opened with
+  // no attribution attached (legacy ingress path).
+  optional aurigin.common.v1.Endpoint endpoint = 12;
+
+  // Track_id the transcript turn came from. Pass-through from the
+  // input TranscriptTurn, same semantics as `endpoint`. Empty /
+  // unset = single-track endpoint or no attribution attached.
+  optional string track_id = 13;
 }
 
 // Three-way decision cassandra produces per turn. Numeric values are
