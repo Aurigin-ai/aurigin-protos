@@ -10,12 +10,21 @@ dependencies = [
     #   0.3.4  — aurigin.recording.v1, consumed by recording_client
     #   0.3.7  — aurigin.asr.v1 (Transcription) + aurigin.fraud.v1 (verdict event shape),
     #           consumed by asr_client
-    "aurigin-protos>=0.3.7",
+    #   0.3.8  — aurigin.common.v1.Endpoint + ClientAudioFrame + ClientMetadata +
+    #           endpoint/track_id attribution across consumer configs and outputs
+    "aurigin-protos>=0.3.8",
     "grpcio>=1.62",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0"]
+# Tests spawn the simulator packages as subprocesses using the same Python
+# interpreter (via sys.executable + PYTHONPATH to examples/simulator/*/src/).
+# pyyaml + jsonschema are runtime deps of the deepfake simulator's scenario
+# loader (examples/simulator/deepfake/src/deepfake_simulator_service/sim/
+# loader.py); the sibling asr / fingerprint / replay / recording sims don't
+# need them. Kept here so `uv sync --extra test` is the single install
+# recipe for the whole test suite.
+test = ["pytest>=8.0", "pyyaml>=6.0", "jsonschema>=4.20"]
 
 # Mirrors the TypeScript example's `npm run client` / etc. After `uv sync`,
 # run with `uv run client` / `uv run phone-call` / `uv run phone-call-burst` /

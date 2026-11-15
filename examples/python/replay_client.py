@@ -7,6 +7,7 @@ against a 3000 ms window — the halo-3 training length).
 
 CLI:
     python replay_client.py [--target HOST:PORT] [--audio-dir DIR]
+                            [--endpoint {near_end,far_end,mixed}] [--track-id STR]
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from aurigin.common.v1 import endpoint_pb2 as ep_pb
 from aurigin.media.v1 import audio_frame_pb2 as af_pb
 from aurigin.replay_detection.v1 import replay_detection_pb2 as pb
 from aurigin.replay_detection.v1 import replay_detection_pb2_grpc as pb_grpc
@@ -27,10 +29,39 @@ CHUNK_MS = 500
 # training window so the fallback fires at least one AnalysisResult in CI.
 SILENCE_CHUNKS = 6
 
+_ENDPOINT_BY_NAME = {
+    "near_end": ep_pb.ENDPOINT_NEAR_END,
+    "far_end":  ep_pb.ENDPOINT_FAR_END,
+    "mixed":    ep_pb.ENDPOINT_MIXED,
+}
 
-def _silent_session_iter():
+_ENDPOINT_LABEL = {
+    ep_pb.ENDPOINT_UNSPECIFIED: "unspecified",
+    ep_pb.ENDPOINT_NEAR_END:    "near_end",
+    ep_pb.ENDPOINT_FAR_END:     "far_end",
+    ep_pb.ENDPOINT_MIXED:       "mixed",
+}
+
+
+def _create_session_request(
+    endpoint: int | None, track_id: str | None,
+) -> pb.CreateSessionRequest:
+    """Build a CreateSessionRequest with ReplayConfig populating
+    endpoint/track_id if the caller set either. No flags ⇒ no config
+    object on the wire, matching the pre-0.3.8 call shape."""
+    if endpoint is None and not track_id:
+        return pb.CreateSessionRequest()
+    cfg = pb.ReplayConfig()
+    if endpoint is not None:
+        cfg.endpoint = endpoint
+    if track_id:
+        cfg.track_id = track_id
+    return pb.CreateSessionRequest(config=cfg)
+
+
+def _silent_session_iter(endpoint: int | None, track_id: str | None):
     """Fallback iterator: CreateSession + 6 × 500 ms of silence at 16 kHz."""
-    yield pb.DetectReplayRequest(create_session_request=pb.CreateSessionRequest())
+    yield pb.DetectReplayRequest(create_session_request=_create_session_request(endpoint, track_id))
     pts_ns = 0
     for _ in range(SILENCE_CHUNKS):
         samples = int(DEFAULT_RATE * CHUNK_MS / 1000)
@@ -47,11 +78,11 @@ def _silent_session_iter():
         pts_ns += CHUNK_MS * 1_000_000
 
 
-def _wav_session_iter(wav: WavData):
+def _wav_session_iter(wav: WavData, endpoint: int | None, track_id: str | None):
     """Stream a WAV file (S16LE / F32LE / PCMU / PCMA) as CreateSession + AudioFrame chunks."""
     bytes_per_chunk = int(wav.rate * CHUNK_MS / 1000) * wav.bytes_per_sample
 
-    yield pb.DetectReplayRequest(create_session_request=pb.CreateSessionRequest())
+    yield pb.DetectReplayRequest(create_session_request=_create_session_request(endpoint, track_id))
 
     pts_ns = 0
     for start in range(0, len(wav.samples), bytes_per_chunk):
@@ -82,20 +113,35 @@ def _run_session(stub, request_iter, label: str) -> None:
                 print(f"Model:   {ack.model_name or '?'}@{ack.model_version or '?'}")
         elif kind == "analysis_result":
             r = response.analysis_result
+            attr = ""
+            if r.endpoint and r.endpoint != ep_pb.ENDPOINT_UNSPECIFIED:
+                attr += f" ep={_ENDPOINT_LABEL.get(r.endpoint, r.endpoint)}"
+            if r.track_id:
+                attr += f" track={r.track_id}"
             print(
                 f"Analysis | offset={r.audio_offset_ms}ms | duration={r.duration_ms}ms | "
                 f"score={r.score:.3f} | label={r.label_raw or r.label} | "
-                f"confidence={r.confidence:.2f}",
+                f"confidence={r.confidence:.2f}{attr}",
             )
         elif kind == "final_result":
             f = response.final_result
+            attr = ""
+            if f.endpoint and f.endpoint != ep_pb.ENDPOINT_UNSPECIFIED:
+                attr += f" ep={_ENDPOINT_LABEL.get(f.endpoint, f.endpoint)}"
+            if f.track_id:
+                attr += f" track={f.track_id}"
             print(
                 f"FINAL    | total={f.total_audio_ms}ms | score={f.overall_score:.3f} | "
-                f"label={f.overall_label_raw or f.overall_label} | analyses={f.analysis_count}",
+                f"label={f.overall_label_raw or f.overall_label} | analyses={f.analysis_count}{attr}",
             )
 
 
-def main(target: str = "localhost:50051", audio_dir: str | Path | None = None) -> None:
+def main(
+    target: str = "localhost:50051",
+    audio_dir: str | Path | None = None,
+    endpoint: int | None = None,
+    track_id: str | None = None,
+) -> None:
     audio_dir = (
         Path(audio_dir).resolve()
         if audio_dir
@@ -108,7 +154,11 @@ def main(target: str = "localhost:50051", audio_dir: str | Path | None = None) -
     with make_sync_channel(target) as channel:
         stub = pb_grpc.ReplayDetectionStub(channel)
         if not wavs:
-            _run_session(stub, _silent_session_iter(), "silence (3 s @ 16 kHz)")
+            _run_session(
+                stub,
+                _silent_session_iter(endpoint, track_id),
+                "silence (3 s @ 16 kHz)",
+            )
             return
         for path in wavs:
             # Pre-validate before opening the stream — same reasoning as
@@ -121,7 +171,7 @@ def main(target: str = "localhost:50051", audio_dir: str | Path | None = None) -
             except ValueError as exc:
                 print(f"\n=== {path.name} ===\nSKIPPED: {exc}")
                 continue
-            _run_session(stub, _wav_session_iter(wav), path.name)
+            _run_session(stub, _wav_session_iter(wav, endpoint, track_id), path.name)
 
 
 def cli() -> None:
@@ -143,8 +193,27 @@ def cli() -> None:
         default=None,
         help="Directory to scan for *.wav (default: examples/audio/)",
     )
+    parser.add_argument(
+        "--endpoint",
+        choices=list(_ENDPOINT_BY_NAME),
+        default=None,
+        help=(
+            "Caller-supplied endpoint attribution attached to ReplayConfig. "
+            "The service echoes it on every AnalysisResult + FinalResult "
+            "without inspecting."
+        ),
+    )
+    parser.add_argument(
+        "--track-id",
+        default=None,
+        help=(
+            "Caller-supplied track_id attribution attached to ReplayConfig. "
+            "Same pass-through semantics as --endpoint."
+        ),
+    )
     args = parser.parse_args()
-    main(args.target, args.audio_dir)
+    endpoint = _ENDPOINT_BY_NAME[args.endpoint] if args.endpoint else None
+    main(args.target, args.audio_dir, endpoint, args.track_id)
 
 
 if __name__ == "__main__":

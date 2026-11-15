@@ -68,6 +68,52 @@
 #   just tls                                   # regenerate the committed self-signed certs
 #   just smoke                                 # end-to-end pytest
 #
+# ─── 0.3.8+ attribution flags ────────────────────────────────────────────────
+# Every client script accepts `--endpoint {near_end,far_end,mixed}` +
+# `--track-id STR` so the caller can label audio with per-leg attribution.
+# Pass-through only: services echo them on every output they emit. Omit
+# both → no config on the wire (bit-identical pre-0.3.8 shape).
+#
+#   just client --endpoint near_end --track-id subject-mic
+#   just phone-call --endpoint far_end --track-id remote-speaker
+#   just scan-file --file long.wav --endpoint mixed --track-id archive-scan
+#   just fingerprint-client --endpoint near_end --track-id voiceprint-demo
+#
+# The orchestrator-client additionally supports multi-leg streaming —
+# one session carrying any 2 or 3 of NEAR_END / FAR_END / MIXED frames
+# interleaved (via ClientAudioFrame):
+#
+#   # NEAR + FAR (1-on-1 call shape):
+#   just orchestrator-client \
+#     --near-end-file ../audio/fixtures/test_call.wav \
+#     --far-end-file ../audio/fixtures/test_call_mulaw.wav \
+#     --track-id dual-demo
+#
+#   # NEAR + MIXED (MS Teams / conference-mix + separate mic):
+#   just orchestrator-client \
+#     --near-end-file ../audio/fixtures/test_call.wav \
+#     --mixed-file ../audio/fixtures/test_call_10s_tail.wav \
+#     --track-id teams-call
+#
+#   # NEAR + FAR + MIXED (full three-endpoint smoke test):
+#   just orchestrator-client \
+#     --near-end-file ../audio/fixtures/test_call.wav \
+#     --far-end-file ../audio/fixtures/test_call_mulaw.wav \
+#     --mixed-file ../audio/fixtures/test_call_10s_tail.wav \
+#     --track-id triple-demo
+#
+# The orchestrator-client also schedules mid-call ClientMetadata
+# emissions (state transitions modelling aurigin-guard-win detecting
+# a Chrome Teams tab, a mic going silent, etc.):
+#
+#   # Convenience shorthand — two canned Teams start/stop transitions:
+#   just orchestrator-client --duration 12 --demo-teams-meeting
+#
+#   # Explicit scheduling — repeat --metadata-at SECONDS KEY=VAL[,KEY=VAL...]:
+#   just orchestrator-client --duration 12 \
+#     --metadata-at 2 active_app=chrome.exe,meeting_state=in_meeting \
+#     --metadata-at 10 meeting_state=idle
+#
 # See examples/certs/README.md for the full trust model.
 
 set shell := ["bash", "-cu"]

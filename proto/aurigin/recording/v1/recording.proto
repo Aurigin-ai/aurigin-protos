@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package aurigin.recording.v1;
 
+import "aurigin/common/v1/endpoint.proto";
 import "aurigin/media/v1/audio_frame.proto";
 
 // Recording Service.
@@ -163,6 +164,15 @@ message RecordingConfig {
   // (e.g. F32LE for lossless float workflows). Recorder transcodes
   // every incoming frame to the target before writing.
   optional aurigin.media.v1.AudioCodec target_codec = 5;
+
+  // Caller-supplied attribution metadata. The service caches these
+  // values at session open and echoes them on RecordingComplete —
+  // pass-through only. Callers use them to label the recording so
+  // their downstream systems can attribute the file to a leg (e.g.
+  // "this recording holds the NEAR_END stream"). The service MUST
+  // NOT branch on these values. Unset = no attribution attached.
+  optional aurigin.common.v1.Endpoint endpoint = 6;
+  optional string track_id = 7;
 }
 
 enum ContainerFormat {
@@ -222,4 +232,10 @@ message RecordingComplete {
   // Sample rate of the audio inside the container, Hz. Same
   // provenance as `codec` — mirrors what rode on AudioFrame.
   uint32 sample_rate_hz = 7;
+
+  // Echo of the session's `endpoint` and `track_id` from
+  // RecordingConfig. Pass-through only — the service never inspects
+  // the values. Unset when the session had no attribution attached.
+  optional aurigin.common.v1.Endpoint endpoint = 8;
+  optional string track_id = 9;
 }

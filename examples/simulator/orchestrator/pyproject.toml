@@ -9,8 +9,10 @@ requires-python = ">=3.10"
 dependencies = [
     # Consumed by the generated stubs the server responds with. Aligned with
     # the aurigin-protos version this repo publishes; bump in lockstep on
-    # each release.
-    "aurigin-protos>=0.3.2",
+    # each release. 0.3.8 adds the ClientAudioFrame wrapper + Verdict
+    # endpoint/track_id fields the simulator now demuxes (one canned
+    # Verdict per observed endpoint per tick) and echoes.
+    "aurigin-protos>=0.3.8",
     "grpcio>=1.62",
 ]
 

@@ -6,14 +6,17 @@
 //
 // CLI:
 //   npm run fingerprint-client -- [--target HOST:PORT]
+//                                 [--endpoint {near_end,far_end,mixed}] [--track-id STR]
 //   tsx fingerprint_client.ts [--target HOST:PORT]
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { Endpoint } from "@aurigin/protos/aurigin/common/v1/endpoint";
 import {
   type ExtractFingerprintRequest,
   type ExtractFingerprintResponse,
+  type FingerprintConfig,
   FingerprintClient,
 } from "@aurigin/protos/aurigin/fingerprint/v1/fingerprint";
 import { AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
@@ -28,8 +31,44 @@ const CHUNK_MS = 500;
 // fallback fires at least one EmbeddingResult in CI.
 const SILENCE_CHUNKS = 10;
 
-function* silentChunks(): Generator<ExtractFingerprintRequest> {
-  yield { createSessionRequest: {} };
+const ENDPOINT_BY_NAME: Record<string, Endpoint> = {
+  near_end: Endpoint.ENDPOINT_NEAR_END,
+  far_end: Endpoint.ENDPOINT_FAR_END,
+  mixed: Endpoint.ENDPOINT_MIXED,
+};
+
+const ENDPOINT_LABEL: Record<number, string> = {
+  [Endpoint.ENDPOINT_UNSPECIFIED]: "unspecified",
+  [Endpoint.ENDPOINT_NEAR_END]: "near_end",
+  [Endpoint.ENDPOINT_FAR_END]: "far_end",
+  [Endpoint.ENDPOINT_MIXED]: "mixed",
+};
+
+function createSessionRequest(
+  endpoint: Endpoint | null,
+  trackId: string | null,
+): { config?: FingerprintConfig } {
+  if (endpoint === null && !trackId) return {};
+  const config: Partial<FingerprintConfig> = {};
+  if (endpoint !== null) config.endpoint = endpoint;
+  if (trackId) config.trackId = trackId;
+  return { config: config as FingerprintConfig };
+}
+
+function attrSuffix(endpoint: number | undefined, trackId: string | undefined): string {
+  const parts: string[] = [];
+  if (endpoint && endpoint !== Endpoint.ENDPOINT_UNSPECIFIED) {
+    parts.push(`ep=${ENDPOINT_LABEL[endpoint] ?? endpoint}`);
+  }
+  if (trackId) parts.push(`track=${trackId}`);
+  return parts.length ? ` ${parts.join(" ")}` : "";
+}
+
+function* silentChunks(
+  endpoint: Endpoint | null,
+  trackId: string | null,
+): Generator<ExtractFingerprintRequest> {
+  yield { createSessionRequest: createSessionRequest(endpoint, trackId) };
   let ptsNs = 0n;
   for (let i = 0; i < SILENCE_CHUNKS; i++) {
     const samples = Math.floor((DEFAULT_RATE * CHUNK_MS) / 1000);
@@ -47,11 +86,15 @@ function* silentChunks(): Generator<ExtractFingerprintRequest> {
   }
 }
 
-function* wavChunks(wav: WavData): Generator<ExtractFingerprintRequest> {
+function* wavChunks(
+  wav: WavData,
+  endpoint: Endpoint | null,
+  trackId: string | null,
+): Generator<ExtractFingerprintRequest> {
   const framesPerChunk = Math.floor((wav.rate * CHUNK_MS) / 1000);
   const bytesPerFrame = wav.bytesPerSample * wav.channels;
   const bytesPerChunk = framesPerChunk * bytesPerFrame;
-  yield { createSessionRequest: {} };
+  yield { createSessionRequest: createSessionRequest(endpoint, trackId) };
   let ptsNs = 0n;
   for (let i = 0; i < wav.samples.length; i += bytesPerChunk) {
     const chunk = wav.samples.subarray(i, Math.min(i + bytesPerChunk, wav.samples.length));
@@ -93,11 +136,15 @@ function runSession(
         const head = Buffer.from(r.embedding.slice(0, 8)).toString("hex");
         console.log(
           `Embedding | offset=${r.audioOffsetMs}ms | duration=${r.durationMs}ms | ` +
-            `code=${r.fingerprintCode} | dim=${r.dim} | head=${head}`,
+            `code=${r.fingerprintCode} | dim=${r.dim} | head=${head}` +
+            attrSuffix(r.endpoint, r.trackId),
         );
       } else if (response.finalResult) {
         const f = response.finalResult;
-        console.log(`FINAL     | total=${f.totalAudioMs}ms | embeddings=${f.embeddingCount}`);
+        console.log(
+          `FINAL     | total=${f.totalAudioMs}ms | embeddings=${f.embeddingCount}` +
+            attrSuffix(f.endpoint, f.trackId),
+        );
       }
     });
     call.on("end", resolve);
@@ -107,14 +154,27 @@ function runSession(
   });
 }
 
-function parseTarget(argv: string[]): string {
-  const i = argv.indexOf("--target");
-  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : "localhost:50051";
+function parseFlag(argv: string[], flag: string): string | null {
+  const i = argv.indexOf(flag);
+  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
 }
 
 async function main() {
   const argv = process.argv.slice(2);
-  const target = parseTarget(argv);
+  const target = parseFlag(argv, "--target") ?? "localhost:50051";
+  const endpointName = parseFlag(argv, "--endpoint");
+  const trackId = parseFlag(argv, "--track-id");
+
+  let endpoint: Endpoint | null = null;
+  if (endpointName !== null) {
+    const ep = ENDPOINT_BY_NAME[endpointName];
+    if (ep === undefined) {
+      console.error(`unknown --endpoint ${endpointName}; choices: near_end, far_end, mixed`);
+      process.exit(2);
+    }
+    endpoint = ep;
+  }
+
   const audioDir = path.join(__dirname, "..", "audio");
   const wavs = fs.existsSync(audioDir)
     ? fs
@@ -129,7 +189,11 @@ async function main() {
   const client = new FingerprintClient(target, channelCredentials());
   try {
     if (wavs.length === 0) {
-      await runSession(client, silentChunks(), "silence (5 s @ 16 kHz)");
+      await runSession(
+        client,
+        silentChunks(endpoint, trackId),
+        "silence (5 s @ 16 kHz)",
+      );
     } else {
       for (const wavPath of wavs) {
         // Pre-validate before opening the stream — same reasoning as
@@ -144,7 +208,7 @@ async function main() {
           console.log(`\n=== ${path.basename(wavPath)} ===\nSKIPPED: ${(err as Error).message}`);
           continue;
         }
-        await runSession(client, wavChunks(wav), path.basename(wavPath));
+        await runSession(client, wavChunks(wav, endpoint, trackId), path.basename(wavPath));
       }
     }
   } finally {

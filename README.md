@@ -186,10 +186,38 @@ import { DeepfakeDetectionClient } from "@aurigin/protos/aurigin/deepfake_detect
 // shape as deepfake; per-window EmbeddingResult (768-d L2-normalised
 // float32 bytes) instead of AnalysisResult.
 import { FingerprintClient } from "@aurigin/protos/aurigin/fingerprint/v1/fingerprint";
+// New in 0.3.2 — SDK-facing AudioVerification surface. Clients send
+// audio + optional metadata; server (orchestrator) terminates Stream
+// bidi, dispatches to the tenant's configured consumer set, and
+// surfaces Verdict / EmbeddingVerdict / TranscriptTurn / FraudVerdict
+// / Notification on the response stream.
+import { AudioVerificationClient } from "@aurigin/protos/aurigin/client/v1/audio_verification";
+// New in 0.3.3 — replay-vs-genuine classifier contract. Same bidi
+// shape as deepfake; per-window AnalysisResult labelled
+// REPLAY_LABEL_REPLAY / REPLAY_LABEL_GENUINE.
+import { ReplayDetectionClient } from "@aurigin/protos/aurigin/replay_detection/v1/replay_detection";
+// New in 0.3.4 — per-call audio recorder (sink only, no scoring). Bidi
+// Record → terminal RecordingComplete with blob_uri + sha256 for
+// downstream retrieval.
+import { RecordingClient } from "@aurigin/protos/aurigin/recording/v1/recording";
+// New in 0.3.7 — real-time transcription (Parakeet TDT model). Emits
+// one TranscriptTurn per VAD-delimited speech turn; bidi shape
+// mirrors deepfake / replay for consumer-dispatch parity.
+import { TranscriptionClient } from "@aurigin/protos/aurigin/asr/v1/asr";
+// New in 0.3.7 — fraud-classifier Kafka event schema (no gRPC service
+// — the classifier consumes `transcript_turns` and publishes
+// `fraud_verdicts`). Consumers of the fraud_verdicts topic import
+// this to deserialise.
+import { FraudVerdict } from "@aurigin/protos/aurigin/fraud/v1/fraud";
 // New in 0.3.0 — self-describing audio frame (codec / sample_rate_hz /
 // channels on the message). Preferred over the deprecated Twilio-vendored
 // AudioBuffer for all new integrations.
 import { AudioFrame, AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
+// New in 0.3.8 — per-leg attribution (NEAR_END / FAR_END / MIXED)
+// carried on ClientAudioFrame + echoed on every verdict / embedding /
+// transcript output. Lives in common.v1 so consumer services that only
+// take raw AudioFrame don't pull a routing concept into their stubs.
+import { Endpoint } from "@aurigin/protos/aurigin/common/v1/endpoint";
 
 const client = new DeepfakeDetectionClient(
   "localhost:50051",
@@ -202,7 +230,7 @@ const fingerprintClient = new FingerprintClient(
 ```
 
 Full client snippets: [examples/typescript/](examples/typescript/).
-Simulator servers: [examples/simulator/deepfake/](examples/simulator/deepfake/), [examples/simulator/fingerprint/](examples/simulator/fingerprint/).
+Simulator servers: [examples/simulator/deepfake/](examples/simulator/deepfake/), [examples/simulator/fingerprint/](examples/simulator/fingerprint/), [examples/simulator/replay/](examples/simulator/replay/), [examples/simulator/recording/](examples/simulator/recording/), [examples/simulator/asr/](examples/simulator/asr/), [examples/simulator/orchestrator/](examples/simulator/orchestrator/).
 
 > *Aurigin engineers who need to install from the internal CodeArtifact channel (e.g. to pick up a tagged version before it has been promoted to public npm): see [`infra/aws/`](infra/aws/) for the connection details.*
 
@@ -218,17 +246,44 @@ from aurigin.deepfake_detection.v1 import deepfake_detection_pb2, deepfake_detec
 # shape as deepfake; per-window EmbeddingResult (768-d L2-normalised
 # float32 bytes) instead of AnalysisResult.
 from aurigin.fingerprint.v1 import fingerprint_pb2, fingerprint_pb2_grpc  # noqa: F401
+# New in 0.3.2 — SDK-facing AudioVerification surface. Clients send
+# audio + optional metadata; server (orchestrator) terminates Stream
+# bidi, dispatches to the tenant's configured consumer set, and
+# surfaces Verdict / EmbeddingVerdict / TranscriptTurn / FraudVerdict
+# / Notification on the response stream.
+from aurigin.client.v1 import audio_verification_pb2, audio_verification_pb2_grpc  # noqa: F401
+# New in 0.3.3 — replay-vs-genuine classifier contract. Same bidi shape
+# as deepfake; per-window AnalysisResult labelled REPLAY_LABEL_REPLAY /
+# REPLAY_LABEL_GENUINE.
+from aurigin.replay_detection.v1 import replay_detection_pb2, replay_detection_pb2_grpc  # noqa: F401
+# New in 0.3.4 — per-call audio recorder (sink only, no scoring). Bidi
+# Record → terminal RecordingComplete with blob_uri + sha256.
+from aurigin.recording.v1 import recording_pb2, recording_pb2_grpc  # noqa: F401
+# New in 0.3.7 — real-time transcription (Parakeet TDT model). Emits
+# one TranscriptTurn per VAD-delimited speech turn; bidi shape mirrors
+# deepfake / replay for consumer-dispatch parity.
+from aurigin.asr.v1 import asr_pb2, asr_pb2_grpc  # noqa: F401
+# New in 0.3.7 — fraud-classifier Kafka event schema (no gRPC service
+# — the classifier consumes `transcript_turns` and publishes
+# `fraud_verdicts`). Consumers of the fraud_verdicts topic import
+# this to deserialise.
+from aurigin.fraud.v1 import fraud_pb2  # noqa: F401
 # New in 0.3.0 — self-describing audio frame (codec / sample_rate_hz /
 # channels on the message). Preferred over the deprecated Twilio-vendored
 # AudioBuffer for all new integrations.
 from aurigin.media.v1 import audio_frame_pb2
+# New in 0.3.8 — per-leg attribution (NEAR_END / FAR_END / MIXED)
+# carried on ClientAudioFrame + echoed on every verdict / embedding /
+# transcript output. Lives in common.v1 so consumer services that only
+# take raw AudioFrame don't pull a routing concept into their stubs.
+from aurigin.common.v1 import endpoint_pb2  # noqa: F401
 # Deprecated — kept importable so 0.2.x consumers keep working. Scheduled
 # for removal in 0.4.0.
 from twilio.tme.extensions.common.v1 import audio_buffer_pb2  # noqa: F401
 ```
 
 Full client snippets: [examples/python/](examples/python/).
-Simulator servers: [examples/simulator/deepfake/](examples/simulator/deepfake/), [examples/simulator/fingerprint/](examples/simulator/fingerprint/).
+Simulator servers: [examples/simulator/deepfake/](examples/simulator/deepfake/), [examples/simulator/fingerprint/](examples/simulator/fingerprint/), [examples/simulator/replay/](examples/simulator/replay/), [examples/simulator/recording/](examples/simulator/recording/), [examples/simulator/asr/](examples/simulator/asr/), [examples/simulator/orchestrator/](examples/simulator/orchestrator/).
 
 > *Aurigin engineers who need to install from the internal CodeArtifact channel (e.g. to pick up a tagged version before it has been promoted to public PyPI, or to keep build inputs inside the AWS perimeter): see [`infra/aws/`](infra/aws/) for the connection details.*
 

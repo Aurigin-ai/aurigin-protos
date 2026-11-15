@@ -16,8 +16,10 @@ import { fileURLToPath } from "node:url";
 import {
   type TranscribeRequest,
   type TranscribeResponse,
+  type TranscriptionConfig,
   TranscriptionClient,
 } from "@aurigin/protos/aurigin/asr/v1/asr";
+import { Endpoint } from "@aurigin/protos/aurigin/common/v1/endpoint";
 import { AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
 import { channelCredentials, readWav, transportLabel, type WavData } from "./common/index.js";
 
@@ -31,8 +33,44 @@ const CHUNK_MS = 500;
 // path exercised at least twice before FinalResult.
 const SILENCE_CHUNKS = 8;
 
-function* silentChunks(): Generator<TranscribeRequest> {
-  yield { createSessionRequest: {} };
+const ENDPOINT_BY_NAME: Record<string, Endpoint> = {
+  near_end: Endpoint.ENDPOINT_NEAR_END,
+  far_end: Endpoint.ENDPOINT_FAR_END,
+  mixed: Endpoint.ENDPOINT_MIXED,
+};
+
+const ENDPOINT_LABEL: Record<number, string> = {
+  [Endpoint.ENDPOINT_UNSPECIFIED]: "unspecified",
+  [Endpoint.ENDPOINT_NEAR_END]: "near_end",
+  [Endpoint.ENDPOINT_FAR_END]: "far_end",
+  [Endpoint.ENDPOINT_MIXED]: "mixed",
+};
+
+function createSessionRequest(
+  endpoint: Endpoint | null,
+  trackId: string | null,
+): { config?: TranscriptionConfig } {
+  if (endpoint === null && !trackId) return {};
+  const config: Partial<TranscriptionConfig> = {};
+  if (endpoint !== null) config.endpoint = endpoint;
+  if (trackId) config.trackId = trackId;
+  return { config: config as TranscriptionConfig };
+}
+
+function attrSuffix(endpoint: number | undefined, trackId: string | undefined): string {
+  const parts: string[] = [];
+  if (endpoint && endpoint !== Endpoint.ENDPOINT_UNSPECIFIED) {
+    parts.push(`ep=${ENDPOINT_LABEL[endpoint] ?? endpoint}`);
+  }
+  if (trackId) parts.push(`track=${trackId}`);
+  return parts.length ? ` ${parts.join(" ")}` : "";
+}
+
+function* silentChunks(
+  endpoint: Endpoint | null,
+  trackId: string | null,
+): Generator<TranscribeRequest> {
+  yield { createSessionRequest: createSessionRequest(endpoint, trackId) };
   let ptsNs = 0n;
   for (let i = 0; i < SILENCE_CHUNKS; i++) {
     const samples = Math.floor((DEFAULT_RATE * CHUNK_MS) / 1000);
@@ -50,11 +88,15 @@ function* silentChunks(): Generator<TranscribeRequest> {
   }
 }
 
-function* wavChunks(wav: WavData): Generator<TranscribeRequest> {
+function* wavChunks(
+  wav: WavData,
+  endpoint: Endpoint | null,
+  trackId: string | null,
+): Generator<TranscribeRequest> {
   const framesPerChunk = Math.floor((wav.rate * CHUNK_MS) / 1000);
   const bytesPerFrame = wav.bytesPerSample * wav.channels;
   const bytesPerChunk = framesPerChunk * bytesPerFrame;
-  yield { createSessionRequest: {} };
+  yield { createSessionRequest: createSessionRequest(endpoint, trackId) };
   let ptsNs = 0n;
   for (let i = 0; i < wav.samples.length; i += bytesPerChunk) {
     const chunk = wav.samples.subarray(i, Math.min(i + bytesPerChunk, wav.samples.length));
@@ -92,15 +134,16 @@ function runSession(
         console.log(
           `Turn ${String(t.turn).padStart(3)} | ` +
             `${String(t.t0Ms).padStart(6)}-${String(t.t1Ms).padEnd(6)}ms | ` +
-            `conf=${t.confidence.toFixed(2)} | silence=${t.silencePct.toFixed(1)}% | ` +
-            `${JSON.stringify(t.text)}`,
+            `conf=${t.confidence.toFixed(2)} | silence=${t.silencePct.toFixed(1)}% |` +
+            `${attrSuffix(t.endpoint, t.trackId)} ${JSON.stringify(t.text)}`,
         );
       } else if (response.finalResult) {
         const f = response.finalResult;
         console.log(
           `FINAL     | total=${f.totalAudioMs}ms | turns=${f.turnCount} | ` +
             `wall=${f.wallMs}ms | rtf=${f.rtf.toFixed(2)} | ` +
-            `silence_mean=${f.silencePctMean.toFixed(1)}%`,
+            `silence_mean=${f.silencePctMean.toFixed(1)}%` +
+            attrSuffix(f.endpoint, f.trackId),
         );
       }
     });
@@ -111,20 +154,28 @@ function runSession(
   });
 }
 
-function parseTarget(argv: string[]): string {
-  const i = argv.indexOf("--target");
-  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : "localhost:50051";
-}
-
-function parseAudioDir(argv: string[]): string {
-  const i = argv.indexOf("--audio-dir");
-  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : path.join(__dirname, "..", "audio");
+function parseFlag(argv: string[], flag: string): string | null {
+  const i = argv.indexOf(flag);
+  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : null;
 }
 
 async function main() {
   const argv = process.argv.slice(2);
-  const target = parseTarget(argv);
-  const audioDir = parseAudioDir(argv);
+  const target = parseFlag(argv, "--target") ?? "localhost:50051";
+  const audioDir = parseFlag(argv, "--audio-dir") ?? path.join(__dirname, "..", "audio");
+  const endpointName = parseFlag(argv, "--endpoint");
+  const trackId = parseFlag(argv, "--track-id");
+
+  let endpoint: Endpoint | null = null;
+  if (endpointName !== null) {
+    const ep = ENDPOINT_BY_NAME[endpointName];
+    if (ep === undefined) {
+      console.error(`unknown --endpoint ${endpointName}; choices: near_end, far_end, mixed`);
+      process.exit(2);
+    }
+    endpoint = ep;
+  }
+
   const wavs = fs.existsSync(audioDir)
     ? fs
         .readdirSync(audioDir)
@@ -138,7 +189,11 @@ async function main() {
   const client = new TranscriptionClient(target, channelCredentials());
   try {
     if (wavs.length === 0) {
-      await runSession(client, silentChunks(), "silence (4 s @ 16 kHz)");
+      await runSession(
+        client,
+        silentChunks(endpoint, trackId),
+        "silence (4 s @ 16 kHz)",
+      );
     } else {
       for (const wavPath of wavs) {
         // Pre-validate before opening the stream — same reasoning as
@@ -154,7 +209,7 @@ async function main() {
           console.log(`\n=== ${path.basename(wavPath)} ===\nSKIPPED: ${(err as Error).message}`);
           continue;
         }
-        await runSession(client, wavChunks(wav), path.basename(wavPath));
+        await runSession(client, wavChunks(wav, endpoint, trackId), path.basename(wavPath));
       }
     }
   } finally {

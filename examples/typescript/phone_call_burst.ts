@@ -42,6 +42,7 @@ import {
   readWav,
   transportLabel,
 } from "./common/index.js";
+import { Endpoint } from "@aurigin/protos/aurigin/common/v1/endpoint";
 // The per-call building blocks. `phone_call_burst` is "sendCall + recvCall
 // instantiated N times over one channel" — importing keeps that
 // relationship explicit and prevents drift between the two files' loops.
@@ -97,6 +98,8 @@ async function runOneCall(
   fileName: string,
   registerCall: (call: Call) => void,
   maxWallS: number | null,
+  endpoint: Endpoint | null = null,
+  trackId: string | null = null,
 ): Promise<CallResult> {
   // Stagger-driven delay before opening the stream — used by --stagger-ms
   // to spread call starts across wallclock.
@@ -118,7 +121,11 @@ async function runOneCall(
   let sendResult: SendResult | null = null;
   try {
     const [sr] = await Promise.all([
-      sendCall(call, wav, chunkMs, durationS, { maxWallS: maxWallS ?? undefined }),
+      sendCall(call, wav, chunkMs, durationS, {
+        maxWallS: maxWallS ?? undefined,
+        endpoint,
+        trackId,
+      }),
       recvCall(call, { label, sink }),
     ]);
     sendResult = sr;
@@ -148,7 +155,15 @@ interface Args {
   staggerMs: number;
   scenarioId: string | null;
   csv: string | null;
+  endpoint: Endpoint | null;
+  trackId: string | null;
 }
+
+const ENDPOINT_BY_NAME: Record<string, Endpoint> = {
+  near_end: Endpoint.ENDPOINT_NEAR_END,
+  far_end: Endpoint.ENDPOINT_FAR_END,
+  mixed: Endpoint.ENDPOINT_MIXED,
+};
 
 function parseArgs(argv: string[]): Args {
   const out: Args = {
@@ -161,6 +176,8 @@ function parseArgs(argv: string[]): Args {
     staggerMs: 0,
     scenarioId: null,
     csv: null,
+    endpoint: null,
+    trackId: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -175,6 +192,17 @@ function parseArgs(argv: string[]): Args {
       case "--stagger-ms": out.staggerMs = Number(next()); break;
       case "--scenario-id": out.scenarioId = next(); break;
       case "--csv": out.csv = next(); break;
+      case "--endpoint": {
+        const name = next();
+        const ep = ENDPOINT_BY_NAME[name];
+        if (ep === undefined) {
+          console.error(`unknown --endpoint ${name}; choices: near_end, far_end, mixed`);
+          process.exit(2);
+        }
+        out.endpoint = ep;
+        break;
+      }
+      case "--track-id": out.trackId = next(); break;
       case "-h": case "--help":
         console.log("Usage: tsx phone_call_burst.ts [--audio FILE] [--duration SEC]");
         console.log("                               [--max-wall-s SEC]");
@@ -237,6 +265,8 @@ async function main() {
           metadata, i * args.staggerMs, csv, path.basename(audioPath),
           (c) => activeCalls.push(c),
           args.maxWallS,
+          args.endpoint,
+          args.trackId,
         ),
       ),
     );
