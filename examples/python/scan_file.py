@@ -352,6 +352,8 @@ async def _run_scan(
     vad_threshold_pct: float | None = None,
     tail_strategy: str = "auto",
     min_analysis_duration_s: float | None = None,
+    endpoint: int | None = None,
+    track_id: str | None = None,
 ) -> None:
     wav = read_wav(audio_path)
     slices = _split_wav(wav, concurrency, align_seconds=5.0)
@@ -368,6 +370,8 @@ async def _run_scan(
         or vad_threshold_pct is not None
         or tail_strategy != "auto"
         or min_analysis_duration_s is not None
+        or endpoint is not None
+        or track_id is not None
     )
     if _any_override:
         detection_config = pb.DetectionConfig()
@@ -414,6 +418,24 @@ async def _run_scan(
                     "--min-analysis-duration ignored. Upgrade aurigin-protos to ≥ 0.5.",
                     file=sys.stderr,
                 )
+        if endpoint is not None:
+            if "endpoint" in detection_config.DESCRIPTOR.fields_by_name:
+                detection_config.endpoint = endpoint
+            else:
+                print(
+                    "⚠️  installed aurigin-protos wheel doesn't ship DetectionConfig.endpoint — "
+                    "--endpoint ignored. Upgrade aurigin-protos to ≥ 0.3.8.",
+                    file=sys.stderr,
+                )
+        if track_id is not None:
+            if "track_id" in detection_config.DESCRIPTOR.fields_by_name:
+                detection_config.track_id = track_id
+            else:
+                print(
+                    "⚠️  installed aurigin-protos wheel doesn't ship DetectionConfig.track_id — "
+                    "--track-id ignored. Upgrade aurigin-protos to ≥ 0.3.8.",
+                    file=sys.stderr,
+                )
 
     slice_seconds = [
         len(pcm) / (wav.bytes_per_sample * wav.channels * wav.rate) for pcm, _ in slices
@@ -444,6 +466,10 @@ async def _run_scan(
             cfg_parts.append(f"tail_strategy={tail_strategy}")
         if min_analysis_duration_s is not None:
             cfg_parts.append(f"min_analysis_duration_s={min_analysis_duration_s}")
+        if endpoint is not None:
+            cfg_parts.append(f"endpoint={endpoint}")
+        if track_id is not None:
+            cfg_parts.append(f"track_id={track_id!r}")
         print(f"  Per-session DetectionConfig: {', '.join(cfg_parts)}")
 
     channel = _make_aio_channel_with_opts(target)
@@ -717,6 +743,21 @@ def cli() -> None:
         "1.0). Residuals shorter than this are handled per --tail-strategy. "
         "Cannot go below ~1.0 without breaking wav2vec2's feature extractor.",
     )
+    parser.add_argument(
+        "--endpoint",
+        choices=["near_end", "far_end", "mixed"],
+        default=None,
+        help="Caller-supplied endpoint attribution on DetectionConfig "
+        "(aurigin-protos ≥ 0.3.8). Applies to every slice; the service "
+        "echoes it on AnalysisResult + FinalResult without inspecting.",
+    )
+    parser.add_argument(
+        "--track-id",
+        default=None,
+        help="Caller-supplied track_id attribution on DetectionConfig "
+        "(aurigin-protos ≥ 0.3.8). Applies to every slice; use to label "
+        "the scan so downstream systems can attribute results.",
+    )
     args = parser.parse_args()
 
     # Resolve concurrency: explicit arg wins over --extreme preset, which
@@ -746,6 +787,27 @@ def cli() -> None:
             f"Expect heavy dfs GPU load; monitor `nvidia-smi` on the target.",
         )
 
+    # Resolve endpoint CLI → Endpoint enum. Import lazily so pre-0.3.8
+    # wheels (without common/v1/endpoint.proto) still load the rest of
+    # scan_file; the "warn + ignore" path inside _run_scan will fire
+    # when the DetectionConfig field is missing.
+    endpoint_value: int | None = None
+    if args.endpoint is not None:
+        try:
+            from aurigin.common.v1 import endpoint_pb2 as ep_pb
+            endpoint_value = {
+                "near_end": ep_pb.ENDPOINT_NEAR_END,
+                "far_end":  ep_pb.ENDPOINT_FAR_END,
+                "mixed":    ep_pb.ENDPOINT_MIXED,
+            }[args.endpoint]
+        except ImportError:
+            print(
+                "⚠️  installed aurigin-protos wheel doesn't ship "
+                "aurigin.common.v1.endpoint — --endpoint ignored. "
+                "Upgrade aurigin-protos to ≥ 0.3.8.",
+                file=sys.stderr,
+            )
+
     audio_path = _resolve_audio(args.file)
     asyncio.run(
         _run_scan(
@@ -759,6 +821,8 @@ def cli() -> None:
             vad_threshold_pct=args.vad_threshold,
             tail_strategy=args.tail_strategy,
             min_analysis_duration_s=args.min_analysis_duration,
+            endpoint=endpoint_value,
+            track_id=args.track_id,
         ),
     )
 

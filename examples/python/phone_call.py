@@ -68,6 +68,8 @@ async def send_call(
     duration_s: float,
     *,
     max_wall_s: float | None = None,
+    endpoint: int | None = None,
+    track_id: str | None = None,
 ) -> "SendResult":
     """Stream `wav` in real-time-paced AudioFrame chunks.
 
@@ -103,7 +105,19 @@ async def send_call(
     bytes_per_chunk = max(1, int(wav.rate * chunk_ms / 1000) * wav.bytes_per_sample)
     chunk_seconds = chunk_ms / 1000
 
-    await call.write(pb.DetectDeepfakeRequest(create_session_request=pb.CreateSessionRequest()))
+    # Build CreateSessionRequest with optional endpoint/track_id attribution
+    # via DetectionConfig (aurigin-protos ≥ 0.3.8). No flags ⇒ no config on
+    # the wire (bit-identical to the pre-0.3.8 call shape).
+    if endpoint is None and not track_id:
+        create_req = pb.CreateSessionRequest()
+    else:
+        cfg = pb.DetectionConfig()
+        if endpoint is not None:
+            cfg.endpoint = endpoint
+        if track_id:
+            cfg.track_id = track_id
+        create_req = pb.CreateSessionRequest(config=cfg)
+    await call.write(pb.DetectDeepfakeRequest(create_session_request=create_req))
 
     loop = asyncio.get_running_loop()
     started_at = loop.time()
@@ -245,7 +259,30 @@ async def main() -> None:
         "--scenario-id", default=None,
         help="Server-side simulator scenario to request (sent as x-scenario-id metadata).",
     )
+    parser.add_argument(
+        "--endpoint",
+        choices=["near_end", "far_end", "mixed"],
+        default=None,
+        help="Caller-supplied endpoint attribution on DetectionConfig "
+        "(aurigin-protos ≥ 0.3.8). The service echoes it on "
+        "AnalysisResult + FinalResult without inspecting.",
+    )
+    parser.add_argument(
+        "--track-id",
+        default=None,
+        help="Caller-supplied track_id attribution on DetectionConfig "
+        "(aurigin-protos ≥ 0.3.8). Same pass-through semantics as --endpoint.",
+    )
     args = parser.parse_args()
+
+    endpoint_value: int | None = None
+    if args.endpoint is not None:
+        from aurigin.common.v1 import endpoint_pb2 as ep_pb
+        endpoint_value = {
+            "near_end": ep_pb.ENDPOINT_NEAR_END,
+            "far_end":  ep_pb.ENDPOINT_FAR_END,
+            "mixed":    ep_pb.ENDPOINT_MIXED,
+        }[args.endpoint]
 
     audio_path = _resolve_audio(args.audio)
     wav = read_wav(audio_path)
@@ -275,7 +312,12 @@ async def main() -> None:
         # install_signal_shutdown cancels on Ctrl-C.
         async def _bidi() -> None:
             await asyncio.gather(
-                send_call(call, wav, args.chunk_ms, args.duration, max_wall_s=args.max_wall_s),
+                send_call(
+                    call, wav, args.chunk_ms, args.duration,
+                    max_wall_s=args.max_wall_s,
+                    endpoint=endpoint_value,
+                    track_id=args.track_id,
+                ),
                 recv_call(call),
             )
 

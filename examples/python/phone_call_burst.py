@@ -80,6 +80,8 @@ async def _run_one_call(
     metadata: tuple[tuple[str, str], ...], delay_s: float,
     csv_out: ResultCSV | None, file_name: str,
     max_wall_s: float | None,
+    endpoint: int | None = None,
+    track_id: str | None = None,
 ) -> tuple[str, BaseException | None, "SendResult | None"]:
     """Open one bidi stream, run send_call + recv_call concurrently. Returns
     (label, exception_or_none, send_result_or_none) so a failing call
@@ -109,7 +111,12 @@ async def _run_one_call(
     send_result: SendResult | None = None
     try:
         send_result, _ = await asyncio.gather(
-            send_call(call, wav, chunk_ms, duration_s, max_wall_s=max_wall_s),
+            send_call(
+                call, wav, chunk_ms, duration_s,
+                max_wall_s=max_wall_s,
+                endpoint=endpoint,
+                track_id=track_id,
+            ),
             recv_call(call, label=label, sink=sink),
         )
         result: BaseException | None = None
@@ -156,7 +163,30 @@ async def main() -> None:
         help="Server-side simulator scenario to request (sent as x-scenario-id metadata).",
     )
     parser.add_argument("--csv", default=None, help="Write per-chunk results to this path (overwrites)")
+    parser.add_argument(
+        "--endpoint",
+        choices=["near_end", "far_end", "mixed"],
+        default=None,
+        help="Caller-supplied endpoint attribution on DetectionConfig "
+        "(aurigin-protos ≥ 0.3.8). Applied to every concurrent call.",
+    )
+    parser.add_argument(
+        "--track-id",
+        default=None,
+        help="Caller-supplied track_id attribution on DetectionConfig "
+        "(aurigin-protos ≥ 0.3.8). Applied to every concurrent call; "
+        "use a stable label so downstream systems can group the burst.",
+    )
     args = parser.parse_args()
+
+    endpoint_value: int | None = None
+    if args.endpoint is not None:
+        from aurigin.common.v1 import endpoint_pb2 as ep_pb
+        endpoint_value = {
+            "near_end": ep_pb.ENDPOINT_NEAR_END,
+            "far_end":  ep_pb.ENDPOINT_FAR_END,
+            "mixed":    ep_pb.ENDPOINT_MIXED,
+        }[args.endpoint]
 
     if args.concurrency < 1:
         parser.error("--concurrency must be >= 1")
@@ -196,6 +226,8 @@ async def main() -> None:
                     metadata, delay_s=i * stagger_s,
                     csv_out=csv_out, file_name=audio_path.name,
                     max_wall_s=args.max_wall_s,
+                    endpoint=endpoint_value,
+                    track_id=args.track_id,
                 ))
                 for i, label in enumerate(labels)
             ]
