@@ -16,6 +16,7 @@ from pathlib import Path
 
 from aurigin.asr.v1 import asr_pb2 as pb
 from aurigin.asr.v1 import asr_pb2_grpc as pb_grpc
+from aurigin.common.v1 import endpoint_pb2 as ep_pb
 from aurigin.media.v1 import audio_frame_pb2 as af_pb
 
 from common import WavData, make_sync_channel, read_wav, transport_label
@@ -28,10 +29,40 @@ CHUNK_MS = 500
 # path exercised at least twice before FinalResult.
 SILENCE_CHUNKS = 8
 
+_ENDPOINT_BY_NAME = {
+    "near_end": ep_pb.ENDPOINT_NEAR_END,
+    "far_end":  ep_pb.ENDPOINT_FAR_END,
+    "mixed":    ep_pb.ENDPOINT_MIXED,
+}
 
-def _silent_session_iter():
+_ENDPOINT_LABEL = {
+    ep_pb.ENDPOINT_UNSPECIFIED: "unspecified",
+    ep_pb.ENDPOINT_NEAR_END:    "near_end",
+    ep_pb.ENDPOINT_FAR_END:     "far_end",
+    ep_pb.ENDPOINT_MIXED:       "mixed",
+}
+
+
+def _create_session_request(
+    endpoint: int | None, track_id: str | None,
+) -> pb.CreateSessionRequest:
+    """Build a CreateSessionRequest with TranscriptionConfig populating
+    endpoint/track_id if the caller set either. An empty config means
+    defaults, so the pre-0.3.8 call shape stays available (no flags ⇒
+    no config object on the wire)."""
+    if endpoint is None and not track_id:
+        return pb.CreateSessionRequest()
+    cfg = pb.TranscriptionConfig()
+    if endpoint is not None:
+        cfg.endpoint = endpoint
+    if track_id:
+        cfg.track_id = track_id
+    return pb.CreateSessionRequest(config=cfg)
+
+
+def _silent_session_iter(endpoint: int | None, track_id: str | None):
     """Fallback iterator: CreateSession + 8 × 500 ms of silence at 16 kHz."""
-    yield pb.TranscribeRequest(create_session_request=pb.CreateSessionRequest())
+    yield pb.TranscribeRequest(create_session_request=_create_session_request(endpoint, track_id))
     pts_ns = 0
     for _ in range(SILENCE_CHUNKS):
         samples = int(DEFAULT_RATE * CHUNK_MS / 1000)
@@ -48,11 +79,11 @@ def _silent_session_iter():
         pts_ns += CHUNK_MS * 1_000_000
 
 
-def _wav_session_iter(wav: WavData):
+def _wav_session_iter(wav: WavData, endpoint: int | None, track_id: str | None):
     """Stream a WAV file (S16LE / F32LE / PCMU / PCMA) as CreateSession + AudioFrame chunks."""
     bytes_per_chunk = int(wav.rate * CHUNK_MS / 1000) * wav.bytes_per_sample
 
-    yield pb.TranscribeRequest(create_session_request=pb.CreateSessionRequest())
+    yield pb.TranscribeRequest(create_session_request=_create_session_request(endpoint, track_id))
 
     pts_ns = 0
     for start in range(0, len(wav.samples), bytes_per_chunk):
@@ -83,9 +114,14 @@ def _run_session(stub, request_iter, label: str) -> None:
                 print(f"Model:   {ack.model_name or '?'}@{ack.model_version or '?'}")
         elif kind == "transcript_turn":
             t = response.transcript_turn
+            attr = ""
+            if t.endpoint and t.endpoint != ep_pb.ENDPOINT_UNSPECIFIED:
+                attr += f" ep={_ENDPOINT_LABEL.get(t.endpoint, t.endpoint)}"
+            if t.track_id:
+                attr += f" track={t.track_id}"
             print(
                 f"Turn {t.turn:>3} | {t.t0_ms:>6}-{t.t1_ms:<6}ms | "
-                f"conf={t.confidence:.2f} | silence={t.silence_pct:.1f}% | "
+                f"conf={t.confidence:.2f} | silence={t.silence_pct:.1f}% |{attr} "
                 f"{t.text!r}",
             )
         elif kind == "final_result":
@@ -97,7 +133,12 @@ def _run_session(stub, request_iter, label: str) -> None:
             )
 
 
-def main(target: str = "localhost:50051", audio_dir: str | Path | None = None) -> None:
+def main(
+    target: str = "localhost:50051",
+    audio_dir: str | Path | None = None,
+    endpoint: int | None = None,
+    track_id: str | None = None,
+) -> None:
     audio_dir = (
         Path(audio_dir).resolve()
         if audio_dir
@@ -110,7 +151,11 @@ def main(target: str = "localhost:50051", audio_dir: str | Path | None = None) -
     with make_sync_channel(target) as channel:
         stub = pb_grpc.TranscriptionStub(channel)
         if not wavs:
-            _run_session(stub, _silent_session_iter(), "silence (4 s @ 16 kHz)")
+            _run_session(
+                stub,
+                _silent_session_iter(endpoint, track_id),
+                "silence (4 s @ 16 kHz)",
+            )
             return
         for path in wavs:
             # Pre-validate before opening the stream — same reasoning as
@@ -124,7 +169,7 @@ def main(target: str = "localhost:50051", audio_dir: str | Path | None = None) -
             except ValueError as exc:
                 print(f"\n=== {path.name} ===\nSKIPPED: {exc}")
                 continue
-            _run_session(stub, _wav_session_iter(wav), path.name)
+            _run_session(stub, _wav_session_iter(wav, endpoint, track_id), path.name)
 
 
 def cli() -> None:
@@ -146,8 +191,27 @@ def cli() -> None:
         default=None,
         help="Directory to scan for *.wav (default: examples/audio/)",
     )
+    parser.add_argument(
+        "--endpoint",
+        choices=list(_ENDPOINT_BY_NAME),
+        default=None,
+        help=(
+            "Caller-supplied endpoint attribution attached to "
+            "TranscriptionConfig. The service echoes it on every "
+            "TranscriptTurn + FinalResult without inspecting."
+        ),
+    )
+    parser.add_argument(
+        "--track-id",
+        default=None,
+        help=(
+            "Caller-supplied track_id attribution attached to "
+            "TranscriptionConfig. Same pass-through semantics as --endpoint."
+        ),
+    )
     args = parser.parse_args()
-    main(args.target, args.audio_dir)
+    endpoint = _ENDPOINT_BY_NAME[args.endpoint] if args.endpoint else None
+    main(args.target, args.audio_dir, endpoint, args.track_id)
 
 
 if __name__ == "__main__":

@@ -135,11 +135,23 @@ class AudioVerificationSimulatorServicer(pb_grpc.AudioVerificationServicer):
         # can stream freely, one ticking on the interval. Whichever finishes
         # first (client half-closes or stream cancelled) tears down the other.
         verdict_count = 0
+        # Observed attribution from ClientAudioFrame messages — mutated by
+        # the drainer, read by the verdict emitter. Keyed by endpoint so a
+        # session that carries interleaved NEAR_END + FAR_END frames can
+        # emit one verdict per endpoint per tick, exercising the per-leg
+        # routing path on the client side. For the pre-0.3.8 raw AudioFrame
+        # variant (no attribution), we emit a single untagged verdict per
+        # tick (matches historical behaviour).
+        seen_tracks: dict[int, str] = {}
 
         async def _drain() -> None:
-            async for _req in request_iterator:
-                # Silently discard — the sim doesn't need the audio.
-                pass
+            async for req in request_iterator:
+                kind = req.WhichOneof("request")
+                if kind == "client_audio_frame":
+                    caf = req.client_audio_frame
+                    seen_tracks[caf.endpoint] = caf.track_id
+                # audio_frame / any other variant — silently discard;
+                # the sim doesn't need the audio bytes.
 
         drain_task = asyncio.create_task(_drain(), name=f"drain-{session_id}")
         try:
@@ -150,18 +162,25 @@ class AudioVerificationSimulatorServicer(pb_grpc.AudioVerificationServicer):
                         timeout=_VERDICT_INTERVAL_S,
                     )
                 except asyncio.TimeoutError:
-                    # Time to emit another canned Verdict.
-                    yield pb.StreamResponse(
-                        verdict=pb.Verdict(
-                            consumer_name=_CANNED_CONSUMER_NAME,
-                            audio_offset_ms=verdict_count * _CANNED_WINDOW_MS,
-                            duration_ms=_CANNED_WINDOW_MS,
-                            label=result_pb.RESULT_LABEL_BONAFIDE,
-                            label_raw="bonafide",
-                            score=0.5,
-                            confidence=0.5,
-                        ),
-                    )
+                    # Time to emit canned Verdicts. One verdict per
+                    # endpoint observed on the stream; falls back to a
+                    # single untagged verdict when no ClientAudioFrame has
+                    # arrived (pre-0.3.8 clients).
+                    attributions = list(seen_tracks.items()) if seen_tracks else [(0, "")]
+                    for endpoint, track_id in attributions:
+                        yield pb.StreamResponse(
+                            verdict=pb.Verdict(
+                                consumer_name=_CANNED_CONSUMER_NAME,
+                                audio_offset_ms=verdict_count * _CANNED_WINDOW_MS,
+                                duration_ms=_CANNED_WINDOW_MS,
+                                label=result_pb.RESULT_LABEL_BONAFIDE,
+                                label_raw="bonafide",
+                                score=0.5,
+                                confidence=0.5,
+                                endpoint=endpoint,
+                                track_id=track_id,
+                            ),
+                        )
                     verdict_count += 1
         finally:
             if not drain_task.done():
@@ -171,7 +190,10 @@ class AudioVerificationSimulatorServicer(pb_grpc.AudioVerificationServicer):
                 except (asyncio.CancelledError, Exception):
                     pass
 
-        # 3. Terminal aggregate.
+        # 3. Terminal aggregate. FinalResult lives at session level so it
+        # stays untagged — per-endpoint summaries would belong on
+        # ConsumerFinalResult, which doesn't carry attribution in the
+        # current proto (left for a future bump).
         yield pb.StreamResponse(
             final_result=pb.FinalResult(
                 total_audio_ms=verdict_count * _CANNED_WINDOW_MS,
@@ -187,9 +209,10 @@ class AudioVerificationSimulatorServicer(pb_grpc.AudioVerificationServicer):
             ),
         )
         log.info(
-            "stream closed: session=%s verdicts=%d",
+            "stream closed: session=%s verdicts=%d endpoints_seen=%d",
             session_id,
             verdict_count,
+            len(seen_tracks),
         )
 
     async def Verify(  # noqa: N802 — grpc-generated method name

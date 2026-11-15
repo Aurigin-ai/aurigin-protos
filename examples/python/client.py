@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from aurigin.common.v1 import endpoint_pb2 as ep_pb
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2 as pb
 from aurigin.deepfake_detection.v1 import deepfake_detection_pb2_grpc as pb_grpc
 from aurigin.media.v1 import audio_frame_pb2 as af_pb
@@ -27,10 +28,41 @@ CHUNK_MS = 500
 SILENCE_CHUNKS = 10  # 5 seconds — matches the dfs default analysis_interval_s=5.0
                      # so the fallback fires at least one analysis window in CI.
 
+_ENDPOINT_BY_NAME = {
+    "near_end": ep_pb.ENDPOINT_NEAR_END,
+    "far_end":  ep_pb.ENDPOINT_FAR_END,
+    "mixed":    ep_pb.ENDPOINT_MIXED,
+}
 
-def _silent_session_iter():
+_ENDPOINT_LABEL = {
+    ep_pb.ENDPOINT_UNSPECIFIED: "unspecified",
+    ep_pb.ENDPOINT_NEAR_END:    "near_end",
+    ep_pb.ENDPOINT_FAR_END:     "far_end",
+    ep_pb.ENDPOINT_MIXED:       "mixed",
+}
+
+
+def _create_session_request(
+    endpoint: int | None, track_id: str | None,
+) -> pb.CreateSessionRequest:
+    """Build a CreateSessionRequest with DetectionConfig populating
+    endpoint/track_id if the caller set either. No flags ⇒ no config
+    object on the wire, matching the pre-0.3.8 call shape."""
+    if endpoint is None and not track_id:
+        return pb.CreateSessionRequest()
+    cfg = pb.DetectionConfig()
+    if endpoint is not None:
+        cfg.endpoint = endpoint
+    if track_id:
+        cfg.track_id = track_id
+    return pb.CreateSessionRequest(config=cfg)
+
+
+def _silent_session_iter(endpoint: int | None, track_id: str | None):
     """Fallback iterator: CreateSession + 10 × 500 ms of silence at 16 kHz."""
-    yield pb.DetectDeepfakeRequest(create_session_request=pb.CreateSessionRequest())
+    yield pb.DetectDeepfakeRequest(
+        create_session_request=_create_session_request(endpoint, track_id),
+    )
     pts_ns = 0
     for _ in range(SILENCE_CHUNKS):
         samples = int(DEFAULT_RATE * CHUNK_MS / 1000)
@@ -47,11 +79,13 @@ def _silent_session_iter():
         pts_ns += CHUNK_MS * 1_000_000
 
 
-def _wav_session_iter(wav: WavData):
+def _wav_session_iter(wav: WavData, endpoint: int | None, track_id: str | None):
     """Stream a WAV file (S16LE or F32LE) as CreateSession + AudioFrame chunks."""
     bytes_per_chunk = int(wav.rate * CHUNK_MS / 1000) * wav.bytes_per_sample
 
-    yield pb.DetectDeepfakeRequest(create_session_request=pb.CreateSessionRequest())
+    yield pb.DetectDeepfakeRequest(
+        create_session_request=_create_session_request(endpoint, track_id),
+    )
 
     pts_ns = 0
     for start in range(0, len(wav.samples), bytes_per_chunk):
@@ -105,12 +139,22 @@ def _run_session(stub, request_iter, label: str, csv_out: ResultCSV | None = Non
                 confidence=r.confidence,
                 label=r.label,
             ))
-            print(f"Analysis | offset={r.audio_offset_ms}ms | score={r.score:.3f} | label={r.label} | confidence={r.confidence:.2f}")
+            attr = ""
+            if r.endpoint and r.endpoint != ep_pb.ENDPOINT_UNSPECIFIED:
+                attr += f" ep={_ENDPOINT_LABEL.get(r.endpoint, r.endpoint)}"
+            if r.track_id:
+                attr += f" track={r.track_id}"
+            print(f"Analysis | offset={r.audio_offset_ms}ms | score={r.score:.3f} | label={r.label} | confidence={r.confidence:.2f}{attr}")
         elif kind == "final_result":
             f = response.final_result
             audio_duration_ms = f.total_audio_ms
             global_result = f.overall_label
-            print(f"FINAL    | total={f.total_audio_ms}ms | score={f.overall_score:.3f} | label={f.overall_label} | analyses={f.analysis_count}")
+            attr = ""
+            if f.endpoint and f.endpoint != ep_pb.ENDPOINT_UNSPECIFIED:
+                attr += f" ep={_ENDPOINT_LABEL.get(f.endpoint, f.endpoint)}"
+            if f.track_id:
+                attr += f" track={f.track_id}"
+            print(f"FINAL    | total={f.total_audio_ms}ms | score={f.overall_score:.3f} | label={f.overall_label} | analyses={f.analysis_count}{attr}")
 
     processing_time_ms = (time.perf_counter() - t_start) * 1000.0
     if csv_out is not None:
@@ -124,6 +168,8 @@ def main(
     target: str = "localhost:50051",
     audio_dir: str | Path | None = None,
     csv_path: str | Path | None = None,
+    endpoint: int | None = None,
+    track_id: str | None = None,
 ) -> None:
     audio_dir = Path(audio_dir).resolve() if audio_dir else Path(__file__).resolve().parent.parent / "audio"
     wavs = sorted(audio_dir.glob("*.wav")) if audio_dir.is_dir() else []
@@ -139,7 +185,12 @@ def main(
         with make_sync_channel(target) as channel:
             stub = pb_grpc.DeepfakeDetectionStub(channel)
             if not wavs:
-                _run_session(stub, _silent_session_iter(), "silence (5 s @ 16 kHz)", csv_out)
+                _run_session(
+                    stub,
+                    _silent_session_iter(endpoint, track_id),
+                    "silence (5 s @ 16 kHz)",
+                    csv_out,
+                )
                 return
             for path in wavs:
                 # Pre-validate before opening the stream. If read_wav raises
@@ -154,7 +205,12 @@ def main(
                 except ValueError as exc:
                     print(f"\n=== {path.name} ===\nSKIPPED: {exc}")
                     continue
-                _run_session(stub, _wav_session_iter(wav), path.name, csv_out)
+                _run_session(
+                    stub,
+                    _wav_session_iter(wav, endpoint, track_id),
+                    path.name,
+                    csv_out,
+                )
     finally:
         if csv_out is not None:
             csv_out.close()
@@ -173,8 +229,27 @@ def cli() -> None:
     parser.add_argument("--target", default="localhost:50051", help="gRPC server host:port (default: localhost:50051)")
     parser.add_argument("--audio-dir", default=None, help="Directory to scan for *.wav (default: examples/audio/)")
     parser.add_argument("--csv", default=None, help="Write per-chunk results to this path (overwrites)")
+    parser.add_argument(
+        "--endpoint",
+        choices=list(_ENDPOINT_BY_NAME),
+        default=None,
+        help=(
+            "Caller-supplied endpoint attribution attached to DetectionConfig. "
+            "The service echoes it on every AnalysisResult + FinalResult "
+            "without inspecting."
+        ),
+    )
+    parser.add_argument(
+        "--track-id",
+        default=None,
+        help=(
+            "Caller-supplied track_id attribution attached to DetectionConfig. "
+            "Same pass-through semantics as --endpoint."
+        ),
+    )
     args = parser.parse_args()
-    main(args.target, args.audio_dir, args.csv)
+    endpoint = _ENDPOINT_BY_NAME[args.endpoint] if args.endpoint else None
+    main(args.target, args.audio_dir, args.csv, endpoint, args.track_id)
 
 
 if __name__ == "__main__":

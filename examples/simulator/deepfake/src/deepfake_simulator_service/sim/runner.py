@@ -111,6 +111,13 @@ class _SessionState:
     # A1 (see _aggregate_final): scores from actionable windows only —
     # silence sentinels are excluded so they don't bias the final mean.
     actionable_scores: list[float] = field(default_factory=list)
+    # Caller-supplied attribution metadata from DetectionConfig —
+    # cached at session open and echoed on every AnalysisResult +
+    # FinalResult. Pass-through only; the simulator never branches on
+    # these values. Older clients send no config, leaving them at
+    # proto3 zero values (= unset).
+    endpoint: int = 0
+    track_id: str = ""
 
     def now_ms(self, loop: asyncio.AbstractEventLoop) -> int:
         return int((loop.time() - self.started_at) * 1000)
@@ -145,6 +152,8 @@ def _make_analysis_result(
             score=score,
             label=label,
             confidence=confidence,
+            endpoint=state.endpoint,
+            track_id=state.track_id,
         ),
     )
 
@@ -456,6 +465,11 @@ async def run_session(
         return
 
     state = _SessionState(session_id=_make_session_id(), started_at=loop.time())
+    # Cache attribution from DetectionConfig (0.3.8+). Older clients send
+    # no config, leaving endpoint/track_id at proto3 zero values.
+    cfg = first.create_session_request.config
+    state.endpoint = cfg.endpoint
+    state.track_id = cfg.track_id
     yield pb.DetectDeepfakeResponse(
         create_session_response=pb.CreateSessionResponse(
             session_id=state.session_id,
@@ -550,6 +564,8 @@ async def run_session(
                 overall_label=overall_label,
                 analysis_count=state.analysis_count,
                 model_version=model_version,
+                endpoint=state.endpoint,
+                track_id=state.track_id,
             ),
         )
     finally:
