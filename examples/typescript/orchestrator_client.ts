@@ -23,6 +23,15 @@
 //   * With no `--endpoint` / `--track-id` / dual-file flags, falls back
 //     to the raw AudioFrame wire shape (backward-compatible path).
 //
+// Mid-call state transitions:
+//   * `--metadata-at SECONDS KEY=VAL[,KEY=VAL...]` (repeatable) —
+//     schedule a ClientMetadata emission at SECONDS from stream start.
+//     Models aurigin-guard-win detecting a new foreground app, a
+//     meeting starting, a mic being suspended, etc.
+//   * `--demo-teams-meeting` — convenience shorthand that schedules
+//     two canned emissions modelling a Chrome tab running a Teams
+//     meeting (meeting_state=in_meeting at 2s, idle at 10s).
+//
 // Points at the orchestrator simulator by default (`localhost:50053`).
 // Override `--target` to hit any AudioVerification server.
 //
@@ -83,6 +92,7 @@ interface Args {
   mixedFile: string | null;
   endpoint: Endpoint | null;
   trackId: string | null;
+  metadataSchedule: MetadataEvent[];
 }
 
 function parseArgs(): Args {
@@ -98,7 +108,9 @@ function parseArgs(): Args {
     mixedFile: null,
     endpoint: null,
     trackId: null,
+    metadataSchedule: [],
   };
+  let demoTeamsMeeting = false;
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     const next = argv[i + 1];
@@ -121,6 +133,36 @@ function parseArgs(): Args {
       args.endpoint = ep; i++;
     }
     else if (flag === "--track-id" && next) { args.trackId = next; i++; }
+    else if (flag === "--metadata-at" && next && argv[i + 2]) {
+      // --metadata-at SECONDS KEY=VAL[,KEY=VAL...]
+      const timeS = Number(next);
+      const kvStr = argv[i + 2];
+      if (Number.isNaN(timeS)) {
+        console.error(`--metadata-at: expected a float SECONDS, got ${JSON.stringify(next)}`);
+        process.exit(2);
+      }
+      const attrs: Record<string, string> = {};
+      for (const rawPair of kvStr.split(",")) {
+        const pair = rawPair.trim();
+        if (!pair) continue;
+        const eq = pair.indexOf("=");
+        if (eq < 0) {
+          console.error(
+            `--metadata-at: expected KEY=VAL pairs separated by commas, ` +
+            `got ${JSON.stringify(pair)} (in ${JSON.stringify(kvStr)})`,
+          );
+          process.exit(2);
+        }
+        attrs[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+      }
+      if (Object.keys(attrs).length === 0) {
+        console.error(`--metadata-at: no KEY=VAL attributes parsed from ${JSON.stringify(kvStr)}`);
+        process.exit(2);
+      }
+      args.metadataSchedule.push({ timeS, attrs });
+      i += 2;
+    }
+    else if (flag === "--demo-teams-meeting") { demoTeamsMeeting = true; }
   }
 
   // Multi-file mode (any 2 or 3 of near/far/mixed) is mutually
@@ -141,6 +183,23 @@ function parseArgs(): Args {
   if (multiCount >= 2 && args.endpoint !== null) {
     console.error("--endpoint is implied by multi-file mode; don't set both");
     process.exit(2);
+  }
+
+  // Convenience shorthand — models aurigin-guard-win detecting a
+  // Chrome Teams tab. Only applies when no explicit --metadata-at
+  // was given, so explicit beats shorthand.
+  if (args.metadataSchedule.length === 0 && demoTeamsMeeting) {
+    args.metadataSchedule = [
+      {
+        timeS: 2.0,
+        attrs: {
+          active_app: "chrome.exe",
+          active_window_title: "Weekly Sync | Microsoft Teams",
+          meeting_state: "in_meeting",
+        },
+      },
+      { timeS: 10.0, attrs: { meeting_state: "idle" } },
+    ];
   }
 
   return args;
@@ -195,6 +254,19 @@ function attrSuffix(endpoint: number | undefined, trackId: string | undefined): 
   return parts.length ? ` ${parts.join(" ")}` : "";
 }
 
+type MetadataEvent = { timeS: number; attrs: Record<string, string> };
+
+// Build a StreamRequest carrying a ClientMetadata message. `emittedAtMs`
+// is stamped from wall-clock at call time.
+function makeMetadataRequest(attrs: Record<string, string>): object {
+  return {
+    clientMetadata: {
+      emittedAtMs: BigInt(Date.now()),
+      attributes: attrs,
+    },
+  };
+}
+
 interface WavChunk { payload: Buffer; ptsNs: bigint }
 
 function chunkWav(wav: WavData): WavChunk[] {
@@ -225,11 +297,19 @@ async function run(args: Args): Promise<void> {
   const src = multiSources.length >= 2
     ? `multi=${[args.nearEndFile, args.farEndFile, args.mixedFile].filter(Boolean).join("+")}`
     : args.audioFile ? `file=${args.audioFile}` : `duration=${args.duration}s`;
+  const mdSummary = args.metadataSchedule.length > 0
+    ? args.metadataSchedule
+        .slice()
+        .sort((a, b) => a.timeS - b.timeS)
+        .map(({ timeS, attrs }) =>
+          `${timeS.toFixed(1)}s:{${Object.keys(attrs).sort().join(",")}}`,
+        ).join(", ")
+    : "(none)";
   console.log(
     `# target=${args.target} tls=${tls} ${src} ` +
     `token_prefix=${args.token.slice(0, 10)}… ` +
     `endpoint=${args.endpoint !== null ? ENDPOINT_LABEL[args.endpoint] : "untagged"} ` +
-    `track_id=${args.trackId ?? "(none)"}`
+    `track_id=${args.trackId ?? "(none)"} metadata=${mdSummary}`
   );
 
   const client = new AudioVerificationClient(
@@ -316,6 +396,19 @@ async function run(args: Args): Promise<void> {
     },
   });
 
+  // Scheduled ClientMetadata emissions — sorted by time, popped as
+  // their deadline passes. Each audio tick advances elapsedS by
+  // CHUNK_MS and drains any now-due entries before the next frame.
+  const pending: MetadataEvent[] = [...args.metadataSchedule]
+    .sort((a, b) => a.timeS - b.timeS);
+  let elapsedS = 0;
+  const drainMetadata = () => {
+    while (pending.length > 0 && pending[0].timeS <= elapsedS) {
+      const ev = pending.shift()!;
+      call.write(makeMetadataRequest(ev.attrs));
+    }
+  };
+
   // Multi-file mode: interleave 2-or-3 endpoint-tagged streams in one
   // session. Each tick walks every endpoint slot once and emits one
   // frame per side that still has audio. Files of different lengths
@@ -324,6 +417,7 @@ async function run(args: Args): Promise<void> {
     const chunked = multiSources.map(([ep, wav]) => ({ ep, wav, chunks: chunkWav(wav) }));
     const maxLen = Math.max(...chunked.map(({ chunks }) => chunks.length));
     for (let i = 0; i < maxLen; i++) {
+      drainMetadata();
       for (const { ep, wav, chunks } of chunked) {
         if (i < chunks.length) {
           const { payload, ptsNs } = chunks[i];
@@ -333,14 +427,17 @@ async function run(args: Args): Promise<void> {
           ));
         }
       }
+      elapsedS += CHUNK_MS / 1000;
       await new Promise((r) => setTimeout(r, CHUNK_MS));
     }
   } else if (singleWav) {
     for (const { payload, ptsNs } of chunkWav(singleWav)) {
+      drainMetadata();
       call.write(makeFrameRequest(
         singleWav.audioCodec, singleWav.rate, singleWav.channels,
         payload, ptsNs, args.endpoint, args.trackId,
       ));
+      elapsedS += CHUNK_MS / 1000;
       await new Promise((r) => setTimeout(r, CHUNK_MS));
     }
   } else {
@@ -348,14 +445,19 @@ async function run(args: Args): Promise<void> {
     const totalChunks = Math.floor((args.duration * 1000) / CHUNK_MS);
     let ptsNs = 0n;
     for (let i = 0; i < totalChunks; i++) {
+      drainMetadata();
       call.write(makeFrameRequest(
         AudioCodec.AUDIO_CODEC_S16LE, RATE, CHANNELS,
         silence, ptsNs, args.endpoint, args.trackId,
       ));
       ptsNs += BigInt(CHUNK_MS * 1_000_000);
+      elapsedS += CHUNK_MS / 1000;
       await new Promise((r) => setTimeout(r, CHUNK_MS));
     }
   }
+  // Flush any still-pending metadata after audio drains.
+  elapsedS = Infinity;
+  drainMetadata();
   call.end();
 
   await done.catch(() => {});

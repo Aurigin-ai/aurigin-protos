@@ -582,6 +582,45 @@ different lengths continue independently until all drain.
 For a MIXED-only input (SIPREC mix-mode recording, uploaded conference
 file), use the single-source path: `--audio-file mix.wav --endpoint mixed`.
 
+### Mid-call ClientMetadata — modelling a Teams meeting start/stop
+
+The orchestrator client additionally schedules `ClientMetadata`
+emissions mid-stream. This models the aurigin-guard-win integration
+shape: the desktop client is running a monitoring session, and partway
+through it detects (via foreground-process + audio-session inspection)
+that a Chrome tab has started a Teams meeting; later the meeting ends.
+Each state transition is one `ClientMetadata` message interleaved with
+the ongoing audio frames.
+
+Schedule explicit emissions with repeatable `--metadata-at SECONDS
+KEY=VAL[,KEY=VAL...]`:
+
+```bash
+uv run orchestrator-client --duration 12 \
+  --metadata-at 2 active_app=chrome.exe,meeting_state=in_meeting,active_window_title="Weekly Sync | Microsoft Teams" \
+  --metadata-at 10 meeting_state=idle
+```
+
+Or use the convenience shorthand that emits the same two canned
+transitions:
+
+```bash
+uv run orchestrator-client --duration 12 --demo-teams-meeting
+```
+
+The orchestrator simulator logs each received emission on its own
+line so you can tail the server output to confirm end-to-end flow:
+
+```
+client_metadata: session=call-… attrs={'active_app': 'chrome.exe', 'meeting_state': 'in_meeting', ...}
+client_metadata: session=call-… attrs={'meeting_state': 'idle'}
+stream closed: session=call-… verdicts=2 endpoints_seen=0 client_metadata=2
+```
+
+Values may contain spaces (quote the full `KEY=VAL,...` argument) but
+NOT commas — those separate key/value pairs. Repeat `--metadata-at`
+for additional emissions; they're sorted by time at start-up.
+
 ## Wire messages — `AudioFrame` (new in 0.3.0) and `AudioBuffer` (deprecated)
 
 `DetectDeepfakeRequest.oneof request` accepts three alternatives — one

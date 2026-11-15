@@ -102,6 +102,18 @@
 #     --mixed-file ../audio/fixtures/test_call_10s_tail.wav \
 #     --track-id triple-demo
 #
+# The orchestrator-client also schedules mid-call ClientMetadata
+# emissions (state transitions modelling aurigin-guard-win detecting
+# a Chrome Teams tab, a mic going silent, etc.):
+#
+#   # Convenience shorthand — two canned Teams start/stop transitions:
+#   just orchestrator-client --duration 12 --demo-teams-meeting
+#
+#   # Explicit scheduling — repeat --metadata-at SECONDS KEY=VAL[,KEY=VAL...]:
+#   just orchestrator-client --duration 12 \
+#     --metadata-at 2 active_app=chrome.exe,meeting_state=in_meeting \
+#     --metadata-at 10 meeting_state=idle
+#
 # See examples/certs/README.md for the full trust model.
 
 set shell := ["bash", "-cu"]

@@ -18,6 +18,22 @@ verdicts per interval — enough to validate the per-leg routing path
 end-to-end. Sessions that only send the raw `AudioFrame` variant get
 the single untagged verdict per tick (pre-0.3.8 behaviour, unchanged).
 
+The sim also observes `ClientMetadata` messages (also 0.3.8) and logs
+each one on its own line so a single grep walks the session's full
+state-change timeline:
+
+```
+client_metadata: session=call-… emitted_at_ms=1799999999999 attrs={'active_app': 'chrome.exe', 'meeting_state': 'in_meeting', 'active_window_title': 'Weekly Sync | Microsoft Teams'}
+client_metadata: session=call-… emitted_at_ms=1800000008123 attrs={'meeting_state': 'idle'}
+...
+stream closed: session=call-… verdicts=2 endpoints_seen=0 client_metadata=2
+```
+
+The session-close line surfaces `client_metadata=N` so operators + test
+suites can confirm emissions arrived without parsing the full timeline.
+The sim doesn't persist or forward metadata — a real orchestrator writes
+to the call-service timeline and fans the event onto the pub/sub bus.
+
 ## What it does not do
 
 - **No scenarios / YAML** — a single hardcoded response loop. If you
