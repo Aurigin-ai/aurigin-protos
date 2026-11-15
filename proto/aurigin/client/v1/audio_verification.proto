@@ -86,9 +86,9 @@ message StreamRequest {
   //
   // In-call variants:
   //   - audio_frame (field 2): the raw self-describing AudioFrame.
-  //     No endpoint attribution — orchestrator applies its
-  //     configured fallback (default FAR_END) at ingress. The
-  //     pre-0.3.8 shape, kept for backward compat.
+  //     No endpoint attribution — the server applies its configured
+  //     fallback (default FAR_END) at ingress. The pre-0.3.8 shape,
+  //     kept for backward compat.
   //   - client_audio_frame (field 3): AudioFrame wrapped with
   //     optional endpoint + track_id tags. Preferred for new
   //     clients that capture multiple audio sources (mic +
@@ -96,8 +96,8 @@ message StreamRequest {
   //   - client_metadata (field 4): non-audio key/value context
   //     the client emits on state transitions (active app change,
   //     meeting start/stop, capture suspended/resumed, per-track
-  //     display names). Orchestrator stamps it on the call session
-  //     and fans to the event bus for call-service persistence.
+  //     display names). Server records it on the call session and
+  //     persists it on the call's timeline.
   oneof request {
     CreateSessionRequest create_session_request = 1;
 
@@ -111,35 +111,31 @@ message StreamRequest {
 
     // Endpoint-aware audio frame. Wraps AudioFrame with optional
     // endpoint + track_id for clients that know which leg each
-    // frame belongs to (microphone vs speakers vs mixed). The
-    // orchestrator reads the endpoint tag to route the frame to
-    // the per-endpoint consumer set configured for the tenant.
-    // Consumer services downstream (deepfake, replay, fingerprint,
-    // ASR, fraud-classifier) still receive raw AudioFrame only;
-    // the wrapper exists on this client-facing surface alone.
+    // frame belongs to (e.g. microphone vs speakers; one SIP leg vs
+    // another). The server reads the endpoint tag to route the
+    // frame to the per-endpoint consumer set configured for the
+    // tenant.
     //
-    // Prefer this variant for new clients. Clients that only ever
-    // emit one logical source can keep sending the raw
-    // `audio_frame` branch above.
+    // Prefer this variant for new clients that capture multiple
+    // audio sources (mic + speakers, per-participant forks).
+    // Clients that only ever emit one logical source can keep
+    // sending the raw `audio_frame` branch above.
     ClientAudioFrame client_audio_frame = 3;
 
     // Mid-call key/value context the client emits on state
     // transitions — never periodic. See ClientMetadata below for
-    // the attribute conventions the orchestrator and call-service
-    // treat specially (active_app, meeting_state, per-track display
-    // names, etc.).
+    // the attribute conventions the server treats specially
+    // (active_app, meeting_state, per-track display names, etc.).
     ClientMetadata client_metadata = 4;
   }
 }
 
 // Endpoint-aware audio frame for the client-facing AudioVerification
 // stream. Carries the raw AudioFrame plus optional per-frame
-// attribution so the orchestrator can route by endpoint / track
-// without each consumer service having to know about those
-// concepts. This wrapper lives on `aurigin.client.v1` deliberately:
-// internal consumer services (deepfake, replay, fingerprint, ASR,
-// fraud-classifier) keep accepting raw `aurigin.media.v1.AudioFrame`
-// and are never exposed to endpoint/track_id.
+// attribution so the server can route by endpoint / track. This
+// wrapper lives on `aurigin.client.v1` so the raw
+// `aurigin.media.v1.AudioFrame` stays endpoint-agnostic and can be
+// reused on any audio surface that doesn't need per-leg attribution.
 message ClientAudioFrame {
   // The wrapped audio frame — self-describing codec, sample rate,
   // channels, payload.
@@ -156,14 +152,14 @@ message ClientAudioFrame {
   // conference-mix feed can send NEAR_END + MIXED.
   //
   // Optional. Unset / ENDPOINT_UNSPECIFIED means the client doesn't
-  // distinguish endpoints and the orchestrator applies its
-  // configured legacy fallback (default FAR_END, matching every
-  // pre-0.3.8 client that only captured loopback audio).
+  // distinguish endpoints; the server applies its configured legacy
+  // fallback (default FAR_END, matching every pre-0.3.8 client that
+  // only captured loopback audio).
   optional aurigin.common.v1.Endpoint endpoint = 2;
 
   // Client-chosen identifier distinguishing one source within
-  // `endpoint`. Opaque to the orchestrator — never parsed. Stable
-  // for the lifetime of the track within one session.
+  // `endpoint`. Opaque to the server — never parsed. Stable for
+  // the lifetime of the track within one session.
   //
   // Empty / unset = the single track for this endpoint (the common
   // case: desktop 1-on-1). Non-empty appears on multi-source
@@ -172,15 +168,14 @@ message ClientAudioFrame {
   optional string track_id = 3;
 }
 
-// Mid-call key/value context the client pushes to the orchestrator
-// on state transitions. Not periodic — one message per transition.
-// The orchestrator stamps the attributes onto its in-memory call
-// session (so consumer rules can read them synchronously during
-// verdict evaluation) AND fans the event to the bus for call-service
-// persistence.
+// Mid-call key/value context the client pushes on state transitions.
+// Not periodic — one message per transition. The server records the
+// attributes against the current session (so tenant rules can read
+// them during verdict evaluation) and persists them in the call's
+// timeline.
 //
-// Reserved attribute key conventions the orchestrator + call-service
-// treat specially (all optional; clients populate what they know):
+// Reserved attribute key conventions the server treats specially
+// (all optional; clients populate what they know):
 //   active_app              — foreground app family name
 //   active_window_title     — foreground window title (raw)
 //   audio_session_processes — comma-joined PIDs with active audio
@@ -193,14 +188,14 @@ message ClientAudioFrame {
 //   track:<id>:role         — role of the participant (agent, caller)
 //
 // Any other keys are passed through as-is; the convention is
-// lower_snake_case to keep call-service facet filters predictable.
+// lower_snake_case so values are facet-filterable in downstream
+// analytics without casing surprises.
 message ClientMetadata {
   // Wall-clock timestamp on the client when the state transition
   // occurred, in Unix epoch milliseconds. Lets analysts distinguish
-  // client-side state change time from orchestrator ingestion time
-  // when the two drift. Server-side logic should prefer the
-  // orchestrator's receive time for authoritative ordering;
-  // emitted_at_ms is informational.
+  // client-side state change time from server ingestion time when
+  // the two drift. Server-side logic uses its own receive time for
+  // authoritative ordering; emitted_at_ms is informational.
   int64 emitted_at_ms = 1;
 
   // The key/value attributes themselves. Keep values short (land
@@ -288,32 +283,29 @@ message StreamResponse {
     // multiplex on the same branch.
     EmbeddingVerdict embedding_verdict = 5;
 
-    // Per-turn ASR transcript, forwarded from the orchestrator's
-    // ASR consumer wrapper (aurigin.asr.v1.Transcription). Emitted
-    // once per VAD-delimited turn once the server has transcribed
-    // it. Reuses the canonical TranscriptTurn shape so SDK clients
-    // and the Kafka `transcript_turns` topic consumers share one
-    // schema.
+    // Per-turn ASR transcript (aurigin.asr.v1.TranscriptTurn),
+    // surfaced on this stream when the tenant's consumer set
+    // enables transcription. Emitted once per VAD-delimited turn.
+    // Reuses the canonical TranscriptTurn shape so SDK clients and
+    // event-bus consumers of transcript turns share one schema.
     //
-    // Only fires when the tenant's consumer set enables ASR. If the
-    // tenant isn't configured for transcription, this branch stays
-    // silent for every session — clients should treat its absence as
-    // "not enabled for this tenant", not as an error.
+    // Only fires when transcription is enabled for the tenant. If
+    // it isn't, this branch stays silent for every session —
+    // clients should treat its absence as "not enabled for this
+    // tenant", not as an error.
     aurigin.asr.v1.TranscriptTurn transcript_turn = 6;
 
-    // Per-turn fraud verdict, forwarded from the orchestrator's
-    // fraud-classifier consumer wrapper (aurigin.fraud.v1). Emitted
-    // once per transcript turn after the classifier has scored it.
-    // Reuses the canonical FraudVerdict shape so SDK clients and
-    // Kafka `fraud_verdicts` topic consumers share one schema; the
-    // `call_id` field inside FraudVerdict mirrors the session_id
-    // the orchestrator assigned on handshake.
+    // Per-turn fraud verdict (aurigin.fraud.v1.FraudVerdict),
+    // surfaced on this stream when the tenant's consumer set
+    // enables fraud detection. Reuses the canonical FraudVerdict
+    // shape so SDK clients and event-bus consumers share one
+    // schema; `FraudVerdict.call_id` mirrors the session_id the
+    // server assigned on handshake.
     //
-    // Only fires when the tenant's consumer set enables fraud
-    // detection (which transitively requires ASR). If the tenant
-    // isn't configured for fraud, this branch stays silent for
-    // every session. Same "not an error, just disabled" semantics
-    // as transcript_turn above.
+    // Only fires when fraud detection is enabled for the tenant
+    // (which transitively requires transcription). If fraud isn't
+    // enabled, this branch stays silent. Same "not an error, just
+    // disabled" semantics as transcript_turn above.
     aurigin.fraud.v1.FraudVerdict fraud_verdict = 7;
   }
 }
@@ -385,22 +377,14 @@ message Verdict {
   float silence_pct = 9;
 
   // Endpoint the analysed window came from, mirroring the
-  // ClientAudioFrame.endpoint the orchestrator routed to the
-  // producing consumer. The orchestrator attaches this at session
-  // open as pass-through metadata on the consumer's config
-  // (DetectionConfig / ReplayConfig / FingerprintConfig); the
-  // consumer echoes it unchanged on every output it emits. The
-  // orchestrator then forwards the already-attributed verdict here
-  // without modification.
-  //
-  // Optional. Unset means aggregate (consumer ran with mix_near_far
-  // enabled over a merged signal) or no attribution attached to the
-  // session (legacy ingress path).
+  // ClientAudioFrame.endpoint the client sent. Populated by the
+  // server when attribution is available; unset when the verdict
+  // is aggregate (mixed-leg analysis) or the session was opened
+  // without attribution.
   optional aurigin.common.v1.Endpoint endpoint = 10;
 
-  // Track_id the analysed window came from. Same pass-through
-  // semantics as `endpoint` above — orchestrator attaches at session
-  // open, consumer echoes, orchestrator forwards. Empty / unset =
+  // Track_id the analysed window came from, mirroring the
+  // ClientAudioFrame.track_id the client sent. Empty / unset =
   // single-track endpoint or no attribution attached.
   optional string track_id = 11;
 }
@@ -448,19 +432,16 @@ message EmbeddingVerdict {
   // publishes it despite producing embeddings on silence too).
   map<string, string> attributes = 7;
 
-  // Endpoint the analysed window came from. Pass-through metadata
-  // the orchestrator attaches at session open on FingerprintConfig
-  // (or the equivalent config for any future embedding consumer);
-  // the service echoes it on every EmbeddingResult it emits. The
-  // orchestrator forwards the already-attributed result here without
-  // modification.
-  //
-  // Optional. Unset means aggregate or no attribution attached.
+  // Endpoint the analysed window came from, mirroring the
+  // ClientAudioFrame.endpoint the client sent. Populated by the
+  // server when attribution is available; unset when the embedding
+  // is aggregate (mixed-leg analysis) or the session was opened
+  // without attribution.
   optional aurigin.common.v1.Endpoint endpoint = 8;
 
-  // Track_id the analysed window came from. Same pass-through
-  // semantics as `endpoint` above. Empty / unset = single-track
-  // endpoint or no attribution attached.
+  // Track_id the analysed window came from, mirroring the
+  // ClientAudioFrame.track_id the client sent. Empty / unset =
+  // single-track endpoint or no attribution attached.
   optional string track_id = 9;
 }
 

@@ -3,62 +3,63 @@ syntax = "proto3";
 package aurigin.common.v1;
 
 // Logical endpoint a frame or verdict belongs to within a call, from
-// the perspective of the subject (desktop user, FS channel owner,
-// monitored agent). Orthogonal to call direction (inbound vs outbound
-// VoIP call) and to A-leg / B-leg bridge notation — those terms
-// collide across contexts; `endpoint` is anchored to the party we're
-// analysing.
+// the perspective of the subject (the party whose voice is being
+// analysed or protected — e.g. a monitored agent, a protected caller,
+// the local user of a desktop app).
 //
-// Lives in `common.v1` because it crosses package boundaries:
-// `aurigin.client.v1` carries it on ClientAudioFrame / Verdict /
-// EmbeddingVerdict; `aurigin.asr.v1` carries it on TranscriptTurn
-// (populated by the orchestrator wrapper); `aurigin.fraud.v1` carries
-// it on FraudVerdict. Deliberately NOT in `aurigin.media.v1` so that
-// consumer services which only import AudioFrame (deepfake, replay,
-// fingerprint, ASR servicer) don't pull a routing-attribution concept
-// into their generated code.
+// Orthogonal to call direction (inbound vs outbound VoIP call) and to
+// A-leg / B-leg bridge notation — those terms collide across contexts.
+// `endpoint` is anchored to the party being analysed, not to the call
+// setup.
 //
-// Mutually exclusive on a single frame but a call can carry any
-// combination on the same session — NEAR_END + FAR_END on desktop
-// 1-on-1; NEAR_END + MIXED on MS Teams integration; MIXED only on
-// SIPREC mix-mode or uploaded recordings.
+// The three roles are mutually exclusive on a single frame, but a
+// call can carry any combination on the same session — NEAR_END +
+// FAR_END on a 1-on-1 call; NEAR_END + MIXED when a separate mic
+// feed accompanies a conference-mix recording; MIXED only on
+// post-call uploaded recordings.
 //
 // Dividing line between FAR_END and MIXED: is the subject's voice in
 // the stream? If yes → MIXED. If no → FAR_END (whether the stream is
 // one remote party or a pre-mix of several).
+//
+// This enum is referenced by multiple packages (session configs,
+// frame wrappers, verdict / embedding / transcript outputs) so it
+// lives in `common.v1`. Packages that only process raw `AudioFrame`
+// are deliberately not forced to import it.
 //
 // Extension policy: additive-only. New values go at the tail with the
 // next unused number; do not reuse retired numbers.
 enum Endpoint {
   // Zero-value sentinel. Means the producer did not declare an
   // endpoint. Not a semantic value in its own right — receivers that
-  // branch on endpoint apply their own fallback policy (common
-  // choice: treat as FAR_END, matching every pre-0.3.8 producer that
-  // only ever sent speaker/loopback audio). Receivers that don't
-  // branch on endpoint can ignore the field entirely.
+  // branch on endpoint apply their own fallback policy. A common
+  // choice is to treat unset as FAR_END (matching legacy producers
+  // that only ever sent far-side / loopback audio). Receivers that
+  // don't branch on endpoint can ignore the field entirely.
   ENDPOINT_UNSPECIFIED = 0;
 
-  // Subject's own voice in isolation. Desktop: microphone capture.
-  // FreeSWITCH: channel read-side — the party's own voice entering
-  // FS. What fraud detection scores: isolated speech produced by the
-  // monitored party.
+  // Subject's own voice in isolation. Typical sources: a microphone
+  // capture on the subject's device; the channel-read side of a
+  // SIP/PBX leg for the monitored party. The isolated signal to
+  // score when a classifier must only see the subject's speech
+  // (e.g. fraud/intent classification of the subject).
   ENDPOINT_NEAR_END = 1;
 
   // Everyone except the subject. One remote party in a 1-on-1 call,
-  // OR a pre-mix of several remote parties (desktop speaker loopback
-  // in a group meeting carries one stream containing N remote
-  // speakers mixed by the conferencing app; SIPREC bundled far-side
+  // OR a pre-mix of several remote parties (speaker-side loopback in
+  // a group meeting carries one stream containing N remote speakers
+  // pre-mixed by the conferencing app; a bundled far-side SIPREC
   // fork has the same shape). The subject's voice is NOT in this
-  // stream. What deepfake detection scores: speech produced by
-  // whoever is on the other end of the call.
+  // stream. The signal to score when a classifier must only see the
+  // other party / parties (e.g. deepfake detection of the counter-
+  // party's voice).
   ENDPOINT_FAR_END = 2;
 
   // Subject's voice is in the mix alongside everyone else — the
-  // signal is genuinely inseparable. SIPREC mix-mode recording,
-  // conference-bridge mix fork, uploaded recordings for post-call
-  // analysis. Consumers needing per-party attribution (fingerprint
-  // speaker-ID, fraud on isolated subject) should skip or degrade on
-  // MIXED input; ASR and deepfake-with-lower-confidence remain
-  // viable.
+  // signal is genuinely inseparable. Conference-bridge mix-mode
+  // recordings, uploaded post-call files for review, SIPREC mix-mode
+  // feeds. Classifiers that need per-party attribution (speaker-ID,
+  // subject-specific scoring) should skip or degrade on MIXED input;
+  // transcription and non-attributed classification remain viable.
   ENDPOINT_MIXED = 3;
 }

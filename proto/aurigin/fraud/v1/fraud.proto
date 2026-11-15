@@ -127,21 +127,21 @@ message FraudVerdict {
   // legitimate). Absent when no re-ask fired — the common case.
   optional string reask_answer = 11;
 
-  // Endpoint the transcript turn that produced this verdict came
-  // from. Pass-through: the ASR service stamped it on the inbound
-  // TranscriptTurn (echoed from the TranscriptionConfig the
-  // orchestrator supplied at session open), fraud-classifier copies
-  // the field as-is from the inbound `transcript_turns` Kafka
-  // message to the outbound `fraud_verdicts` message. The
-  // classifier does not inspect the value.
+  // Endpoint attribution carried through from the transcript turn
+  // that produced this verdict. The fraud classifier copies this
+  // field verbatim from the inbound `transcript_turns` message to
+  // the outbound `fraud_verdicts` message and never inspects it.
+  // The value originates on the TranscriptionConfig passed at ASR
+  // session open — see the pipeline architecture at the top of
+  // this file.
   //
   // Optional. Unset when the upstream ASR session was opened with
-  // no attribution attached (legacy ingress path).
+  // no attribution attached.
   optional aurigin.common.v1.Endpoint endpoint = 12;
 
-  // Track_id the transcript turn came from. Pass-through from the
-  // input TranscriptTurn, same semantics as `endpoint`. Empty /
-  // unset = single-track endpoint or no attribution attached.
+  // Track_id attribution carried through from the transcript turn.
+  // Same pass-through semantics as `endpoint` above. Empty / unset =
+  // single-track endpoint or no attribution attached.
   optional string track_id = 13;
 }
 
