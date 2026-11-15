@@ -9,6 +9,15 @@ Answers `Stream` with a canned `Verdict` (BONAFIDE, score=0.5) every
 the client half-closes. Useful as a connectivity + wire-shape smoke-test
 target while a real orchestrator is being brought up.
 
+Since 0.3.8 the sim also understands the endpoint-aware `ClientAudioFrame`
+variant on `StreamRequest`. Frames tagged with `endpoint` are tracked
+per-session; every verdict tick then emits one canned `Verdict` per
+observed endpoint (each echoing the matching `endpoint` + `track_id`),
+so a dual-leg client exercising both NEAR_END and FAR_END gets two
+verdicts per interval — enough to validate the per-leg routing path
+end-to-end. Sessions that only send the raw `AudioFrame` variant get
+the single untagged verdict per tick (pre-0.3.8 behaviour, unchanged).
+
 ## What it does not do
 
 - **No scenarios / YAML** — a single hardcoded response loop. If you

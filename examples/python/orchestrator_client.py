@@ -5,9 +5,10 @@ per source and prints every `Verdict` / `EmbeddingVerdict` / `TranscriptTurn`
 / `FraudVerdict` / `FinalResult` the server responds with.
 
 Source of audio (in priority order):
-  * `--near-end-file PATH --far-end-file PATH` — stream both WAVs in one
-    session, interleaved per chunk, each frame tagged with its endpoint.
-    Use this to exercise the dual-leg routing path.
+  * Any 2-or-3 of `--near-end-file` / `--far-end-file` / `--mixed-file` —
+    stream the WAVs interleaved on one session, each frame tagged with
+    its endpoint via ClientAudioFrame. Covers every per-leg scenario
+    (NEAR+FAR 1-on-1, NEAR+MIXED Teams-style, NEAR+FAR+MIXED conference).
   * `--audio-file PATH` — stream exactly that WAV.
   * `--audio-dir DIR`   — open one session per *.wav found in DIR.
   * neither             — synthesise `--duration` seconds of silence
@@ -38,6 +39,8 @@ CLI:
         --audio-file examples/audio/922.wav --endpoint far_end
     python orchestrator_client.py --token <jwt> --target host.example:443 \\
         --near-end-file mic.wav --far-end-file speaker.wav --track-id demo-call
+    python orchestrator_client.py --token <jwt> --target host.example:443 \\
+        --near-end-file mic.wav --mixed-file conf_mix.wav --track-id teams-call
 """
 
 from __future__ import annotations
@@ -184,42 +187,34 @@ async def _wav_iter(
         await asyncio.sleep(_CHUNK_MS / 1000)
 
 
-async def _dual_wav_iter(
-    near_wav: WavData,
-    far_wav: WavData,
+async def _multi_wav_iter(
+    sources: list[tuple[int, WavData]],
     label: str,
     track_id: str | None,
 ):
-    """Yield session-open + interleaved NEAR_END and FAR_END frames in
-    one session. Both WAVs are chunked at _CHUNK_MS wall-clock; each tick
-    emits one NEAR frame then one FAR frame (if either side still has
-    audio left). Files of different lengths continue independently until
-    both are drained.
+    """Yield session-open + interleaved frames from up to three endpoint-
+    tagged WAVs in one session. Each tick walks every endpoint slot once
+    and emits one frame per side that still has audio. Files of
+    different lengths continue independently until all are drained.
+
+    `sources` is a list of (endpoint_enum, WavData) pairs — any
+    combination of NEAR_END / FAR_END / MIXED, min 2 entries (dual
+    mode is the smoke-test target for per-leg routing).
     """
     yield _new_session_request(label)
-    near_chunks = _chunk_wav(near_wav)
-    far_chunks = _chunk_wav(far_wav)
-    for near, far in zip_longest(near_chunks, far_chunks):
-        if near is not None:
-            payload, pts_ns = near
+    chunked = [(endpoint, wav, _chunk_wav(wav)) for endpoint, wav in sources]
+    for frame_slice in zip_longest(*[chunks for _, _, chunks in chunked]):
+        for (endpoint, wav, _), frame in zip(chunked, frame_slice, strict=True):
+            if frame is None:
+                continue
+            payload, pts_ns = frame
             yield _make_frame_request(
-                codec=near_wav.audio_codec,
-                rate=near_wav.rate,
-                channels=near_wav.channels,
+                codec=wav.audio_codec,
+                rate=wav.rate,
+                channels=wav.channels,
                 payload=payload,
                 pts_ns=pts_ns,
-                endpoint=ep_pb.ENDPOINT_NEAR_END,
-                track_id=track_id,
-            )
-        if far is not None:
-            payload, pts_ns = far
-            yield _make_frame_request(
-                codec=far_wav.audio_codec,
-                rate=far_wav.rate,
-                channels=far_wav.channels,
-                payload=payload,
-                pts_ns=pts_ns,
-                endpoint=ep_pb.ENDPOINT_FAR_END,
+                endpoint=endpoint,
                 track_id=track_id,
             )
         await asyncio.sleep(_CHUNK_MS / 1000)
@@ -315,6 +310,7 @@ async def run(
     audio_dir: str | None,
     near_end_file: str | None,
     far_end_file: str | None,
+    mixed_file: str | None,
     endpoint: int | None,
     track_id: str | None,
 ) -> None:
@@ -335,12 +331,22 @@ async def run(
     async with channel_cm as channel:
         stub = pb_grpc.AudioVerificationStub(channel)
 
-        # Dual-file mode: one session, two interleaved endpoints.
-        if near_end_file and far_end_file:
-            near_wav = read_wav(Path(near_end_file))
-            far_wav = read_wav(Path(far_end_file))
-            label = f"dual {Path(near_end_file).name}+{Path(far_end_file).name}"
-            request_iter = _dual_wav_iter(near_wav, far_wav, label, track_id)
+        # Multi-file mode: one session, interleaved endpoints. Any
+        # combination of 2 or 3 of (near, far, mixed) is valid; frames
+        # of each kind are tagged with its endpoint and interleaved
+        # per 100-ms tick.
+        multi_sources: list[tuple[int, WavData]] = []
+        if near_end_file:
+            multi_sources.append((ep_pb.ENDPOINT_NEAR_END, read_wav(Path(near_end_file))))
+        if far_end_file:
+            multi_sources.append((ep_pb.ENDPOINT_FAR_END, read_wav(Path(far_end_file))))
+        if mixed_file:
+            multi_sources.append((ep_pb.ENDPOINT_MIXED, read_wav(Path(mixed_file))))
+        if len(multi_sources) >= 2:
+            label = "multi " + "+".join(
+                Path(f).name for f in (near_end_file, far_end_file, mixed_file) if f
+            )
+            request_iter = _multi_wav_iter(multi_sources, label, track_id)
             await _run_session(stub, request_iter, label, metadata)
             return
 
@@ -409,16 +415,27 @@ def cli() -> None:
         "--near-end-file",
         default=None,
         help=(
-            "WAV file for the NEAR_END leg. When combined with --far-end-file, "
-            "both are streamed interleaved on one session, each frame tagged "
-            "with its endpoint."
+            "WAV file for the NEAR_END leg. Combine with --far-end-file "
+            "and/or --mixed-file (any 2 or 3) to stream multiple "
+            "endpoints interleaved on one session, each frame tagged "
+            "with its endpoint via the ClientAudioFrame variant."
         ),
     )
     parser.add_argument(
         "--far-end-file",
         default=None,
+        help="WAV file for the FAR_END leg. See --near-end-file.",
+    )
+    parser.add_argument(
+        "--mixed-file",
+        default=None,
         help=(
-            "WAV file for the FAR_END leg. See --near-end-file."
+            "WAV file for the MIXED stream (subject + peers inseparable — "
+            "SIPREC mix-mode, conference-mix recordings). Combine with "
+            "--near-end-file for NEAR+MIXED (e.g. MS Teams integration "
+            "that delivers a conference mix alongside a separate mic "
+            "capture), with --far-end-file, or with both for a "
+            "three-endpoint smoke test."
         ),
     )
     parser.add_argument(
@@ -441,13 +458,21 @@ def cli() -> None:
     )
     args = parser.parse_args()
 
-    # Dual-file mode is mutually exclusive with single-source flags.
-    if (args.near_end_file is None) != (args.far_end_file is None):
-        parser.error("--near-end-file and --far-end-file must be given together")
-    if args.near_end_file and (args.audio_file or args.audio_dir):
-        parser.error("--near-end-file/--far-end-file conflicts with --audio-file/--audio-dir")
-    if args.near_end_file and args.endpoint:
-        parser.error("--endpoint is implied by dual-file mode; don't set both")
+    # Multi-file mode (any 2 or 3 of near/far/mixed) is mutually
+    # exclusive with single-source flags.
+    multi_count = sum(
+        1 for f in (args.near_end_file, args.far_end_file, args.mixed_file) if f
+    )
+    if multi_count == 1:
+        parser.error(
+            "--near-end-file / --far-end-file / --mixed-file need at least two "
+            "of them together — a single endpoint input belongs on --audio-file "
+            "(with --endpoint)",
+        )
+    if multi_count >= 2 and (args.audio_file or args.audio_dir):
+        parser.error("multi-file mode conflicts with --audio-file/--audio-dir")
+    if multi_count >= 2 and args.endpoint:
+        parser.error("--endpoint is implied by multi-file mode; don't set both")
 
     endpoint = _ENDPOINT_BY_NAME[args.endpoint] if args.endpoint else None
 
@@ -461,6 +486,7 @@ def cli() -> None:
             args.audio_dir,
             args.near_end_file,
             args.far_end_file,
+            args.mixed_file,
             endpoint,
             args.track_id,
         ),

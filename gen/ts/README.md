@@ -22,6 +22,41 @@ can install from the internal AWS CodeArtifact mirror under the same
 scope; see [`infra/aws/`](https://github.com/Aurigin-ai/aurigin-protos/tree/main/infra/aws)
 in the repo.
 
+## What's new in 0.3.8
+
+- **`Endpoint` enum** (`aurigin.common.v1`, new) — `NEAR_END` / `FAR_END`
+  / `MIXED` / `UNSPECIFIED`. Carries per-leg attribution across every
+  service that references it. Lives in `common.v1` so packages that only
+  import `AudioFrame` do not pull a routing concept into their generated
+  code.
+- **`ClientAudioFrame`** (`aurigin.client.v1`, new) — wrapper on the
+  SDK-facing `AudioVerification.Stream` request pairing a raw `AudioFrame`
+  with optional `endpoint` + `trackId`. The raw `AudioFrame` variant on
+  `StreamRequest` is untouched; pre-0.3.8 clients keep working.
+- **`ClientMetadata`** (`aurigin.client.v1`, new) — key/value state
+  transitions (active app, meeting state, capture health) on the SDK
+  stream. Server records on the call timeline; opaque to consumer
+  services.
+- **`StreamResponse.transcriptTurn` + `.fraudVerdict`** (new oneof
+  variants) — surface ASR + fraud results in-band on the SDK bidi
+  stream alongside the existing `verdict` / `embeddingVerdict` /
+  `notification` / `finalResult` branches. Only fire when the tenant's
+  consumer set enables ASR / fraud; silent for everyone else.
+- **Pass-through `endpoint` + `trackId`** on every consumer surface:
+  - **configs**: `DetectionConfig`, `ReplayConfig`, `FingerprintConfig`,
+    `TranscriptionConfig`, `RecordingConfig`.
+  - **outputs**: `AnalysisResult` (deepfake + replay), `EmbeddingResult`
+    (fingerprint), `TranscriptTurn` (ASR), per-service `FinalResult`,
+    `RecordingComplete`, and `FraudVerdict` (Kafka event).
+  - **client-facing**: `Verdict` + `EmbeddingVerdict` from
+    `aurigin.client.v1`.
+  The contract on every one of these fields: **the service caches and
+  echoes; MUST NOT branch on the values.** Leg-attribution policy lives
+  with the caller.
+- **`AudioFrame` stays untouched** — every consumer service that only
+  takes raw audio frames (deepfake, replay, fingerprint, ASR, recording)
+  keeps its exact pre-0.3.8 input shape.
+
 ## What's new in 0.3.0
 
 - **`AudioFrame`** (`aurigin.media.v1`) — new Aurigin-native audio

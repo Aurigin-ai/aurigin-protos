@@ -6,9 +6,11 @@
 // the server responds with.
 //
 // Source of audio (in priority order):
-//   * `--near-end-file PATH --far-end-file PATH` — stream both WAVs in
-//     one session, interleaved per chunk, each frame tagged with its
-//     endpoint. Exercises the dual-leg routing path.
+//   * Any 2-or-3 of `--near-end-file` / `--far-end-file` / `--mixed-file` —
+//     stream the WAVs interleaved on one session, each frame tagged
+//     with its endpoint via ClientAudioFrame. Covers every per-leg
+//     scenario (NEAR+FAR 1-on-1, NEAR+MIXED Teams-style,
+//     NEAR+FAR+MIXED conference).
 //   * `--audio-file PATH`  → the WAV at PATH (S16LE / F32LE / PCMU / PCMA).
 //                             `--duration` is ignored.
 //   * default              → synthesised silence (`--duration`).
@@ -36,6 +38,8 @@
 //       --audio-file ../audio/922.wav --endpoint far_end
 //   tsx orchestrator_client.ts --token <jwt> --target host.example:443 \
 //       --near-end-file mic.wav --far-end-file speaker.wav --track-id demo-call
+//   tsx orchestrator_client.ts --token <jwt> --target host.example:443 \
+//       --near-end-file mic.wav --mixed-file conf_mix.wav --track-id teams-call
 
 import { Metadata, credentials } from "@grpc/grpc-js";
 import { AudioVerificationClient } from "@aurigin/protos/aurigin/client/v1/audio_verification";
@@ -76,6 +80,7 @@ interface Args {
   audioFile: string | null;
   nearEndFile: string | null;
   farEndFile: string | null;
+  mixedFile: string | null;
   endpoint: Endpoint | null;
   trackId: string | null;
 }
@@ -90,6 +95,7 @@ function parseArgs(): Args {
     audioFile: null,
     nearEndFile: null,
     farEndFile: null,
+    mixedFile: null,
     endpoint: null,
     trackId: null,
   };
@@ -105,6 +111,7 @@ function parseArgs(): Args {
     else if (flag === "--audio-file" && next) { args.audioFile = next; i++; }
     else if (flag === "--near-end-file" && next) { args.nearEndFile = next; i++; }
     else if (flag === "--far-end-file" && next) { args.farEndFile = next; i++; }
+    else if (flag === "--mixed-file" && next) { args.mixedFile = next; i++; }
     else if (flag === "--endpoint" && next) {
       const ep = ENDPOINT_BY_NAME[next];
       if (ep === undefined) {
@@ -116,17 +123,23 @@ function parseArgs(): Args {
     else if (flag === "--track-id" && next) { args.trackId = next; i++; }
   }
 
-  // Dual-file mode is mutually exclusive with single-source flags.
-  if ((args.nearEndFile === null) !== (args.farEndFile === null)) {
-    console.error("--near-end-file and --far-end-file must be given together");
+  // Multi-file mode (any 2 or 3 of near/far/mixed) is mutually
+  // exclusive with single-source flags.
+  const multiCount = [args.nearEndFile, args.farEndFile, args.mixedFile]
+    .filter((f) => f !== null).length;
+  if (multiCount === 1) {
+    console.error(
+      "--near-end-file / --far-end-file / --mixed-file need at least two of " +
+      "them together — a single endpoint input belongs on --audio-file (with --endpoint)",
+    );
     process.exit(2);
   }
-  if (args.nearEndFile && args.audioFile) {
-    console.error("--near-end-file/--far-end-file conflicts with --audio-file");
+  if (multiCount >= 2 && args.audioFile) {
+    console.error("multi-file mode conflicts with --audio-file");
     process.exit(2);
   }
-  if (args.nearEndFile && args.endpoint !== null) {
-    console.error("--endpoint is implied by dual-file mode; don't set both");
+  if (multiCount >= 2 && args.endpoint !== null) {
+    console.error("--endpoint is implied by multi-file mode; don't set both");
     process.exit(2);
   }
 
@@ -202,8 +215,15 @@ function chunkWav(wav: WavData): WavChunk[] {
 
 async function run(args: Args): Promise<void> {
   const tls = useTls(args.target, args.tls);
-  const src = args.nearEndFile
-    ? `dual=${args.nearEndFile}+${args.farEndFile}`
+  // Pre-read WAVs so bad paths fail BEFORE opening the stream.
+  const multiSources: Array<[Endpoint, WavData]> = [];
+  if (args.nearEndFile) multiSources.push([Endpoint.ENDPOINT_NEAR_END, readWav(args.nearEndFile)]);
+  if (args.farEndFile)  multiSources.push([Endpoint.ENDPOINT_FAR_END,  readWav(args.farEndFile)]);
+  if (args.mixedFile)   multiSources.push([Endpoint.ENDPOINT_MIXED,    readWav(args.mixedFile)]);
+  const singleWav = args.audioFile ? readWav(args.audioFile) : null;
+
+  const src = multiSources.length >= 2
+    ? `multi=${[args.nearEndFile, args.farEndFile, args.mixedFile].filter(Boolean).join("+")}`
     : args.audioFile ? `file=${args.audioFile}` : `duration=${args.duration}s`;
   console.log(
     `# target=${args.target} tls=${tls} ${src} ` +
@@ -211,11 +231,6 @@ async function run(args: Args): Promise<void> {
     `endpoint=${args.endpoint !== null ? ENDPOINT_LABEL[args.endpoint] : "untagged"} ` +
     `track_id=${args.trackId ?? "(none)"}`
   );
-
-  // Pre-read WAVs so bad paths fail BEFORE opening the stream.
-  const nearWav = args.nearEndFile ? readWav(args.nearEndFile) : null;
-  const farWav = args.farEndFile ? readWav(args.farEndFile) : null;
-  const singleWav = args.audioFile ? readWav(args.audioFile) : null;
 
   const client = new AudioVerificationClient(
     args.target,
@@ -286,8 +301,8 @@ async function run(args: Args): Promise<void> {
   });
 
   // Send CreateSessionRequest.
-  const label = args.nearEndFile
-    ? `dual-${args.nearEndFile}+${args.farEndFile}`
+  const label = multiSources.length >= 2
+    ? `multi-${[args.nearEndFile, args.farEndFile, args.mixedFile].filter(Boolean).join("+")}`
     : args.audioFile ?? `silence-${args.duration}s`;
   call.write({
     createSessionRequest: {
@@ -301,25 +316,22 @@ async function run(args: Args): Promise<void> {
     },
   });
 
-  // Dual-file mode: interleave NEAR + FAR chunks in one session.
-  if (nearWav && farWav) {
-    const nearChunks = chunkWav(nearWav);
-    const farChunks = chunkWav(farWav);
-    const maxLen = Math.max(nearChunks.length, farChunks.length);
+  // Multi-file mode: interleave 2-or-3 endpoint-tagged streams in one
+  // session. Each tick walks every endpoint slot once and emits one
+  // frame per side that still has audio. Files of different lengths
+  // continue independently until all drain.
+  if (multiSources.length >= 2) {
+    const chunked = multiSources.map(([ep, wav]) => ({ ep, wav, chunks: chunkWav(wav) }));
+    const maxLen = Math.max(...chunked.map(({ chunks }) => chunks.length));
     for (let i = 0; i < maxLen; i++) {
-      if (i < nearChunks.length) {
-        const { payload, ptsNs } = nearChunks[i];
-        call.write(makeFrameRequest(
-          nearWav.audioCodec, nearWav.rate, nearWav.channels,
-          payload, ptsNs, Endpoint.ENDPOINT_NEAR_END, args.trackId,
-        ));
-      }
-      if (i < farChunks.length) {
-        const { payload, ptsNs } = farChunks[i];
-        call.write(makeFrameRequest(
-          farWav.audioCodec, farWav.rate, farWav.channels,
-          payload, ptsNs, Endpoint.ENDPOINT_FAR_END, args.trackId,
-        ));
+      for (const { ep, wav, chunks } of chunked) {
+        if (i < chunks.length) {
+          const { payload, ptsNs } = chunks[i];
+          call.write(makeFrameRequest(
+            wav.audioCodec, wav.rate, wav.channels,
+            payload, ptsNs, ep, args.trackId,
+          ));
+        }
       }
       await new Promise((r) => setTimeout(r, CHUNK_MS));
     }

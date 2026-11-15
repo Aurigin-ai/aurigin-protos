@@ -509,6 +509,79 @@ client class name is `FingerprintClient`; the RPC is `extractFingerprint`
   doesn't need scenarios. Adding one later is a compatible extension.
 - Smoke test suite for the fingerprint sim in `tests/`.
 
+## Endpoint / track_id attribution (new in 0.3.8)
+
+Every client script accepts two optional attribution flags:
+
+- `--endpoint {near_end,far_end,mixed}` — labels the audio by its role
+  from the subject's perspective. `near_end` is the subject's own
+  voice (microphone, SIP channel read-side); `far_end` is everyone
+  else, one party or a pre-mix; `mixed` is subject + peers inseparable
+  (SIPREC mix-mode, uploaded conference recordings). See
+  [`aurigin.common.v1.Endpoint`](../proto/aurigin/common/v1/endpoint.proto)
+  for the canonical semantic contract.
+- `--track-id STR` — opaque caller-chosen identifier distinguishing one
+  source within an endpoint. Stable for the session lifetime; the
+  service never interprets its value.
+
+Both ride on the service's `CreateSessionRequest.config` (or, for the
+orchestrator client, on `ClientAudioFrame`). The service caches them
+at session open and echoes them on every output (AnalysisResult,
+EmbeddingResult, TranscriptTurn, Verdict, FinalResult, FraudVerdict,
+RecordingComplete) without inspecting — pass-through only. The
+consumer side is transport-only; leg-routing / scoring policy lives
+with the caller.
+
+```bash
+# Label every DetectDeepfake AnalysisResult with endpoint + track:
+uv run client --endpoint near_end --track-id subject-mic
+
+# Same pattern on the integration-shape scripts:
+uv run phone-call --endpoint far_end --track-id remote-speaker --duration 30
+uv run scan-file --file long.wav --endpoint mixed --track-id archive-scan
+
+# Omit both flags → no config on the wire, bit-identical pre-0.3.8:
+uv run client
+```
+
+### Multi-leg mode — orchestrator client only
+
+The orchestrator client additionally streams any 2 or 3 of
+`--near-end-file` / `--far-end-file` / `--mixed-file` on one session,
+each frame tagged with its endpoint via the `ClientAudioFrame` wrapper
+variant on `StreamRequest`. Exercises the per-endpoint routing path
+end-to-end — the orchestrator simulator responds with one verdict per
+observed endpoint per 5-s interval.
+
+```bash
+# Two endpoints — classic 1-on-1 call shape:
+uv run orchestrator-client \
+  --near-end-file ../audio/fixtures/test_call.wav \
+  --far-end-file ../audio/fixtures/test_call_mulaw.wav \
+  --track-id dual-demo
+
+# NEAR + MIXED — MS Teams integration (recording API delivers the
+# conference mix; a local app captures the mic separately):
+uv run orchestrator-client \
+  --near-end-file ../audio/fixtures/test_call.wav \
+  --mixed-file ../audio/fixtures/test_call_10s_tail.wav \
+  --track-id teams-call
+
+# All three — full smoke test of the per-leg routing fan-out:
+uv run orchestrator-client \
+  --near-end-file ../audio/fixtures/test_call.wav \
+  --far-end-file ../audio/fixtures/test_call_mulaw.wav \
+  --mixed-file ../audio/fixtures/test_call_10s_tail.wav \
+  --track-id triple-demo
+```
+
+The WAVs can have different codecs / sample rates (each frame carries
+its own) — the orchestrator demuxes by endpoint at ingress. Files of
+different lengths continue independently until all drain.
+
+For a MIXED-only input (SIPREC mix-mode recording, uploaded conference
+file), use the single-source path: `--audio-file mix.wav --endpoint mixed`.
+
 ## Wire messages — `AudioFrame` (new in 0.3.0) and `AudioBuffer` (deprecated)
 
 `DetectDeepfakeRequest.oneof request` accepts three alternatives — one
