@@ -13,3 +13,10 @@ lint:
 breaking:
   use:
     - FILE
+    # Allow fields to be retired via `reserved N;` — the strict
+    # FIELD_NO_DELETE rule in FILE blocks even reserve-then-delete,
+    # so swap it for the permissive variant that enforces the
+    # standard proto retire-with-reserved pattern.
+    - FIELD_NO_DELETE_UNLESS_NUMBER_RESERVED
+  except:
+    - FIELD_NO_DELETE

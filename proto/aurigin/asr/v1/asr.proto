@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package aurigin.asr.v1;
 
-import "aurigin/common/v1/endpoint.proto";
 import "aurigin/media/v1/audio_frame.proto";
 
 // Automatic Speech Recognition Service.
@@ -184,16 +183,7 @@ message TranscriptionConfig {
   // exposed for tenant-level tuning only.
   optional uint32 cut_search_ms = 9;
 
-  // Caller-supplied attribution metadata. The service caches these
-  // values at session open and echoes them on every TranscriptTurn +
-  // FinalResult it emits on this session — pass-through only. The
-  // service MUST NOT branch on these values; callers use them to
-  // label outputs so their downstream systems can attribute turns
-  // without maintaining session state (e.g. "which leg produced this
-  // turn"). Unset = no attribution attached; the echoed fields on
-  // outputs stay unset.
-  optional aurigin.common.v1.Endpoint endpoint = 10;
-  optional string track_id = 11;
+  reserved 10, 11;
 }
 
 // VAD per-session mode. Controls whether the turn-cutter runs between
@@ -252,14 +242,7 @@ message TranscriptTurn {
   // not "unknown".
   float silence_pct = 6;
 
-  // Echo of the session's `endpoint` metadata from TranscriptionConfig.
-  // Pass-through only — the service never inspects the value. Unset
-  // when the session was opened with no attribution attached.
-  optional aurigin.common.v1.Endpoint endpoint = 7;
-
-  // Echo of the session's `track_id` metadata from TranscriptionConfig.
-  // Same pass-through semantics as `endpoint` above.
-  optional string track_id = 8;
+  reserved 7, 8;
 }
 
 // Emitted once when the client closes the stream. Purely accounting —
@@ -300,10 +283,5 @@ message FinalResult {
   // not "unknown".
   float silence_pct_mean = 6;
 
-  // Echo of the session's `endpoint` and `track_id` from
-  // TranscriptionConfig. Pass-through only — the service never
-  // inspects the values. Unset when the session had no attribution
-  // attached.
-  optional aurigin.common.v1.Endpoint endpoint = 7;
-  optional string track_id = 8;
+  reserved 7, 8;
 }

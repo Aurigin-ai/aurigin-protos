@@ -146,20 +146,12 @@ class ReplayDetectionImpl(pb_grpc.ReplayDetectionServicer):
         window_buf = bytearray()
         window_bytes_target: int | None = None
         window_offset_ms: int = 0
-        # Caller-supplied attribution metadata from ReplayConfig —
-        # cached at session open and echoed on every AnalysisResult +
-        # FinalResult. Pass-through only; the simulator never branches.
-        cached_endpoint: int = 0
-        cached_track_id: str = ""
 
         async for req in request_iterator:
             kind = req.WhichOneof("request")
 
             if kind == "create_session_request":
                 session_id = "sim-" + hashlib.sha256(peer.encode("utf-8", errors="replace")).hexdigest()[:8]
-                cfg = req.create_session_request.config
-                cached_endpoint = cfg.endpoint
-                cached_track_id = cfg.track_id
                 print(f"[incoming] peer={peer} | replay sim", file=sys.stderr, flush=True)
                 print(f"[{session_id}] start", file=sys.stderr, flush=True)
                 yield pb.DetectReplayResponse(
@@ -226,8 +218,6 @@ class ReplayDetectionImpl(pb_grpc.ReplayDetectionServicer):
                         # Purely synthetic — real backend derives this from
                         # softmax margins.
                         confidence=min(1.0, abs(score - self._decision_threshold) * 2.0),
-                        endpoint=cached_endpoint,
-                        track_id=cached_track_id,
                     ),
                 )
                 analysis_count += 1
@@ -251,8 +241,6 @@ class ReplayDetectionImpl(pb_grpc.ReplayDetectionServicer):
                 overall_label_raw=aggregate_label_raw,
                 analysis_count=analysis_count,
                 model_version=self._model_version,
-                endpoint=cached_endpoint,
-                track_id=cached_track_id,
             ),
         )
         print(

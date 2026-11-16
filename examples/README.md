@@ -509,44 +509,9 @@ client class name is `FingerprintClient`; the RPC is `extractFingerprint`
   doesn't need scenarios. Adding one later is a compatible extension.
 - Smoke test suite for the fingerprint sim in `tests/`.
 
-## Endpoint / track_id attribution (new in 0.3.8)
+## Multi-leg mode — orchestrator client
 
-Every client script accepts two optional attribution flags:
-
-- `--endpoint {near_end,far_end,mixed}` — labels the audio by its role
-  from the subject's perspective. `near_end` is the subject's own
-  voice (microphone, SIP channel read-side); `far_end` is everyone
-  else, one party or a pre-mix; `mixed` is subject + peers inseparable
-  (SIPREC mix-mode, uploaded conference recordings). See
-  [`aurigin.common.v1.Endpoint`](../proto/aurigin/common/v1/endpoint.proto)
-  for the canonical semantic contract.
-- `--track-id STR` — opaque caller-chosen identifier distinguishing one
-  source within an endpoint. Stable for the session lifetime; the
-  service never interprets its value.
-
-Both ride on the service's `CreateSessionRequest.config` (or, for the
-orchestrator client, on `ClientAudioFrame`). The service caches them
-at session open and echoes them on every output (AnalysisResult,
-EmbeddingResult, TranscriptTurn, Verdict, FinalResult, FraudVerdict,
-RecordingComplete) without inspecting — pass-through only. The
-consumer side is transport-only; leg-routing / scoring policy lives
-with the caller.
-
-```bash
-# Label every DetectDeepfake AnalysisResult with endpoint + track:
-uv run client --endpoint near_end --track-id subject-mic
-
-# Same pattern on the integration-shape scripts:
-uv run phone-call --endpoint far_end --track-id remote-speaker --duration 30
-uv run scan-file --file long.wav --endpoint mixed --track-id archive-scan
-
-# Omit both flags → no config on the wire, bit-identical pre-0.3.8:
-uv run client
-```
-
-### Multi-leg mode — orchestrator client only
-
-The orchestrator client additionally streams any 2 or 3 of
+The orchestrator client streams any 2 or 3 of
 `--near-end-file` / `--far-end-file` / `--mixed-file` on one session,
 each frame tagged with its endpoint via the `ClientAudioFrame` wrapper
 variant on `StreamRequest`. Exercises the per-endpoint routing path

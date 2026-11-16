@@ -10,10 +10,8 @@ dependencies = [
     # Consumed by the generated stubs the server responds with. Aligned with
     # the aurigin-protos version this repo publishes; bump in lockstep on
     # each aurigin-protos release. `replay_detection.v1` package first
-    # appears in aurigin-protos 0.3.3+; 0.3.8 adds the ReplayConfig +
-    # AnalysisResult + FinalResult endpoint/track_id pass-through fields
-    # the simulator now caches + echoes.
-    "aurigin-protos>=0.3.8",
+    # appears in aurigin-protos 0.3.3+.
+    "aurigin-protos>=0.3.9",
     "grpcio>=1.62",
     # No pyyaml / jsonschema — replay simulator is deliberately
     # scenario-less. Scores are derived deterministically from the audio

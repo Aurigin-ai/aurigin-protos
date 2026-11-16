@@ -214,9 +214,9 @@ import { FraudVerdict } from "@aurigin/protos/aurigin/fraud/v1/fraud";
 // AudioBuffer for all new integrations.
 import { AudioFrame, AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
 // New in 0.3.8 — per-leg attribution (NEAR_END / FAR_END / MIXED)
-// carried on ClientAudioFrame + echoed on every verdict / embedding /
-// transcript output. Lives in common.v1 so consumer services that only
-// take raw AudioFrame don't pull a routing concept into their stubs.
+// carried on ClientAudioFrame. Lives in common.v1 so consumer services
+// that only take raw AudioFrame don't pull a routing concept into their
+// stubs.
 import { Endpoint } from "@aurigin/protos/aurigin/common/v1/endpoint";
 
 const client = new DeepfakeDetectionClient(
@@ -227,6 +227,25 @@ const fingerprintClient = new FingerprintClient(
   "localhost:50052",   // typically a separate service; see simulator/fingerprint/
   credentials.createInsecure(),
 );
+const audioVerificationClient = new AudioVerificationClient(
+  "localhost:50053",   // orchestrator — SDK-facing entry point
+  credentials.createInsecure(),
+);
+const replayClient = new ReplayDetectionClient(
+  "localhost:50054",   // typically a separate service; see simulator/replay/
+  credentials.createInsecure(),
+);
+const transcriptionClient = new TranscriptionClient(
+  "localhost:50055",   // typically a separate service; see simulator/asr/
+  credentials.createInsecure(),
+);
+const recordingClient = new RecordingClient(
+  "localhost:50056",   // typically a separate service; see simulator/recording/
+  credentials.createInsecure(),
+);
+// FraudVerdict has no gRPC client — the classifier consumes
+// `transcript_turns` and publishes `fraud_verdicts` on Kafka. Import
+// the message type above to deserialise on the consumer side.
 ```
 
 Full client snippets: [examples/typescript/](examples/typescript/).
@@ -273,13 +292,37 @@ from aurigin.fraud.v1 import fraud_pb2  # noqa: F401
 # AudioBuffer for all new integrations.
 from aurigin.media.v1 import audio_frame_pb2
 # New in 0.3.8 — per-leg attribution (NEAR_END / FAR_END / MIXED)
-# carried on ClientAudioFrame + echoed on every verdict / embedding /
-# transcript output. Lives in common.v1 so consumer services that only
-# take raw AudioFrame don't pull a routing concept into their stubs.
+# carried on ClientAudioFrame. Lives in common.v1 so consumer services
+# that only take raw AudioFrame don't pull a routing concept into their
+# stubs.
 from aurigin.common.v1 import endpoint_pb2  # noqa: F401
 # Deprecated — kept importable so 0.2.x consumers keep working. Scheduled
 # for removal in 0.4.0.
 from twilio.tme.extensions.common.v1 import audio_buffer_pb2  # noqa: F401
+
+import grpc
+
+channel_deepfake = grpc.insecure_channel("localhost:50051")
+deepfake_client = deepfake_detection_pb2_grpc.DeepfakeDetectionStub(channel_deepfake)
+
+channel_fingerprint = grpc.insecure_channel("localhost:50052")  # typically a separate service; see simulator/fingerprint/
+fingerprint_client = fingerprint_pb2_grpc.FingerprintStub(channel_fingerprint)
+
+channel_audio_verification = grpc.insecure_channel("localhost:50053")  # orchestrator — SDK-facing entry point
+audio_verification_client = audio_verification_pb2_grpc.AudioVerificationStub(channel_audio_verification)
+
+channel_replay = grpc.insecure_channel("localhost:50054")  # typically a separate service; see simulator/replay/
+replay_client = replay_detection_pb2_grpc.ReplayDetectionStub(channel_replay)
+
+channel_asr = grpc.insecure_channel("localhost:50055")  # typically a separate service; see simulator/asr/
+transcription_client = asr_pb2_grpc.TranscriptionStub(channel_asr)
+
+channel_recording = grpc.insecure_channel("localhost:50056")  # typically a separate service; see simulator/recording/
+recording_client = recording_pb2_grpc.RecordingStub(channel_recording)
+
+# FraudVerdict has no gRPC client — the classifier consumes
+# `transcript_turns` and publishes `fraud_verdicts` on Kafka. Import
+# `fraud_pb2.FraudVerdict` above to deserialise on the consumer side.
 ```
 
 Full client snippets: [examples/python/](examples/python/).

@@ -29,12 +29,10 @@ import {
   Metadata,
   type ClientDuplexStream,
 } from "@grpc/grpc-js";
-import { Endpoint } from "@aurigin/protos/aurigin/common/v1/endpoint";
 import {
   DeepfakeDetectionClient,
   type DetectDeepfakeRequest,
   type DetectDeepfakeResponse,
-  type DetectionConfig,
 } from "@aurigin/protos/aurigin/deepfake_detection/v1/deepfake_detection";
 import { AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
 
@@ -123,24 +121,14 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 // clock. We loop a finite WAV here just so the example self-contains.
 export async function sendCall(
   call: Call, wav: WavData, chunkMs: number, durationS: number,
-  opts: { maxWallS?: number; endpoint?: Endpoint | null; trackId?: string | null } = {},
+  opts: { maxWallS?: number } = {},
 ): Promise<SendResult> {
-  const { maxWallS, endpoint = null, trackId = null } = opts;
+  const { maxWallS } = opts;
   const bytesPerFrame = wav.bytesPerSample * wav.channels;
   const bytesPerChunk = Math.max(1, Math.floor((wav.rate * chunkMs) / 1000) * bytesPerFrame);
   const chunkS = chunkMs / 1000;
 
-  // Build CreateSessionRequest with optional endpoint/track_id attribution
-  // on DetectionConfig (aurigin-protos ≥ 0.3.8). No flags ⇒ no config on
-  // the wire (bit-identical to the pre-0.3.8 call shape).
-  let createSessionRequest: { config?: DetectionConfig } = {};
-  if (endpoint !== null || trackId) {
-    const config: Partial<DetectionConfig> = {};
-    if (endpoint !== null) config.endpoint = endpoint;
-    if (trackId) config.trackId = trackId;
-    createSessionRequest = { config: config as DetectionConfig };
-  }
-  call.write({ createSessionRequest });
+  call.write({ createSessionRequest: {} });
 
   const startedAt = Date.now();
   let nextSend = startedAt;
@@ -264,15 +252,7 @@ interface Args {
   chunkMs: number;
   target: string;
   scenarioId: string | null;
-  endpoint: Endpoint | null;
-  trackId: string | null;
 }
-
-const ENDPOINT_BY_NAME: Record<string, Endpoint> = {
-  near_end: Endpoint.ENDPOINT_NEAR_END,
-  far_end: Endpoint.ENDPOINT_FAR_END,
-  mixed: Endpoint.ENDPOINT_MIXED,
-};
 
 function parseArgs(argv: string[]): Args {
   const out: Args = {
@@ -282,8 +262,6 @@ function parseArgs(argv: string[]): Args {
     chunkMs: DEFAULT_CHUNK_MS,
     target: "localhost:50051",
     scenarioId: null,
-    endpoint: null,
-    trackId: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -295,17 +273,6 @@ function parseArgs(argv: string[]): Args {
       case "--chunk-ms": out.chunkMs = Number(next()); break;
       case "--target": out.target = next(); break;
       case "--scenario-id": out.scenarioId = next(); break;
-      case "--endpoint": {
-        const name = next();
-        const ep = ENDPOINT_BY_NAME[name];
-        if (ep === undefined) {
-          console.error(`unknown --endpoint ${name}; choices: near_end, far_end, mixed`);
-          process.exit(2);
-        }
-        out.endpoint = ep;
-        break;
-      }
-      case "--track-id": out.trackId = next(); break;
       case "-h": case "--help":
         console.log("Usage: tsx phone_call.ts [--audio FILE] [--duration SEC]");
         console.log("                         [--max-wall-s SEC]");
@@ -354,8 +321,6 @@ async function main() {
     await Promise.all([
       sendCall(call, wav, args.chunkMs, args.duration, {
         maxWallS: args.maxWallS ?? undefined,
-        endpoint: args.endpoint,
-        trackId: args.trackId,
       }),
       recvCall(call),
     ]);
