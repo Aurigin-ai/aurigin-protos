@@ -10,9 +10,8 @@ dependencies = [
     #   0.3.4  — aurigin.recording.v1, consumed by recording_client
     #   0.3.7  — aurigin.asr.v1 (Transcription) + aurigin.fraud.v1 (verdict event shape),
     #           consumed by asr_client
-    #   0.3.8  — aurigin.common.v1.Endpoint + ClientAudioFrame + ClientMetadata +
-    #           endpoint/track_id attribution across consumer configs and outputs
-    "aurigin-protos>=0.3.8",
+    #   0.3.8  — aurigin.common.v1.Endpoint + ClientAudioFrame + ClientMetadata
+    "aurigin-protos>=0.3.9",
     "grpcio>=1.62",
 ]
 

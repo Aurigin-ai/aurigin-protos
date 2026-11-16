@@ -40,16 +40,9 @@ in the repo.
   stream alongside the existing `Verdict` / `EmbeddingVerdict` /
   `Notification` / `FinalResult` branches. Only fire when the tenant's
   consumer set enables ASR / fraud; silent for everyone else.
-- **Pass-through `endpoint` + `track_id`** on every consumer surface:
-  - **configs**: `DetectionConfig`, `ReplayConfig`, `FingerprintConfig`,
-    `TranscriptionConfig`, `RecordingConfig`.
-  - **outputs**: `AnalysisResult` (deepfake + replay), `EmbeddingResult`
-    (fingerprint), `TranscriptTurn` (ASR), per-service `FinalResult`,
-    `RecordingComplete`, and `FraudVerdict` (Kafka event).
-  - **client-facing**: `client.v1.Verdict` + `client.v1.EmbeddingVerdict`.
-  The contract on every one of these fields: **the service caches and
-  echoes; MUST NOT branch on the values.** Leg-attribution policy lives
-  with the caller.
+- **`client.v1.Verdict` + `client.v1.FraudVerdict`** carry `endpoint` +
+  `track_id` attribution so the orchestrator can label outputs with the
+  leg they relate to.
 - **`AudioFrame` stays untouched** — every consumer service that only
   takes raw audio frames (deepfake, replay, fingerprint, ASR, recording)
   keeps its exact pre-0.3.8 input shape.

@@ -12,7 +12,7 @@ dependencies = [
     # each release. 0.3.8 adds the ClientAudioFrame wrapper + Verdict
     # endpoint/track_id fields the simulator now demuxes (one canned
     # Verdict per observed endpoint per tick) and echoes.
-    "aurigin-protos>=0.3.8",
+    "aurigin-protos>=0.3.9",
     "grpcio>=1.62",
 ]
 

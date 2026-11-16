@@ -10,10 +10,8 @@ dependencies = [
     # Consumed by the generated stubs the server responds with. Aligned with
     # the aurigin-protos version this repo publishes; bump in lockstep on
     # each aurigin-protos release. `recording.v1` package first appears
-    # in aurigin-protos 0.3.4; 0.3.8 adds the RecordingConfig +
-    # RecordingComplete endpoint/track_id pass-through fields the
-    # simulator now caches + echoes on the terminal message.
-    "aurigin-protos>=0.3.8",
+    # in aurigin-protos 0.3.4.
+    "aurigin-protos>=0.3.9",
     "grpcio>=1.62",
     # No pyyaml / jsonschema / audio deps — this simulator is a pure
     # byte-counting sink. It never writes a file, never transcodes,

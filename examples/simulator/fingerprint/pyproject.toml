@@ -11,10 +11,8 @@ dependencies = [
     # the aurigin-protos version this repo publishes; bump in lockstep on
     # each aurigin-protos release. The pin uses the public PyPI package;
     # dev runs use the locally-generated gen/py/ tree via PYTHONPATH so this
-    # pin doesn't actually gate local iteration. 0.3.8 adds the
-    # FingerprintConfig + EmbeddingResult + FinalResult endpoint/track_id
-    # pass-through fields the simulator now caches + echoes.
-    "aurigin-protos>=0.3.8",
+    # pin doesn't actually gate local iteration.
+    "aurigin-protos>=0.3.9",
     "grpcio>=1.62",
     # No pyyaml / jsonschema — fingerprint simulator is deliberately
     # scenario-less. Embeddings are derived deterministically from the

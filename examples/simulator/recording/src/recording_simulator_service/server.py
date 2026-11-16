@@ -87,11 +87,6 @@ class RecordingImpl(pb_grpc.RecordingServicer):
         total_bytes: int = 0
         last_codec: int = af_pb.AUDIO_CODEC_UNSPECIFIED
         last_rate: int = 0
-        # Caller-supplied attribution metadata from RecordingConfig —
-        # cached at session open and echoed on RecordingComplete. Pass-
-        # through only; the simulator never branches on these values.
-        cached_endpoint: int = 0  # ENDPOINT_UNSPECIFIED
-        cached_track_id: str = ""
         # Running SHA-256 of every received payload byte — synthetic
         # (the simulator never persists bytes anywhere) but keeping a
         # real hash lets downstream consumers test their integrity-
@@ -105,11 +100,6 @@ class RecordingImpl(pb_grpc.RecordingServicer):
             if kind == "create_session_request":
                 recording_id = f"rec-{uuid.uuid4().hex}"
                 planned_blob_uri = f"sim://{recording_id}.{self._output_format}"
-                # Cache attribution from config (0.3.8+). Older clients send
-                # no config, leaving endpoint/track_id at proto3 zero values.
-                cfg = req.create_session_request.config
-                cached_endpoint = cfg.endpoint
-                cached_track_id = cfg.track_id
                 print(f"[incoming] peer={peer} | recording sim", file=sys.stderr, flush=True)
                 print(f"[{recording_id}] start | uri={planned_blob_uri}", file=sys.stderr, flush=True)
                 yield pb.RecordResponse(
@@ -155,11 +145,6 @@ class RecordingImpl(pb_grpc.RecordingServicer):
                 sha256=hasher.hexdigest(),
                 codec=last_codec,
                 sample_rate_hz=last_rate,
-                # Pass-through of attribution from RecordingConfig — set
-                # only when the caller supplied it, so pre-0.3.8 sessions
-                # emit RecordingComplete without endpoint/track_id.
-                endpoint=cached_endpoint,
-                track_id=cached_track_id,
             ),
         )
         print(

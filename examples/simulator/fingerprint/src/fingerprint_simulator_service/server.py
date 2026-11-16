@@ -157,20 +157,12 @@ class FingerprintImpl(pb_grpc.FingerprintServicer):
         window_buf = bytearray()
         window_bytes_target: int | None = None
         window_offset_ms: int = 0
-        # Caller-supplied attribution metadata from FingerprintConfig —
-        # cached at session open and echoed on every EmbeddingResult +
-        # FinalResult. Pass-through only; the simulator never branches.
-        cached_endpoint: int = 0
-        cached_track_id: str = ""
 
         async for req in request_iterator:
             kind = req.WhichOneof("request")
 
             if kind == "create_session_request":
                 session_id = "sim-" + hashlib.sha256(peer.encode("utf-8", errors="replace")).hexdigest()[:8]
-                cfg = req.create_session_request.config
-                cached_endpoint = cfg.endpoint
-                cached_track_id = cfg.track_id
                 # Log the inbound call before the runner starts so the operator
                 # sees which session was accepted. Matches the deepfake sim's
                 # [incoming] line for cross-sim grep parity.
@@ -236,8 +228,6 @@ class FingerprintImpl(pb_grpc.FingerprintServicer):
                         embedding=embedding,
                         fingerprint_code=fp_code,
                         dim=self._embedding_dim,
-                        endpoint=cached_endpoint,
-                        track_id=cached_track_id,
                     ),
                 )
                 embedding_count += 1
@@ -251,8 +241,6 @@ class FingerprintImpl(pb_grpc.FingerprintServicer):
                 total_audio_ms=total_audio_ms,
                 embedding_count=embedding_count,
                 model_version=self._model_version,
-                endpoint=cached_endpoint,
-                track_id=cached_track_id,
             ),
         )
         print(

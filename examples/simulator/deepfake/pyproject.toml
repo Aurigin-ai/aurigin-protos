@@ -11,11 +11,8 @@ dependencies = [
     # the aurigin-protos version this repo publishes; bump in lockstep on
     # each aurigin-protos release. The pin uses the public PyPI package;
     # dev runs use the locally-generated gen/py/ tree via PYTHONPATH so this
-    # pin doesn't actually gate local iteration. 0.3.8 adds the
-    # DetectionConfig + AnalysisResult + FinalResult endpoint/track_id
-    # pass-through fields the simulator now caches + echoes on every
-    # emitted result.
-    "aurigin-protos>=0.3.8",
+    # pin doesn't actually gate local iteration.
+    "aurigin-protos>=0.3.9",
     "grpcio>=1.62",
     # Scenario file parsing (YAML) + schema validation. Runtime deps of the
     # `sim` subpackage — kept alongside the server since the whole point

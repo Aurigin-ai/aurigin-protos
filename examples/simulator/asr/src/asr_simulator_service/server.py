@@ -136,22 +136,12 @@ class TranscriptionImpl(pb_grpc.TranscriptionServicer):
         turn_bytes_target: int | None = None
         turn_buf = bytearray()
         turn_offset_ms: int = 0
-        # Caller-supplied attribution metadata from TranscriptionConfig —
-        # cached at session open and echoed on every TranscriptTurn +
-        # FinalResult. Pass-through only; the simulator never branches
-        # on these values. Older clients send no config, leaving these
-        # at proto3 zero values (= unset).
-        cached_endpoint: int = 0
-        cached_track_id: str = ""
 
         async for req in request_iterator:
             kind = req.WhichOneof("request")
 
             if kind == "create_session_request":
                 session_id = "sim-" + hashlib.sha256(peer.encode("utf-8", errors="replace")).hexdigest()[:8]
-                cfg = req.create_session_request.config
-                cached_endpoint = cfg.endpoint
-                cached_track_id = cfg.track_id
                 print(f"[incoming] peer={peer} | asr sim", file=sys.stderr, flush=True)
                 print(f"[{session_id}] start", file=sys.stderr, flush=True)
                 yield pb.TranscribeResponse(
@@ -218,9 +208,6 @@ class TranscriptionImpl(pb_grpc.TranscriptionServicer):
                         # only turns. Real aurigin-asr fills this with the
                         # VAD-measured silence fraction across the turn.
                         silence_pct=0.0,
-                        # Pass-through attribution from TranscriptionConfig.
-                        endpoint=cached_endpoint,
-                        track_id=cached_track_id,
                     ),
                 )
                 turn_count += 1
@@ -236,8 +223,6 @@ class TranscriptionImpl(pb_grpc.TranscriptionServicer):
                 rtf=rtf,
                 model_version=self._model_version,
                 silence_pct_mean=0.0,
-                endpoint=cached_endpoint,
-                track_id=cached_track_id,
             ),
         )
         print(

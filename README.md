@@ -214,9 +214,9 @@ import { FraudVerdict } from "@aurigin/protos/aurigin/fraud/v1/fraud";
 // AudioBuffer for all new integrations.
 import { AudioFrame, AudioCodec } from "@aurigin/protos/aurigin/media/v1/audio_frame";
 // New in 0.3.8 — per-leg attribution (NEAR_END / FAR_END / MIXED)
-// carried on ClientAudioFrame + echoed on every verdict / embedding /
-// transcript output. Lives in common.v1 so consumer services that only
-// take raw AudioFrame don't pull a routing concept into their stubs.
+// carried on ClientAudioFrame. Lives in common.v1 so consumer services
+// that only take raw AudioFrame don't pull a routing concept into their
+// stubs.
 import { Endpoint } from "@aurigin/protos/aurigin/common/v1/endpoint";
 
 const client = new DeepfakeDetectionClient(
@@ -273,9 +273,9 @@ from aurigin.fraud.v1 import fraud_pb2  # noqa: F401
 # AudioBuffer for all new integrations.
 from aurigin.media.v1 import audio_frame_pb2
 # New in 0.3.8 — per-leg attribution (NEAR_END / FAR_END / MIXED)
-# carried on ClientAudioFrame + echoed on every verdict / embedding /
-# transcript output. Lives in common.v1 so consumer services that only
-# take raw AudioFrame don't pull a routing concept into their stubs.
+# carried on ClientAudioFrame. Lives in common.v1 so consumer services
+# that only take raw AudioFrame don't pull a routing concept into their
+# stubs.
 from aurigin.common.v1 import endpoint_pb2  # noqa: F401
 # Deprecated — kept importable so 0.2.x consumers keep working. Scheduled
 # for removal in 0.4.0.

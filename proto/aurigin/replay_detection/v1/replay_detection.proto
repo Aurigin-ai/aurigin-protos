@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package aurigin.replay_detection.v1;
 
-import "aurigin/common/v1/endpoint.proto";
 import "aurigin/media/v1/audio_frame.proto";
 
 // Replay Detection Service.
@@ -156,17 +155,6 @@ message ReplayConfig {
   // section. A 0.99 AUC coexists with double-digit miss rates at the
   // 1% FPR operating point; ignore AUC-based thresholding.
   optional float decision_threshold = 7;
-
-  // Caller-supplied attribution metadata. The service caches these
-  // values at session open and echoes them on every AnalysisResult +
-  // FinalResult it emits on this session — pass-through only. The
-  // service MUST NOT branch on these values; callers use them to
-  // label outputs so their downstream systems can attribute windows
-  // without maintaining session state (e.g. "which leg produced this
-  // verdict"). Unset = no attribution attached; echoed fields on
-  // outputs stay unset.
-  optional aurigin.common.v1.Endpoint endpoint = 8;
-  optional string track_id = 9;
 }
 
 // VAD per-session mode. Controls whether the silence-gate runs before
@@ -254,12 +242,6 @@ message AnalysisResult {
   // too; inferring from `confidence` only works for the silence
   // sentinel. 0.0 is "no silence detected", not "unknown".
   float silence_pct = 7;
-
-  // Echo of the session's `endpoint` and `track_id` from
-  // ReplayConfig. Pass-through only — the service never inspects
-  // the values. Unset when the session had no attribution attached.
-  optional aurigin.common.v1.Endpoint endpoint = 8;
-  optional string track_id = 9;
 }
 
 // Emitted once when the client closes the stream. Purely accounting —
@@ -309,10 +291,4 @@ message FinalResult {
   // actually scored (not VAD-gated silence sentinels) when VAD is on.
   // 0.0 is "no silence observed", not "unknown".
   float silence_pct_mean = 9;
-
-  // Echo of the session's `endpoint` and `track_id` from
-  // ReplayConfig. Pass-through only — the service never inspects
-  // the values. Unset when the session had no attribution attached.
-  optional aurigin.common.v1.Endpoint endpoint = 10;
-  optional string track_id = 11;
 }
