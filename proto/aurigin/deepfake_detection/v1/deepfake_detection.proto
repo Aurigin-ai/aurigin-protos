@@ -123,6 +123,8 @@ message DetectionConfig {
   // ~1 s of audio to produce enough feature frames; setting this lower
   // will break inference on short residuals.
   optional float min_analysis_duration_s = 6;
+
+  reserved 7, 8;
 }
 
 // VAD (voice-activity detection) per-session mode. Controls whether the
@@ -177,6 +179,8 @@ message AnalysisResult {
   // compat and surface the authoritative value here. 0.0 is a legitimate
   // reading (no silence detected), not "unknown".
   float silence_pct = 6;
+
+  reserved 7, 8;
 }
 
 // Emitted once when the client closes the stream.
@@ -218,4 +222,6 @@ message FinalResult {
   // actually scored (not VAD-gated silence sentinels) when
   // vad_mode = ON. 0.0 is "no silence observed", not "unknown".
   float silence_pct_mean = 8;
+
+  reserved 9, 10;
 }

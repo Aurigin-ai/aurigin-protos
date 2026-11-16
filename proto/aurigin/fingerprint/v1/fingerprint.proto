@@ -116,6 +116,8 @@ message FingerprintConfig {
   //     invoking this RPC.
   //   - model_version — rollout is by MODEL_HUB_REVISION on the server,
   //     not by client-selectable string.
+
+  reserved 3, 4;
 }
 
 // Per-session tail strategy. Mirrors deepfake-service's TailStrategy so
@@ -157,6 +159,8 @@ message EmbeddingResult {
   // without hardcoding, and survives a future backbone swap without a
   // silent length mismatch.
   int32 dim = 5;
+
+  reserved 6, 7;
 }
 
 // Emitted once when the client closes the stream. Purely observability:
@@ -193,4 +197,6 @@ message FinalResult {
   // Note: no silence aggregate on this message — this consumer
   // doesn't VAD-gate (see EmbeddingConfig).
   string model_version = 5;
+
+  reserved 6, 7;
 }

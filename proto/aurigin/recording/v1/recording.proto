@@ -163,6 +163,8 @@ message RecordingConfig {
   // (e.g. F32LE for lossless float workflows). Recorder transcodes
   // every incoming frame to the target before writing.
   optional aurigin.media.v1.AudioCodec target_codec = 5;
+
+  reserved 6, 7;
 }
 
 enum ContainerFormat {
@@ -222,4 +224,6 @@ message RecordingComplete {
   // Sample rate of the audio inside the container, Hz. Same
   // provenance as `codec` — mirrors what rode on AudioFrame.
   uint32 sample_rate_hz = 7;
+
+  reserved 8, 9;
 }

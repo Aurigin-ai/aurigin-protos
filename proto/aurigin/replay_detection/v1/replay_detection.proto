@@ -155,6 +155,8 @@ message ReplayConfig {
   // section. A 0.99 AUC coexists with double-digit miss rates at the
   // 1% FPR operating point; ignore AUC-based thresholding.
   optional float decision_threshold = 7;
+
+  reserved 8, 9;
 }
 
 // VAD per-session mode. Controls whether the silence-gate runs before
@@ -242,6 +244,8 @@ message AnalysisResult {
   // too; inferring from `confidence` only works for the silence
   // sentinel. 0.0 is "no silence detected", not "unknown".
   float silence_pct = 7;
+
+  reserved 8, 9;
 }
 
 // Emitted once when the client closes the stream. Purely accounting —
@@ -291,4 +295,6 @@ message FinalResult {
   // actually scored (not VAD-gated silence sentinels) when VAD is on.
   // 0.0 is "no silence observed", not "unknown".
   float silence_pct_mean = 9;
+
+  reserved 10, 11;
 }

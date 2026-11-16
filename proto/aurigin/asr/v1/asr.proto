@@ -182,6 +182,8 @@ message TranscriptionConfig {
   // farther back for a cleaner split. Rarely needs changing;
   // exposed for tenant-level tuning only.
   optional uint32 cut_search_ms = 9;
+
+  reserved 10, 11;
 }
 
 // VAD per-session mode. Controls whether the turn-cutter runs between
@@ -239,6 +241,8 @@ message TranscriptTurn {
   // room with sparse utterances". 0.0 is "no silence detected",
   // not "unknown".
   float silence_pct = 6;
+
+  reserved 7, 8;
 }
 
 // Emitted once when the client closes the stream. Purely accounting —
@@ -278,4 +282,6 @@ message FinalResult {
   // than a running mean on the caller. 0.0 is "no silence observed",
   // not "unknown".
   float silence_pct_mean = 6;
+
+  reserved 7, 8;
 }
